@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <_LastSelectedProfileId>C:\Users\luis\Source\Repos\GameConsoleMode\GAMINGCONSOLEMODE\Properties\PublishProfiles\win-arm64.pubxml</_LastSelectedProfileId>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="App.xaml">
+      <SubType>Designer</SubType>
+    </None>
+    <Page Update="version_news.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="shortcuts.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="rogally.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="onboarding.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Links.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="overlaycontrolls.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="settings.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="Home.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="startup.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="launcher.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <None Update="MainWindow.xaml">
+      <SubType>Designer</SubType>
+    </None>
+    <None Update="Package.appxmanifest">
+      <SubType>Designer</SubType>
+    </None>
+  </ItemGroup>
+</Project>

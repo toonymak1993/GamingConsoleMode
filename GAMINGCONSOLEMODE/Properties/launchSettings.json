@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "GAMINGCONSOLEMODE (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "GAMINGCONSOLEMODE (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

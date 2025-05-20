@@ -1,0 +1,107 @@
+<Window
+    x:Class="GAMINGCONSOLEMODE.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GAMINGCONSOLEMODE"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="GAMINGCONSOLEMODE">
+
+    <!-- Root Grid -->
+    <Grid Background="#2a475e">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <!-- Topbar -->
+            <RowDefinition Height="Auto" />
+            <!-- CommandBar -->
+            <RowDefinition Height="*" />
+            <!-- NavigationView -->
+        </Grid.RowDefinitions>
+
+        <!-- Topbar -->
+        <Grid Grid.Row="0" Background="#333" Height="70" VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Logo -->
+            <Image Source="Assets/logo_gcm.png" Height="60" Margin="25,5"/>
+
+            <!-- Right Button with VisualStateManager -->
+            <Button x:Name="MenuButton" Grid.Column="2" Content="START GCM" Margin="10" Background="DodgerBlue"  CornerRadius="10" BorderThickness="0"  Foreground="White" Padding="12,6" Click="TopbarButton_Click" Height="50" Width="200">
+                <VisualStateManager.VisualStateGroups>
+                    <VisualStateGroup x:Name="CommonStates">
+                        <VisualState x:Name="Normal" />
+                        <VisualState x:Name="PointerOver">
+                            <VisualState.Setters>
+                                <Setter Target="MenuButton.Background" Value="#FF1E90FF" />
+                            </VisualState.Setters>
+                        </VisualState>
+                        <VisualState x:Name="Pressed">
+                            <VisualState.Setters>
+                                <Setter Target="MenuButton.Background" Value="#FF104E8B" />
+                            </VisualState.Setters>
+                        </VisualState>
+                    </VisualStateGroup>
+                </VisualStateManager.VisualStateGroups>
+            </Button>
+        </Grid>
+
+        <!-- CommandBar at the top -->
+        <CommandBar x:Name="UpdateBar" Grid.Row="1" Background="Green" 
+            HorizontalAlignment="Stretch" OverflowButtonVisibility="Collapsed" Visibility="Collapsed">
+            <CommandBar.PrimaryCommands>
+                <AppBarElementContainer>
+                    <ProgressBar x:Name="UpdateProgressBar" Width="500" Height="20" Value="0" Visibility="Collapsed"/>
+                </AppBarElementContainer>
+                <AppBarElementContainer>
+                    <TextBlock x:Name="UpdateBarText" Text="Update Available" Foreground="White" FontSize="16" 
+                               VerticalAlignment="Center" HorizontalAlignment="Center" Margin="10"/>
+                </AppBarElementContainer>
+                <AppBarButton x:Name="UpdateButton" Background="White" Foreground="Green" Visibility="Visible"
+                              Icon="Download" Label="Update" Click="UpdateButton_Click"/>
+                <AppBarButton x:Name="InstallUpdateButton" Background="White" Foreground="Green" Visibility="Collapsed"
+                              Icon="OpenFile" Label="Install" Click="InstallUpdateButton_Click"/>
+            </CommandBar.PrimaryCommands>
+        </CommandBar>
+
+        <!-- NavigationView filling the remaining space -->
+        <NavigationView Grid.Row="2"
+                        x:Name="nvMain"
+                        PaneDisplayMode="Left"
+                        SelectionChanged="NavigationView_SelectionChanged"
+                        Background="#2A2A2A"
+                        IsBackEnabled="True">
+            
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Onboarding" Icon="Placeholder" Tag="OnboardingPage" />
+                <NavigationViewItem Content="Launcher" Icon="StopSlideShow" Tag="LauncherPage" />
+                <NavigationViewItem Content="Extensions" Icon="List"  Tag="StartupPage" />
+                <NavigationViewItem Content="GCM Shortcuts" Icon="Add" Tag="shortcuts" />
+                <NavigationViewItem Content="Handheld specific" Icon="SwitchApps" Tag="Handheld">
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem Content="Rog Ally" Icon="DockBottom" Tag="RogAllyPage" />
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Start GCM" Icon="Play"  Tag="GCMPage"/>
+                <NavigationViewItemSeparator />
+                <NavigationViewItem Content="additional features" Icon="ViewAll" Tag="Handheld">
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem Content="Links" Icon="Link" Tag="LinksPage" />
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+
+            <Frame x:Name="contentFrame">
+                <Frame.ContentTransitions>
+                    <TransitionCollection>
+                        <NavigationThemeTransition />
+                    </TransitionCollection>
+                </Frame.ContentTransitions>
+            </Frame>
+        </NavigationView>
+    </Grid>
+</Window>

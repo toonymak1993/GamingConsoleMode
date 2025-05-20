@@ -1,0 +1,328 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>GAMINGCONSOLEMODE</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <PublishProfile>win-$(Platform).pubxml</PublishProfile>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+	<PublishSingleFile>true</PublishSingleFile>
+	<SelfContained>true</SelfContained>
+	<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="functions\ffmpeg\**" />
+    <EmbeddedResource Remove="functions\ffmpeg\**" />
+    <None Remove="functions\ffmpeg\**" />
+    <Page Remove="functions\ffmpeg\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Remove="Assets\displayfusion.png" />
+    <Content Remove="Assets\Download.png" />
+    <Content Remove="Assets\GCM_Startup_Video.mp4" />
+    <Content Remove="Assets\launcher\custom_logo.png" />
+    <Content Remove="Assets\launcher\gcm_icon.png" />
+    <Content Remove="Assets\launcher\playnite_logo.png" />
+    <Content Remove="Assets\launcher\steam_logo.png" />
+    <Content Remove="Assets\logo_gcm.png" />
+    <Content Remove="Assets\onboarding\discord.jpg" />
+    <Content Remove="Assets\onboarding\flowlauncher.png" />
+    <Content Remove="Assets\onboarding\functions_gcm.png" />
+    <Content Remove="Assets\onboarding\shortcuts.png" />
+    <Content Remove="Assets\onboarding\taskmanager_gcmloader.png" />
+    <Content Remove="Assets\Play.png" />
+    <Content Remove="Assets\playnite_logo.png" />
+    <Content Remove="Assets\rogally\allybackside.png" />
+    <Content Remove="Assets\rogally\allyfrontside.png" />
+    <Content Remove="Assets\Screenshot 2025-01-02 104920.png" />
+    <Content Remove="Assets\settings\usblogon.png" />
+    <Content Remove="Assets\steambp.png" />
+    <Content Remove="Assets\steam_logo.png" />
+    <Content Remove="Assets\Uninstall Programs.png" />
+    <Content Remove="Assets\Xbox Controller.png" />
+    <Content Remove="Assets\xbox-controller.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="Assets\displayfusion.png" />
+    <None Remove="Assets\Download.png" />
+    <None Remove="Assets\GCM_Startup_Video.mp4" />
+    <None Remove="Assets\launcher\custom_logo.png" />
+    <None Remove="Assets\launcher\gcm_icon.png" />
+    <None Remove="Assets\launcher\playnite_logo.png" />
+    <None Remove="Assets\launcher\steam_logo.png" />
+    <None Remove="Assets\logo_gcm.png" />
+    <None Remove="Assets\onboarding\discord.jpg" />
+    <None Remove="Assets\onboarding\flowlauncher.png" />
+    <None Remove="Assets\onboarding\functions_gcm.png" />
+    <None Remove="Assets\onboarding\shortcuts.png" />
+    <None Remove="Assets\onboarding\taskmanager_gcmloader.png" />
+    <None Remove="Assets\Play.png" />
+    <None Remove="Assets\rogally\allybackside.png" />
+    <None Remove="Assets\rogally\allyfrontside.png" />
+    <None Remove="Assets\settings\usblogon.png" />
+    <None Remove="Assets\steambp.png" />
+    <None Remove="Assets\Uninstall Programs.png" />
+    <None Remove="Assets\Xbox Controller.png" />
+    <None Remove="Assets\xbox-controller.png" />
+    <None Remove="functions\deckyloader.png" />
+    <None Remove="functions\discord.png" />
+    <None Remove="functions\joyxoff_logo.png" />
+    <None Remove="functions\joyxoff_panel.png" />
+    <None Remove="functions\preloadlist.png" />
+    <None Remove="functions\rogally_statusicon.png" />
+    <None Remove="functions\speaker.png" />
+    <None Remove="functions\Startup_Video.gif" />
+    <None Remove="functions\TV.png" />
+    <None Remove="functions\windows_statusicon.png" />
+    <None Remove="functions\winpart.png" />
+    <None Remove="Home.xaml" />
+    <None Remove="launcher.xaml" />
+    <None Remove="Links.xaml" />
+    <None Remove="nircmd.exe" />
+    <None Remove="onboarding.xaml" />
+    <None Remove="rogally.xaml" />
+    <None Remove="settings.xaml" />
+    <None Remove="shortcuts.xaml" />
+    <None Remove="startup.xaml" />
+    <None Remove="version_news.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\SplashScreen.scale-200.png" />
+    <Content Include="Assets\LockScreenLogo.scale-200.png" />
+    <Content Include="Assets\Square150x150Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+    <Content Include="Assets\StoreLogo.png" />
+    <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+    <Content Include="logo.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\GCM_Startup_Video.mp4">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\discord.jpg">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\flowlauncher.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\functions_gcm.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\shortcuts.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\taskmanager_gcmloader.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\rogally\allyfrontside.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\settings\usblogon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\xbox-controller.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\deckyloader.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\discord.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\displayfusion.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Download.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\launcher\custom_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\launcher\gcm_icon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\launcher\playnite_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\launcher\steam_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\logo_gcm.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Play.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\steambp.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Uninstall Programs.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Xbox Controller.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\joyxoff_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\joyxoff_panel.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\preloadlist.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\rogally_statusicon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\speaker.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\TV.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\windows_statusicon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\winpart.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="nircmd.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <!--
+    Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
+    Tools extension to be activated for this project even if the Windows App SDK Nuget
+    package has not yet been restored.
+  -->
+  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <ProjectCapability Include="Msix" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" />
+    <PackageReference Include="CommunityToolkit.WinUI.Animations" Version="8.2.250402" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Primitives" Version="8.1.240916" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.250402" />
+    <PackageReference Include="CommunityToolkit.WinUI.Extensions" Version="8.2.250402" />
+    <PackageReference Include="Flurl.Http" Version="4.0.2" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.Management" Version="9.0.3" />
+    <PackageReference Include="TaskScheduler" Version="2.12.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="overlaycontrolls.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Update="settings.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Home.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="startup.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="launcher.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="opensource_apps\" />
+    <Folder Include="Update\" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="functions\Startup_Video.gif">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!--
+    Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
+    Explorer "Package and Publish" context menu entry to be enabled for this project even if
+    the Windows App SDK Nuget package has not yet been restored.
+  -->
+  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
+  </PropertyGroup>
+
+  <!-- Publish Properties -->
+  <PropertyGroup>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
+    <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
+    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
+    <UseWPF>False</UseWPF>
+    <SignAssembly>False</SignAssembly>
+  </PropertyGroup>
+  <ItemGroup>
+    <PRIResource Remove="functions\ffmpeg\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\rogally\allybackside.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="version_news.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="shortcuts.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="rogally.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="onboarding.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Links.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+</Project>

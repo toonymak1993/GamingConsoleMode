@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GAMINGCONSOLEMODE.rogally"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GAMINGCONSOLEMODE"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20" Spacing="20">
+
+        <!-- Bild oben zentriert -->
+        <Image Source="ms-appx:///Assets/rogally/allyfrontside.png" Width="500" Height= "400" HorizontalAlignment="Center"/>
+
+        <!-- Modusauswahl -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20">
+            <RadioButton Content="Handheld Companion" GroupName="Modes" IsEnabled="False"/>
+            <RadioButton Content="Armoury Create" GroupName="Modes" IsEnabled="False"/>
+            <RadioButton Content="G Helper" GroupName="Modes" IsEnabled="False"/>
+        </StackPanel>
+
+        <!-- Trennlinie -->
+        <Rectangle Width="800" Height="1" Fill="Gray" Margin="0,0,0,10"/>
+
+        <StackPanel Spacing="10" HorizontalAlignment="Center">
+            <TextBlock Text="Nothing to see here yet - but soon..." FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
+            
+        </StackPanel>
+   
+
+
+    </StackPanel>
+</Page>

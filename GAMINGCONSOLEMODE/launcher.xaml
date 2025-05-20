@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GAMINGCONSOLEMODE.launcher"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GAMINGCONSOLEMODE"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}">
+    
+    
+
+    <SplitView x:Name="splitView" PaneBackground="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}"
+           IsPaneOpen="True" OpenPaneLength="310" CompactPaneLength="50" DisplayMode="CompactInline">
+        <SplitView.Pane>
+            <StackPanel HorizontalAlignment="Stretch" Width="Auto">
+
+
+                <!-- Button for expanding SplitView -->
+                <Button Content="☰"
+                        Width="50"
+                        Height="40"
+                        FontSize="12"
+                        Click="TogglePaneButton_Click"
+                        Background="Transparent"
+                        HorizontalAlignment="Left"/>
+
+                <!-- Title -->
+                <TextBlock Text="Launcher"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           Margin="12"
+                           HorizontalAlignment="Right"/>
+
+                <TextBlock Text="Select your Launcher."
+                           FontSize="16"
+                           FontWeight="Normal"
+                           Margin="12,20"
+                           HorizontalAlignment="Right"/>
+
+
+                <!-- Steam -->
+                <Grid Margin="15,5">
+                    <Grid.ColumnDefinitions>
+                        <!-- Platz für ToggleSwitch + Text -->
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Image Source="/Assets/launcher/steam_logo.png" Width="25" Height="25" Grid.Column="0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Steam" Grid.Column="1" VerticalAlignment="Center" Margin="20,0"/>
+                    <ToggleSwitch x:Name="use_steam_bp" Grid.Column="2" HorizontalAlignment="Right" Margin="-85,0" Toggled="use_steam_bp_Toggled"/>
+                </Grid>
+
+                <!-- Playnite -->
+                <Grid Padding="15,5">
+                    <Grid.ColumnDefinitions>
+                        <!-- Platz für ToggleSwitch + Text -->
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Image Source="/Assets/launcher/playnite_logo.png" Width="25" Height="25" Grid.Column="0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Playnite" Grid.Column="1" VerticalAlignment="Center" Margin="20,0"/>
+                    <ToggleSwitch x:Name="use_playnite" Grid.Column="2" HorizontalAlignment="Right" Toggled="use_playnite_Toggled"  Margin="-85,0"/>
+                </Grid>
+
+                <!-- Custom Launcher -->
+                <Grid Padding="15,5">
+                    <Grid.ColumnDefinitions>
+                        <!-- Platz für ToggleSwitch + Text -->
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Image Source="/Assets/launcher/custom_logo.png" Width="25" Height="25" Grid.Column="0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Custom Launcher" Grid.Column="1" VerticalAlignment="Center" Margin="20,0"/>
+                    <ToggleSwitch x:Name="use_custom" Grid.Column="2" HorizontalAlignment="Right" Toggled="use_custom_Toggled" Margin="-85,0"/>
+                </Grid>
+            </StackPanel>
+        </SplitView.Pane>
+
+
+        <!-- Main Panels (on the right) -->
+
+        <Grid>
+            
+            <!-- Steam Panel -->
+            <Grid x:Name="SteamPanel">
+                <!-- Color -->
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="#00adee" Offset="-1" />
+                        <GradientStop Color="#000000" Offset="1.5" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+                
+                <!-- Main Content -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Spacing="20">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                            <Image Source="/Assets/launcher/steam_logo.png" Width="75" Height="75" Margin="5"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="STEAM BIG PICTURE" FontSize="30" FontWeight="SemiBold" Foreground="White"/>
+                                <TextBlock Text="GCM will use steam on startup" FontSize="12" Foreground="White" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <HyperlinkButton Content="Download Steam" NavigateUri="https://store.steampowered.com/about/download" Foreground="LightSkyBlue" HorizontalAlignment="Center"/>
+                        <Border Background="#08203e" CornerRadius="6" Padding="8">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Select Steam Path" FontSize="16" FontWeight="Bold" Foreground="White" Margin="8"/>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="pichsteampath" Content="Select a file" Click="pichsteampath_Click"/>
+                                    <TextBlock x:Name="textbox_select_steam_path" TextWrapping="Wrap" Foreground="White"/>
+                                </StackPanel>
+                                <TextBox x:Name="textbox_steam_path" TextChanged="textbox_steam_path_TextChanged" PlaceholderText="Enter the Steam Path" Foreground="White" Background="Transparent" Padding="6"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            
+            <!-- Playnite Panel -->
+            <Grid x:Name="PlaynitePanel">
+                
+                <!-- Color -->
+                    <Grid.Background>
+                        <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="#fc9f32" Offset="-0.5" />
+                        <GradientStop Color="#34073d" Offset="0.8" />
+                        </LinearGradientBrush>
+                    </Grid.Background>
+
+                    <!-- Main Content -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Spacing="20">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                            <Image Source="/Assets/launcher/playnite_logo.png" Width="75" Height="75" Margin="5"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="PLAYNITE FULLSCREEN" FontSize="30" FontWeight="SemiBold" Foreground="White"/>
+                                <TextBlock Text="GCM will use playnite on startup" FontSize="12" Foreground="White" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <HyperlinkButton Content="Download Playnite" NavigateUri="https://playnite.link/" Foreground="LightSkyBlue" HorizontalAlignment="Center"/>
+                        <Border Background="#A06330" CornerRadius="6" Padding="8">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Select Playnite Path" FontSize="16" FontWeight="Bold" Foreground="White" Margin="6"/>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="pichplaynitepath" Content="Select a file" Click="pichplaynitepath_Click"/>
+                                    <TextBlock x:Name="textbox_select_playnite_path" TextWrapping="Wrap" Foreground="White"/>
+                                </StackPanel>
+                                <TextBox x:Name="textbox_playnite_path" TextChanged="textbox_playnite_path_TextChanged" PlaceholderText="Enter the Path" Foreground="White" Background="Transparent" Padding="6"/>
+                            </StackPanel>
+                            
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- CustomLauncher Panel -->
+            <Grid x:Name="CustomPanel">
+                <!-- Color -->
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="#fcb0f3" Offset="-0.5" />
+                        <GradientStop Color="#3d05dd" Offset="0.8" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+
+                <!-- Main Content -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Spacing="20">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                            <Image Source="/Assets/launcher/custom_logo.png" Width="75" Height="75" Margin="5" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="CUSTOM LAUNCHER" FontSize="30" FontWeight="SemiBold" Foreground="White"/>
+                                <TextBlock Text="GCM will use your custom launcher on startup" FontSize="12" Foreground="White" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <Border Background="#5401C1" CornerRadius="6" Padding="8">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Select Path" FontSize="16" FontWeight="Bold" Foreground="White" Margin="6"/>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="pichcustompath" Content="Select a file" Click="pichcustompath_Click"/>
+                                    <TextBlock x:Name="textbox_select_custom_path" TextWrapping="Wrap" Foreground="#9bafd9"/>
+                                </StackPanel>
+                                <TextBox x:Name="textbox_custom_path" TextChanged="textbox_custom_path_TextChanged" PlaceholderText="Enter the Path" Foreground="White" Background="Transparent" Padding="6"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </SplitView>
+
+</Page>

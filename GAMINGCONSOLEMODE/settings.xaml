@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GAMINGCONSOLEMODE.settings"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GAMINGCONSOLEMODE"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        
+
+        <ScrollViewer Grid.Row="2" Padding="10">
+            <StackPanel Spacing="10">
+                <StackPanel Spacing="10">
+                    <!-- Card 1 -->
+                    <Expander IsExpanded="False" Padding="10" BorderThickness="1" HorizontalAlignment="Stretch">
+                        <Expander.Header>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE72E;" Grid.Column="0" Margin="5" VerticalAlignment="Center" />
+                                <TextBlock Text="SECURITY - LOGIN WITHOUT PASSWORD" Grid.Column="1" FontSize="16" FontWeight="Bold" Margin="10" Foreground="White"/>
+                            </Grid>
+                        </Expander.Header>
+
+                        <!-- Content inside Expander -->
+                        <StackPanel Spacing="10" Padding="10">
+                            <!-- With USB -->
+                            <Border BorderBrush="#444444" BorderThickness="1" Padding="10" CornerRadius="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="2*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="windowsloginwithoutpassword" Grid.Column="0" Content="Windows login without password"
+                                            Padding="10,5" Margin="10,0,20,0"
+                                            Background="LightBlue" Foreground="Black"
+                                            HorizontalAlignment="Left"
+                                            Click="windowsloginwithoutpassword_Click"/>
+                                    <TextBlock Grid.Column="1" Text="We believe that a password-free login is the right approach because Windows does not offer this simple functionality, and entering a password every time you start your PC can ruin the experience.
+
+With USB logon, we have found a way to maintain security while allowing access to GCM without a password. Please make sure to configure the settings correctly as shown in the image to ensure that your computer locks automatically when the USB stick is removed."
+                                               VerticalAlignment="Center" TextWrapping="Wrap"
+                                               FontSize="14" Foreground="White"/>
+                                    <Image Grid.Column="2" Height="150" VerticalAlignment="Center" Stretch="Uniform" Margin="10,10,10,10">
+                                        <Image.Source>
+                                            <BitmapImage UriSource="/Assets/settings/usblogon.png" DecodePixelHeight="400"/>
+                                        </Image.Source>
+                                    </Image>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+                <!-- Card 2 -->
+                <Expander IsExpanded="False" Padding="10" BorderThickness="1"  HorizontalAlignment="Stretch">
+                    <Expander.Header>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE72E;" Grid.Column="0" Margin="5" VerticalAlignment="Center" />
+                            <TextBlock Text="SECURITY - UAC" Grid.Column="1" FontSize="16" FontWeight="Bold" Margin="10" />
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="500" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock  Text="GCM respects your decision and UAC is set immediately" Grid.Column="1" VerticalAlignment="Center" FontSize="14" />
+                            <StackPanel Orientation="Horizontal" Grid.Column="2" HorizontalAlignment="Right" Margin="10">
+                                <Button x:Name="uactoggleon"  Content="Disable UAC completely" Margin="5" Click="uactoggle_Click"  />
+                                <Button x:Name="uactoggleoff"  Content="Enable UAC completely" Margin="5" Click="uactoggleoff_Click"  />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+                <!-- Card 3 -->
+                <Expander IsExpanded="False" Padding="10" BorderThickness="1"  HorizontalAlignment="Stretch">
+                    <Expander.Header>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE895;" Grid.Column="0" Margin="5" VerticalAlignment="Center" />
+                            <TextBlock Text="UPDATES" Grid.Column="1" FontSize="16" FontWeight="Bold" Margin="10" />
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="500" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE895;" Grid.Column="0" Margin="10" VerticalAlignment="Stretch" />
+                            <TextBlock x:Name="versiontext" Text="Current version 2.0" Grid.Column="1" VerticalAlignment="Center" FontSize="14" />
+                            <StackPanel Orientation="Horizontal" Grid.Column="2" HorizontalAlignment="Right" Margin="10">
+                                <Button x:Name="changelogbutton" Content="Changelog" Margin="5" Click="changelogbutton_Click" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Card 4 -->
+                <Expander IsExpanded="False" Padding="10" BorderThickness="1"  HorizontalAlignment="Stretch">
+                    <Expander.Header>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8B8;" Grid.Column="0" Margin="5" VerticalAlignment="Center" />
+                            <TextBlock Text="CONFIG" Grid.Column="1" FontSize="16" FontWeight="Bold" Margin="10" />
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="500" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock  Text="With this button you can delete the GCM configuration and reset the GCM" Grid.Column="1" VerticalAlignment="Center" FontSize="14" />
+                            <StackPanel Orientation="Horizontal" Grid.Column="2" HorizontalAlignment="Right" Margin="10">
+                                <Button x:Name="resetconfig"  Content="Reset GCM Config" Margin="5" Click="resetconfig_Click"  />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+               
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Header section -->
+        <StackPanel Grid.Row="0" Background="#111" Padding="15" Spacing="5">
+            <TextBlock Text="GAMING CONSOLE MODE - GCM" FontSize="20" FontWeight="Bold" Foreground="White"/>
+            <TextBlock Text="Developed by Luis Antonio Garcia Roque" FontSize="14" Foreground="LightGray"/>
+            <TextBlock Text="Developed by Mattioni Nikos" FontSize="14" Foreground="LightGray"/>
+        </StackPanel>
+
+        <!-- License info section -->
+        <Border Grid.Row="1" Background="#222" Padding="15" BorderThickness="0,0,0,1" BorderBrush="Gray">
+            <StackPanel>
+                <TextBlock Text="Licenses and Third-Party Components" FontWeight="Bold" FontSize="16" Foreground="White" Margin="0,0,0,5"/>
+                <TextBlock Text="• Icons: Fluent UI System Icons © Microsoft" Foreground="LightGray"/>
+                <TextBlock Text="• Icons: https://icons8.com/ © icons8" Foreground="LightGray"/>
+                <TextBlock Text="• Images: Custom screenshots stored under /Assets" Foreground="LightGray"/>
+                <TextBlock Text="• This software does not use telemetry. All data remains local." Foreground="LightGray"/>
+                <TextBlock Text="Compiled software supplied" FontWeight="Bold" FontSize="16" Foreground="White" Margin="0,0,0,5"/>
+                <TextBlock Text="• Nircmd - https://nircmd.com/" Foreground="LightGray"/>
+                <TextBlock Text="• AudioSwitch - Apache License - license in the software directory" Foreground="LightGray"/>
+                <TextBlock Text="• Flow Launcher - MIT License - Copyright (c) 2019 Flow-Launcher" Foreground="LightGray"/>
+            </StackPanel>
+
+        </Border>
+    </Grid>
+    
+</Page>

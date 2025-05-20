@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="gcmloader.overlaycontrolls"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:gcmloader"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="overlaycontrolls">
+
+    <Grid x:Name="RootGrid" Background="Transparent" Padding="40">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="3*" />
+            <ColumnDefinition Width="5*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 🎮 Controller Visual -->
+        <Border Grid.Column="0" CornerRadius="20" Background="#2D2D30" Margin="0,0,40,0">
+            <Image Source="ms-appx:///Assets/xbox-controller.png"
+                   Stretch="Uniform"
+                   VerticalAlignment="Center"
+                   HorizontalAlignment="Center"
+                   Height="400"
+                   Width="Auto"/>
+        </Border>
+
+        <!-- 📋 Shortcut -->
+        <StackPanel Grid.Column="1" Spacing="20">
+            <TextBlock Text="Controller Shortcuts"
+                       FontSize="36"
+                       Foreground="White"
+                       FontWeight="Bold"
+                       Margin="0,0,0,20"/>
+
+            <ItemsControl x:Name="ShortcutList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="local:ShortcutModel">
+                        <Border Background="#333"
+                                CornerRadius="10"
+                                Padding="20"
+                                Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal" Spacing="20">
+                                <TextBlock Text="{x:Bind Combo}"
+                                           FontSize="24"
+                                           Foreground="LightGreen"
+                                           Width="200"/>
+                                <TextBlock Text="{x:Bind Action}"
+                                           FontSize="24"
+                                           Foreground="White"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </Grid>
+</Window>

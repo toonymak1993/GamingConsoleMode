@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "gcmloader (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "gcmloader (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

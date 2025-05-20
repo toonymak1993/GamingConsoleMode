@@ -1,0 +1,1200 @@
+<Page
+    x:Class="GAMINGCONSOLEMODE.startup"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="using:Microsoft.UI.Xaml.Controls"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+
+    <Page.Resources>
+        <Style TargetType="Button" x:Key="DashboardButtonStyle">
+            <Setter Property="Width" Value="200"/>
+            <Setter Property="Height" Value="200"/>
+            <Setter Property="Margin" Value="10"/>
+            <Setter Property="BorderThickness" Value="3"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#0f0E47" Offset="0.0"/>
+                        <GradientStop Color="#272757" Offset="0.5"/>
+                        <GradientStop Color="Yellow" Offset="1.0"/>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="RootBorder"
+                CornerRadius="10"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                RenderTransformOrigin="0.5,0.5">
+
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="ButtonScale" ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
+
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="PointerOver">
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonScale"
+                                             Storyboard.TargetProperty="ScaleX"
+                                             To="1.05" Duration="0:0:0.2"/>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonScale"
+                                             Storyboard.TargetProperty="ScaleY"
+                                             To="1.05" Duration="0:0:0.2"/>
+                                        </Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonScale"
+                                             Storyboard.TargetProperty="ScaleX"
+                                             To="0.98" Duration="0:0:0.1"/>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonScale"
+                                             Storyboard.TargetProperty="ScaleY"
+                                             To="0.98" Duration="0:0:0.1"/>
+                                        </Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+
+                            <ContentPresenter HorizontalAlignment="Center"
+                              VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+
+
+
+
+        <!-- Animations-Storyboards -->
+        <Storyboard x:Key="ShowDetailPanelStoryboard">
+            <DoubleAnimation Storyboard.TargetName="PanelView"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0" To="1" Duration="0:0:0.3"/>
+            <DoubleAnimation Storyboard.TargetName="DashboardView"
+                             Storyboard.TargetProperty="Opacity"
+                             From="1" To="0" Duration="0:0:0.3"/>
+        </Storyboard>
+
+        <Storyboard x:Key="HideDetailPanelStoryboard">
+            <DoubleAnimation Storyboard.TargetName="PanelView"
+                             Storyboard.TargetProperty="Opacity"
+                             From="1" To="0" Duration="0:0:0.3"/>
+            <DoubleAnimation Storyboard.TargetName="DashboardView"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0" To="1" Duration="0:0:0.3"/>
+        </Storyboard>
+    </Page.Resources>
+
+    <Grid Margin="0">
+        
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            
+        </Grid.RowDefinitions>
+        <Grid Grid.Row="0" >
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,20" Spacing="20" VerticalAlignment="Top">
+                <Button x:Name="filterbuttonall" Content="All" Width="100" Height="40"  Background="Gray" Click="filterbuttonall_Click" />
+                <Button x:Name="filterbuttonenabled" Content="Enabled" Width="100" Height="40" Background="Green" Click="filterbuttonenabled_Click"/>
+                <Button x:Name="filterbuttondisabled" Content="Disabled" Width="100" Height="40" Background="Orange"  Click="filterbuttondisabled_Click" />
+                <AutoSuggestBox
+Grid.Row="0"
+Width="400"
+Height="40"
+    Margin="20"          
+PlaceholderText="Search for your function here"
+Background="DimGray"
+BorderBrush="#FFCCCCCC"
+BorderThickness="0"
+CornerRadius="5"
+Padding="0"
+        Name="SearchBox"
+        TextChanged="SearchBox_TextChanged"
+
+FontSize="14"
+HorizontalAlignment="Center"
+VerticalAlignment="Bottom"/>
+            </StackPanel>
+        </Grid>
+       
+
+        <Grid Grid.Row="2">
+
+
+            <Grid x:Name="DashboardView" Visibility="Visible" CornerRadius="20" Margin="10">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#505081"  Offset="0.0" />
+                        <GradientStop Color="White"  Offset="1.0" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <ScrollViewer  VerticalScrollBarVisibility="Visible">
+                    <ItemsControl  x:Name="DashboardItems">
+                        <ItemsControl.ItemsPanel>
+                           
+                            <ItemsPanelTemplate>
+                                <VariableSizedWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="4" 
+                                 HorizontalAlignment="Center"                      
+                                                       
+                                                       />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+
+                        <ItemsControl.Resources>
+                            <Style TargetType="Button" BasedOn="{StaticResource DashboardButtonStyle}" />
+                        </ItemsControl.Resources>
+
+                        <Button x:Name="cssloaderbutton" Click="cssloader_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="CSS Loader" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/Assets/steambp.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+
+                                    <Border x:Name="cssloaderstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="cssloaderstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="preloadlistbutton" Click="preloadlist_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="Preload List" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/preloadlist.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+
+                                    <Border x:Name="preloadliststate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="preloadliststate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="gcmwallpaperbutton" Click="gcmwallpaperbutton_Click"  Tag="DISABLED" >
+                            <StackPanel x:Name="gcmwallpaperpanel" Tag="DISABLED" >
+                                <TextBlock Text="GCM Wallpaper" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/TV.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                    <Border x:Name="gcmwallpaperstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="gcmwallpaperstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="joyxoffbutton" Click="joyxoffbutton_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED" >
+                                <TextBlock Text="JoyXOff" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/joyxoff_logo.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+
+                                    <Border x:Name="joyxoffstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="joyxoffstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="deckyloaderbutton" Click="deckyloaderbutton_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="Decky Loader" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/deckyloader.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+
+                                    <Border x:Name="deckyloaderstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="deckyloaderstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="preaudiobutton" Click="preaudiobutton_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="Audio Device" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/speaker.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+
+                                    <Border x:Name="audiodevicestate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="audiodevicestate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="displayfusionbutton" Click="displayfusionbutton_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="Display Fusion" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/displayfusion.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+
+                                    <Border x:Name="displayfusionstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="displayfusionstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="startupvideobutton"  Click="startupvideobutton_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="Startup Video" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/Startup_Video.gif" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                    <Border x:Name="startupvideostate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="startupvideostate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                        <!-- Winpart -->
+                        <Button x:Name="winpartbutton"  Click="winpartbutton_Click"  Tag="DISABLED">
+                            <StackPanel Tag="DISABLED">
+                                <TextBlock Text="Hybrid Mode" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <Image Source="/functions/winpart.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                    <Border x:Name="winpartstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                        <TextBlock x:Name="winpartstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
+            <Grid x:Name="PanelView"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch"
+                  CornerRadius="20"
+                  Margin="10"
+      Visibility="Collapsed"
+      Opacity="0">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="Black"  Offset="0.0" />
+                        <GradientStop Color="SlateGray"  Offset="1.0" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid HorizontalAlignment="Stretch"  VerticalAlignment="Stretch"  >
+                    <StackPanel>
+                        <Grid VerticalAlignment="Top" >
+                            <Button Content="BACK" HorizontalAlignment="Left" Click="CloseDetailPanel_Click" Margin="10" Width="200"/>
+                        </Grid>
+                        <Grid x:Name="DetailContentGrid">
+                            <!-- Panels -->
+                            <!--joyxoff-->
+                            <Grid x:Name="JoyxoffPanel"
+      Visibility="Collapsed"
+      Background="Transparent"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+      xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Auto">
+
+                                    <Grid Padding="12"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch">
+
+                                        <StackPanel HorizontalAlignment="Center"
+                        MaxWidth="960"
+                        MinWidth="280"
+                        Width="Auto"
+                        Spacing="16">
+
+                                            <!-- Logo über Header -->
+                                            <Image Source="/functions/joyxoff_logo.png"
+                       Width="80"
+                       Height="80"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,10"/>
+
+                                            <controls:SettingsCard x:Name="JoyxoffCard"
+                                       Header="JOYXOFF MOUSE"
+                                       Description="Mouse control for gamepad (only in Windows Mode)"
+                                       HorizontalAlignment="Stretch"
+                                       Margin="12"
+                                       Padding="16"
+                                       FontSize="24"
+                                       CornerRadius="12">
+
+                                                <StackPanel x:Name="MainStackPanel"
+                                Spacing="24"
+                                HorizontalAlignment="Stretch">
+
+                                                    <!-- InfoBar -->
+                                                    <muxc:InfoBar IsOpen="True"
+                                      Severity="Warning"
+                                      Title="Windows Only"
+                                      Message="Could collide in GCM mode"
+                                      HorizontalAlignment="Stretch"
+                                      Margin="0,10,0,0"/>
+
+                                                    <!-- Beschreibung -->
+                                                    <TextBlock Text="Set GCM so that it starts Joyxoff for you in GCM mode"
+                                   FontSize="13"
+                                   Foreground="#CCCCCC"
+                                   TextWrapping="Wrap"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"/>
+
+                                                    <!-- Installationsstatus -->
+                                                    <Border x:Name="border_install_state_joyxoff"
+                                Background="Green"
+                                CornerRadius="8"
+                                Padding="10,5"
+                                Margin="8"
+                                HorizontalAlignment="Center">
+
+                                                        <TextBlock x:Name="text_install_state_joyxoff"
+                                       Text="INSTALLED"
+                                       Foreground="White"
+                                       FontSize="13"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                                                    </Border>
+
+                                                    <!-- Install/Uninstall Buttons -->
+                                                    <StackPanel x:Name="ButtonPanel"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Center"
+                                    MinWidth="200"
+                                    Spacing="12"
+                                    Padding="0"
+                                    >
+
+                                                        <Button x:Name="button_uninstall_joyxoff"
+                                    Content="Uninstall"
+                                    Width="140"
+                                    Click="button_uninstall_joyxoff_Click"
+                                    Style="{StaticResource AccentButtonStyle}"/>
+
+                                                        <Button x:Name="button_install_joyxoff"
+                                    Content="Download"
+                                    Width="140"
+                                    Click="button_install_joyxoff_Click"
+                                    Style="{StaticResource AccentButtonStyle}"/>
+                                                    </StackPanel>
+
+                                                    <!-- Toggle Option -->
+                                                    <StackPanel HorizontalAlignment="Center"
+                                    Spacing="4">
+
+                                                        <TextBlock Text="Start Joyxoff in gaming mode"
+                                       FontSize="13"
+                                       Foreground="#AAAAAA"
+                                       TextAlignment="Center"/>
+
+                                                        <ToggleSwitch x:Name="use_joyxoff"
+                                          Margin="10"
+                                          Toggled="use_joyxoff_Toggled"
+                                          HorizontalAlignment="Center"/>
+                                                    </StackPanel>
+
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+                                        </StackPanel>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--Preloadlist-->
+                            <Grid x:Name="preloadlist" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+
+                                        <controls:SettingsCard Header="PRELOAD LIST"
+                                   Description="Automatically launch files when GCM starts"
+                                   Width="Auto"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="20,0"
+                                   Padding="20"
+                                   FontSize="30"
+                                   CornerRadius="15">
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- ICON + Install Badge -->
+                                                <StackPanel HorizontalAlignment="Center" Spacing="10">
+                                                    <Image Source="/functions/preloadlist.png"
+                               Width="100"
+                               Height="100"
+                               HorizontalAlignment="Center"/>
+
+                                                    <Border x:Name="border_install_state_preloadlist"
+                                Background="Brown"
+                                CornerRadius="10"
+                                Padding="12,6"
+                                Margin="10"
+                                HorizontalAlignment="Center">
+                                                        <TextBlock x:Name="text_install_state_preloadlist"
+                                       Text="DISABLED"
+                                       Foreground="White"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                                                    </Border>
+                                                </StackPanel>
+
+                                                <!-- Beschreibung -->
+                                                <TextBlock Text="GCM will automatically launch all files listed in your preload list at startup."
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+
+                                                <!-- Toggle -->
+                                                <TextBlock Text="Enable Preload List"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"/>
+                                                <ToggleSwitch x:Name="use_preloadlist"
+                                  HorizontalAlignment="Center"
+                                  Toggled="use_preloadlist_Toggled"/>
+
+                                                <!-- Hinweis -->
+                                                <TextBlock Text="Please use the button below to create a .txt file"
+                               FontSize="13"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"/>
+
+                                                <TextBlock Text="List each program or file on a new line. Comments start with #"
+                               FontSize="13"
+                               Foreground="#AAAAAA"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+
+                                                <!-- Button -->
+                                                <Button x:Name="btn_create_or_open_preloadlist"
+                            Content="Create list / Open list"
+                            Width="250"
+                            Height="40"
+                            CornerRadius="5"
+                            HorizontalAlignment="Center"
+                            Click="btn_create_or_open_preloadlist_Click"/>
+
+                                                <!-- Pfad-Anzeige -->
+                                                <TextBox x:Name="preloadlist_path"
+                             Header="Preload List Path"
+                             PlaceholderText="Path"
+                             IsEnabled="False"
+                             Width="500"
+                             CornerRadius="5"
+                             TextChanged="preloadlist_path_TextChanged"/>
+
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--Preaudio-->
+                            <Grid x:Name="preaudio" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+
+                                        <controls:SettingsCard Header="AUDIO DEVICE SWITCH"
+                                   Description="Switch audio output automatically when GCM starts or ends"
+                                   Width="800"
+                                   HorizontalAlignment="Center"
+                                   Margin="20,0"
+                                   Padding="20"
+                                   FontSize="30"
+                                   CornerRadius="15"
+                                   BorderBrush="Aqua"
+                                   BorderThickness="2"
+                                                                   >
+
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- ICON + Install Badge -->
+                                                <StackPanel HorizontalAlignment="Center" Spacing="10">
+
+
+                                                    <Border x:Name="border_install_state_preaudio"
+                                Background="Brown"
+                                CornerRadius="10"
+                                Padding="12,6"
+                                Margin="10"
+                                HorizontalAlignment="Center">
+                                                        <TextBlock x:Name="text_install_state_preaudio"
+                                       Text="DISABLED"
+                                       Foreground="White"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                                                    </Border>
+
+                                                    <!-- InfoBar bei Erfolg -->
+                                                    <InfoBar x:Name="infobar_preaudio"
+                                 IsOpen="False"
+                                 Severity="Success"
+                                 Title="Success"
+                                 Message="Your settings have been saved"
+                                 HorizontalAlignment="Stretch"/>
+                                                </StackPanel>
+
+                                                <!-- Beschreibung -->
+                                                <TextBlock Text="Automatically change your audio output device when entering or exiting GCM."
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+
+                                                <!-- Toggle -->
+                                                <TextBlock Text="Enable Audio Device Switching"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"/>
+                                                <ToggleSwitch x:Name="use_preaudio"
+                                  HorizontalAlignment="Center"
+                                  Toggled="use_preaudio_Toggled"/>
+
+                                                <!-- Gerätauswahl: Start -->
+                                                <TextBlock Text="Audio device when GCM starts"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               Margin="0,10,0,0"/>
+                                                <ComboBox x:Name="preaudio_start"
+                              Width="500"
+                              Margin="0,5,0,10"
+                              SelectionChanged="preaudio_start_SelectionChanged"/>
+
+                                                <!-- Gerätauswahl: Ende -->
+                                                <TextBlock Text="Audio device when GCM ends"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"/>
+                                                <ComboBox x:Name="preaudio_end"
+                              Width="500"
+                              Margin="0,5,0,10"
+                              SelectionChanged="preaudio_end_SelectionChanged"/>
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--deckyloader - ready-->
+                            <Grid x:Name="deckyloader" Visibility="Collapsed"
+                                  xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Enabled">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+                                        <StackPanel Spacing="4">
+
+
+                                            <TextBlock Text="Decky Loader"  Margin="10" FontSize="35" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+
+                                            
+                                            <TextBlock Text="Settings" FontSize="14" FontWeight="SemiBold" Margin="0,8,36,0"/>
+                                            
+                                            
+                                            <controls:SettingsCard Width="850" Description="Set GCM so that it starts Joyxoff for you in GCM mode"
+                                              Header="ON/OFF" >
+                                                <ToggleSwitch x:Name="use_decky_loader"
+                                                              Toggled="use_decky_loader_Toggled_1"
+                                                              HorizontalAlignment="Center"/>
+                                            </controls:SettingsCard>
+
+                                            
+                                            <controls:SettingsCard Header="INSTALLATION PANEL">
+                                                <controls:SettingsCard.Description>
+                                                    <Border x:Name="border_install_state_decky_loader"
+                                                            Grid.Column="1"
+                                                            Background="Green"
+                                                            CornerRadius="8"
+                                                            Padding="10,5"
+                                                            Margin="0,10,0,0"
+                                                            HorizontalAlignment="Left">
+                                                        <TextBlock x:Name="text_install_state_decky_loader"
+                                                                   Text="INSTALLED"
+                                                                   Foreground="White"
+                                                                   FontSize="13"
+                                                                   FontWeight="Bold"
+                                                                   TextAlignment="Center"/>     
+                                                    </Border>
+                                                </controls:SettingsCard.Description>
+
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <Button x:Name="button_install_decky_loader" Content="DOWNLOAD" Margin="10" Width="150" Click="button_install_decky_loader_Click"/>
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+      
+                                            <controls:SettingsCard Header="Github Repo">
+                                                <controls:SettingsCard.Description>
+                                                    <HyperlinkButton Content="Learn more about Decky Loader" NavigateUri="https://wiki.deckbrew.xyz/"/>
+                                                </controls:SettingsCard.Description>
+                                                <HyperlinkButton Content="Link to Github Repo" NavigateUri="https://github.com/SteamDeckHomebrew/decky-loader#-installation"/>
+                                            </controls:SettingsCard>
+
+
+                                            <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
+
+                                            <controls:SettingsCard  Description="Please extract all files into a folder and run the executable inside. Then, return to GCM."
+                                                                    Header="Installation instructions" >
+                                                <controls:SettingsCard.Resources>
+                                                    <x:Double x:Key="SettingsCardWrapThreshold">800</x:Double>
+                                                    <x:Double x:Key="SettingsCardWrapNoIconThreshold">600</x:Double>
+                                                </controls:SettingsCard.Resources>
+                                            </controls:SettingsCard>
+                                            
+
+                                            <controls:SettingsCard x:Name="settingsCard"
+                                                                   Header="Compatible plugins">
+                                                <StackPanel>
+                                                    <TextBlock Text="• Audio Loader" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• CSS Loader" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• IsThereAnyDeal For Deck" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• PlayCount" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• PlayTime" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• ProtonDB Badges" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• SteamGridDB" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• TabMaster" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="• Web Browser" Margin="0,2,0,0"/>
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+
+
+
+
+
+                                            <!-- Installationsanleitung -->
+                                            
+                                        </StackPanel>
+
+
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid> 
+                            <!--startup video-->
+                            <Grid x:Name="startupvideo" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+
+                                        <controls:SettingsCard Header="STARTUP VIDEO"
+                                   Description="Show a short video while your launcher boots in the background"
+                                   Width="900"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="20,0"
+                                   Padding="20"
+                                   FontSize="30"
+                                   CornerRadius="15">
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- Icon + Install-Badge -->
+                                                <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                                    <Image Source="/functions/Startup_Video.gif"
+                               Width="100"
+                               Height="100"        
+                               HorizontalAlignment="Center"/>
+
+                                                    <Border x:Name="border_install_state_Startup_Video"
+                                Background="Brown"
+                                CornerRadius="10"
+                                Padding="12,6"
+                                Margin="0"
+                                HorizontalAlignment="Center">
+                                                        <TextBlock x:Name="text_install_state_Startup_Video"
+                                       Text="DISABLED"
+                                       Foreground="White"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                                                    </Border>
+                                                </StackPanel>
+
+                                                <!-- Toggle -->
+                                                <TextBlock Text="Enable Startup Video"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"/>
+                                                <ToggleSwitch x:Name="use_startup_video"
+                                  Toggled="use_startup_video_Toggled"
+                                  HorizontalAlignment="Center"/>
+
+                                                <!-- Unterbereich für Video Path etc. -->
+                                                <Border CornerRadius="15"
+        Padding="10"
+                                                            Width="500"
+                                                            Height="460"
+        Background="#1F1F1F"
+        Margin="0,0,0,0">
+
+                                                    <StackPanel Spacing="10">
+
+                                                        <!-- Sektionstitel -->
+                                                        <TextBlock Text="Select Video Path"
+                   FontSize="14"
+                   FontWeight="Bold"
+                   Foreground="White"
+                   Margin="0,0,0,5"/>
+
+                                                        <!-- Buttons -->
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <Button x:Name="pichstartupvideopath"
+                    Content="Select a file"
+                    Click="pichstartupvideopath_Click"
+                    Style="{StaticResource AccentButtonStyle}"/>
+                                                            <Button x:Name="Resetstartupvideopath"
+                    Content="Reset"
+                    Click="Resetstartupvideopath_Click"
+                    Style="{StaticResource AccentButtonStyle}"/>
+                                                        </StackPanel>
+
+                                                        <!-- Info -->
+                                                        <InfoBar IsOpen="True"
+                 Severity="Informational"
+                 Title="Important"
+                 Message="If not used with Steam, please avoid .webm format"
+                 Margin="0,5,0,0"
+                 HorizontalAlignment="Stretch"/>
+
+                                                        <!-- Dateipfad-Vorschau -->
+                                                        <TextBlock x:Name="textbox_select_startupvideo_path"
+                   TextWrapping="Wrap"
+                   Foreground="White"
+                   FontSize="13"/>
+
+                                                        <!-- Eingabefeld -->
+                                                        <TextBox x:Name="textbox_startupvideo_path"
+                 IsReadOnly="True"
+                 PlaceholderText="Enter the Path"
+                 TextChanged="textbox_startupvideo_path_TextChanged"
+                 Foreground="Black"
+                 Background="White"
+                 Padding="6"
+                 Margin="0,5,0,0"/>
+
+                                                        <!-- Linie -->
+                                                        <Line Margin="0,10,0,10"
+              Stroke="#333"
+              X1="0" Y1="0"
+              X2="700" Y2="0"
+              StrokeThickness="1.5"/>
+
+                                                        <!-- Steam-Hinweis -->
+                                                        <TextBlock Text="For Steam only:"
+                   FontSize="13"
+                   FontWeight="Bold"
+                   Foreground="White"
+                   Margin="0,5,0,0"/>
+
+                                                        <TextBlock Text="The selected video must be in WebM format. It replaces the default Steam intro video in GCM."
+                   TextWrapping="Wrap"
+                   Foreground="#CCCCCC"
+                   FontSize="13"/>
+
+                                                        <!-- Checkbox + Aktion -->
+                                                        <CheckBox x:Name="UseSteamStartupVideo"
+                  Content="Use this method"
+                  Checked="UseSteamStartupVideoCheckBox_Checked"
+                  Unchecked="UseSteamStartupVideoCheckBox_Unchecked"
+                  Margin="0,5,0,0"/>
+
+                                                        <Button x:Name="Injectstartupvideo_button"
+                Content="Inject video"
+                Click="Injectstartupvideo_button_Click"
+                Style="{StaticResource AccentButtonStyle}"
+                Width="150"
+                HorizontalAlignment="Left"/>
+
+                                                        <!-- Fortschritt -->
+                                                        <ProgressBar x:Name="Injectstartupvideo_ProgressBar"
+                     Width="300"
+                     Value="0"
+                     Margin="0,10,0,0"
+                     Background="#444"
+                     Visibility="Collapsed"/>
+
+                                                        <TextBlock x:Name="Injectstartupvideo_Text"
+                   Text="Conversion"
+                   Foreground="#CCCCCC"
+                   FontSize="12"
+                   Visibility="Collapsed"
+                   Margin="0,5,0,0"/>
+                                                    </StackPanel>
+                                                </Border>
+
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--Display fusion video-->
+                            <Grid x:Name="displayfusion" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+                                        <controls:SettingsCard Header="DISPLAYFUSION"
+                                   Description="Change the screen profile with DisplayFusion"
+                                   Width="900"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="20,0"
+                                   Padding="20"
+                                   FontSize="30"
+                                   CornerRadius="15">
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- Bild + Install Status + InfoBar -->
+                                                <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                                    <Image Source="/functions/displayfusion.png"
+                               Width="100"
+                               Height="100"
+                               HorizontalAlignment="Center"/>
+
+                                                    <Border x:Name="border_install_state_displayfusion"
+                                Background="Green"
+                                CornerRadius="10"
+                                Padding="12,6"
+                                HorizontalAlignment="Center">
+                                                        <TextBlock x:Name="text_install_state_displayfusion"
+                                       Text="INSTALLED"
+                                       Foreground="White"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                                                    </Border>
+
+                                                    <InfoBar IsOpen="True"
+                                 Severity="Informational"
+                                 Title="Better experience"
+                                 Message="The GCM team recommends this function"
+                                 HorizontalAlignment="Stretch"
+                                 Margin="0,10,0,0"/>
+                                                </StackPanel>
+
+                                                <!-- Beschreibung -->
+                                                <TextBlock Text="Use DisplayFusion to automatically switch screen profiles."
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+
+                                                <!-- Icon Buttons -->
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
+                                                    <Button x:Name="button_uninstall_displayfusion"
+                                Click="button_uninstall_displayfusion_Click_1">
+                                                        <Image Source="/Assets/Uninstall Programs.png"
+                                   Width="40" Height="40"/>
+                                                    </Button>
+
+                                                    <Button x:Name="button_install_displayfusion"
+                                Click="button_install_displayfusion_Click_2">
+                                                        <Image Source="/Assets/Download.png"
+                                   Width="40" Height="40"/>
+                                                    </Button>
+                                                </StackPanel>
+
+                                                <!-- Toggle mit Label -->
+                                                <TextBlock Text="Use DisplayFusion in GCM"
+                               FontSize="14"
+                               Foreground="#AAAAAA"
+                               TextAlignment="Center"/>
+                                                <ToggleSwitch x:Name="use_displayfusion"
+                                  Toggled="use_displayfusion_Toggled"
+                                  HorizontalAlignment="Center"
+                                  Margin="0,0,0,10"/>
+
+                                                <!-- TextBoxen -->
+                                                <TextBlock Text="Set DisplayFusion config names for START and END"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               Margin="10,5,10,0"/>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+                                                    <TextBox x:Name="displayfusion_start"
+                                 Header="START configname"
+                                 PlaceholderText="START"
+                                 TextChanged="displayfusion_start_TextChanged"
+                                 CornerRadius="5"/>
+                                                    <TextBox x:Name="displayfusion_end"
+                                 Header="END configname"
+                                 PlaceholderText="END"
+                                 TextChanged="displayfusion_end_TextChanged"
+                                 CornerRadius="5"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--gcmwallpaper-->
+                            <Grid x:Name="gcmwallpaper" Visibility="Collapsed"
+xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+
+                                        <controls:SettingsCard Header="GCM WALLPAPER"
+   Description="Set a wallpaper in GCM background mode"
+   Width="800"
+   HorizontalAlignment="Stretch"
+   Margin="20,0"
+   Padding="20"
+   FontSize="30"
+   BorderBrush="Aqua"
+   BorderThickness="2"
+   CornerRadius="15">
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- ICON OBEN ZENTRIERT -->
+                                                <Image Source="/functions/TV.png"
+Width="100"
+Height="100"
+HorizontalAlignment="Center"
+Margin="0,0,0,-10"/>
+
+                                                <!-- Installationsstatus -->
+                                                <Border x:Name="border_install_state_wallpaper"
+Background="Brown"
+CornerRadius="10"
+Padding="12,6"
+Margin="10"
+HorizontalAlignment="Center">
+                                                    <TextBlock x:Name="text_install_state_wallpaper"
+   Text="DISABLED"
+   Foreground="White"
+   FontSize="14"
+   FontWeight="Bold"
+   TextAlignment="Center"/>
+                                                </Border>
+
+                                                <!-- Beschreibung -->
+                                                <TextBlock Text="Show a custom wallpaper in the background while GCM is running."
+FontSize="14"
+Foreground="#CCCCCC"
+TextWrapping="Wrap"
+TextAlignment="Center"/>
+
+                                                <!-- Toggle-Label -->
+                                                <TextBlock Text="Show wallpaper in background in GCM"
+FontSize="14"
+Foreground="#CCCCCC"
+TextAlignment="Center"
+TextWrapping="Wrap"/>
+
+                                                <!-- Toggle -->
+                                                <ToggleSwitch x:Name="use_wallpaper"
+  HorizontalAlignment="Center"
+  Margin="0,0,0,0"
+  Toggled="use_wallpaper_Toggled"/>
+
+                                                <!-- Pfad zur Wallpaper-Datei -->
+                                                <TextBox x:Name="wallpaper_path"
+Header="Wallpaper Path"
+PlaceholderText="Path"
+TextChanged="wallpaper_path_TextChanged"
+CornerRadius="5"
+Width="500"/>
+
+                                                <!-- Footer Text -->
+                                                <TextBlock Text="If you minimize your launcher, you will see your wallpaper"
+FontSize="14"
+Foreground="#CCCCCC"
+TextAlignment="Center"
+TextWrapping="Wrap"
+Margin="5"/>
+
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--CSS Loader-->
+                            <Grid x:Name="cssloader" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+
+                                        <controls:SettingsCard Header="STEAM THEMES LOADER"
+                                   Description="Customize Steam's look with amazing CSS themes"
+                                   Width="900"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="20,0"
+                                   Padding="20"
+                                   FontSize="30"
+                                   CornerRadius="15">
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- Icon oben -->
+                                                <Image Source="/Assets/steambp.png"
+                           Width="100"
+                           Height="100"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,-10"/>
+
+                                                <!-- Installationsstatus -->
+                                                <Border x:Name="border_install_state_cssloader"
+                            Background="Green"
+                            CornerRadius="10"
+                            Padding="12,6"
+                            Margin="10"
+                            HorizontalAlignment="Center">
+                                                    <TextBlock x:Name="text_install_state_cssloader"
+                                   Text="INSTALLED"
+                                   Foreground="White"
+                                   FontSize="14"
+                                   FontWeight="Bold"
+                                   TextAlignment="Center"/>
+                                                </Border>
+
+                                                <!-- InfoBar -->
+                                                <InfoBar IsOpen="True"
+                             Severity="Informational"
+                             Title="Better experience"
+                             Message="The GCM team recommends this function"
+                             HorizontalAlignment="Stretch"/>
+
+                                                <!-- Buttons mit Icons -->
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
+                                                    <Button x:Name="button_uninstall_cssloader"
+                                Click="button_uninstall_cssloader_Click">
+                                                        <Image Source="/Assets/Uninstall Programs.png"
+                                   Width="40" Height="40"
+                                   AutomationProperties.Name="Uninstall"/>
+                                                    </Button>
+
+                                                    <Button x:Name="button_install_cssloader"
+                                Click="button_install_cssloader_Click">
+                                                        <Image Source="/Assets/Download.png"
+                                   Width="40" Height="40"
+                                   AutomationProperties.Name="Download"/>
+                                                    </Button>
+                                                </StackPanel>
+
+                                                <!-- Erklärung -->
+                                                <TextBlock Text="Start CSSLoader in gaming mode"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+
+                                                <!-- Toggle -->
+                                                <ToggleSwitch x:Name="use_cssloader"
+                                  Toggled="use_cssloader_Toggled"
+                                  HorizontalAlignment="Center"
+                                  Margin="0,0,10,10"/>
+
+                                                <!-- Footer Info -->
+                                                <TextBlock Text="Enable Designs in Steam BP over CSS Loader."
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                            <!--Winpart-->
+                            <Grid x:Name="winpart" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+
+                                        <controls:SettingsCard Header="Hybrid Mode (WINPART)"
+                                   Description="Explorer runs silently alongside GCM"
+                                   Width="900"
+                                   HorizontalAlignment="Stretch"
+                                   Margin="20,0"
+                                   Padding="20"
+                                   FontSize="30"
+                                   CornerRadius="15">
+
+                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
+
+                                                <!-- Icon -->
+                                                <Image Source="/functions/winpart.png"
+                           Width="100"
+                           Height="100"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,-10"/>
+
+                                                <!-- Installationsstatus -->
+                                                <Border x:Name="border_install_state_winpart"
+                            Background="Brown"
+                            CornerRadius="10"
+                            Padding="12,6"
+                            Margin="10"
+                            HorizontalAlignment="Center">
+                                                    <TextBlock x:Name="text_install_state_winpart"
+                                   Text="DISABLED"
+                                   Foreground="White"
+                                   FontSize="14"
+                                   FontWeight="Bold"
+                                   TextAlignment="Center"/>
+                                                </Border>
+
+                                                <!-- Beschreibung -->
+                                                <TextBlock Text="Windows Explorer is started with GCM and remains partly invisible in the background."
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               Margin="5"/>
+
+                                                <!-- Toggle 1 mit Text -->
+                                                <TextBlock Text="Start Winpart with GCM"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+                                                <ToggleSwitch x:Name="use_winpart"
+                                  HorizontalAlignment="Center"
+                                  Margin="0,-10,10,10"
+                                  Toggled="use_winpart_Toggled"/>
+
+                                                <!-- Toggle 2 mit Text -->
+                                                <TextBlock Text="Deactivate Windows Autostart apps inside GCM"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+                                                <ToggleSwitch x:Name="use_winpart_startapps"
+                                  HorizontalAlignment="Center"
+                                  Margin="0,-10,10,10"
+                                  Toggled="use_winpart_startapps_Toggled"/>
+
+                                                <!-- Footer Info -->
+                                                <TextBlock Text="With Winpart you have access to the Windows functions within the GCM shell"
+                               FontSize="14"
+                               Foreground="#CCCCCC"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               Margin="5"/>
+                                            </StackPanel>
+                                        </controls:SettingsCard>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Grid>
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

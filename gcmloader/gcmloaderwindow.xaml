@@ -1,0 +1,41 @@
+﻿<Window
+    x:Class="gcmloader.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="gcmloader">
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Hintergrundbild Layer (unterste Ebene) -->
+        <Image
+            x:Name="BackgroundImage"
+            Stretch="UniformToFill"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            Grid.ColumnSpan="2"/>
+
+        <!-- Task Manager Panel (mittlere Ebene) -->
+        <StackPanel
+            x:Name="TaskManagerPanel"
+            Orientation="Vertical"
+            Background="#1E1E1E"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Stretch"
+            Width="auto"
+            Margin="0"
+            Visibility="Collapsed" />
+
+        <!-- Logo Layer (oberste Ebene) -->
+        <Image
+            Source="Assets/logo_gcm.png"
+            Width="200"
+            Height="200"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Grid.Column="1"/>
+    </Grid>
+</Window>

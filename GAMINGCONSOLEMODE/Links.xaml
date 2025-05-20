@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GAMINGCONSOLEMODE.Links"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GAMINGCONSOLEMODE"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Grid>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Height="Auto">
+            <StackPanel HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="100,20,100,0">
+
+                <!-- Titre principal -->
+                <TextBlock Text="Links :"
+                           FontSize="28"
+                           FontWeight="Bold"
+                           Margin="0,0,0,10"
+                           TextAlignment="Left"/>
+
+                <!-- Description -->
+                <TextBlock Text="This is a list of useful programs that can enhance your gaming console experience.Each tool below provides a unique feature to improve performance, usability, or customization of your gaming setup."
+                           FontSize="16"
+                           TextAlignment="Left"
+                           Margin="0,0,0,20"/>
+                
+                <!-- Expander BoilR -->
+                <Expander x:Name="BoilR" HorizontalAlignment="Stretch" Margin="0,0,0,5">
+                <Expander.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <!-- Image -->
+                            <ColumnDefinition Width="Auto" />
+                            <!-- Text -->
+                            <ColumnDefinition Width="*" />
+                            <!-- Download Button -->
+                        </Grid.ColumnDefinitions>
+
+                        <Image Source="https://github.com/PhilipK/BoilR/blob/main/resources/64/io.github.philipk.boilr.png?raw=true"
+                               Width="50" Height="50" 
+                               Margin="5"
+                               VerticalAlignment="Center"/>
+
+                        <TextBlock Text="BoilR"
+                                   Grid.Column="1"
+                                   FontSize="16"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0"/>
+                        
+                        <HyperlinkButton Content="Download"
+                                         Grid.Column="2"
+                                         Margin="5"
+                                         NavigateUri="https://github.com/PhilipK/BoilR"
+                                         HorizontalAlignment="Right"/>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <Grid Margin="10">
+                        <TextBlock TextAlignment="Left"
+                                   Text="BoilR automatically adds (almost) all your games to your Steam library (including image art). It uses the Steam 3rd party shortcuts feature and does not require you to set up anything. The goal is that you do not have to leave your Steam library to launch games from other launchers/stores, so that you can find all the games that you have available. Optionally, you can set up BoilR to automatically download artwork from SteamGridDB."
+                                   TextWrapping="Wrap"
+                                   FontSize="14"/>
+                    </Grid>
+                </Expander.Content>
+            </Expander>
+
+                <!-- Expander HackBGRT -->
+                <Expander x:Name="HackBGRT" HorizontalAlignment="Stretch" Margin="0,0,0,5">
+                <Expander.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <!-- Image -->
+                            <ColumnDefinition Width="Auto" />
+                            <!-- Text -->
+                            <ColumnDefinition Width="*" />
+                            <!-- Download Button -->
+                        </Grid.ColumnDefinitions>
+
+                        <Image Source="https://github.com/Metabolix/HackBGRT/raw/refs/heads/main/splash.bmp"
+                   Width="50" Height="50" 
+                   Margin="5"
+                   VerticalAlignment="Center"/>
+
+                        <TextBlock Text="HackBGRT"
+                       Grid.Column="1"
+                       FontSize="16"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center"
+                       Margin="10,0,0,0"/>
+                        
+                        <HyperlinkButton Content="Download"
+                             Grid.Column="2"
+                             Margin="5"
+                             NavigateUri="https://github.com/Metabolix/HackBGRT"
+                             HorizontalAlignment="Right"/>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <Grid Margin="10">
+                        <TextBlock TextAlignment="Left"
+                       Text="HackBGRT is intended as a boot logo changer for UEFI-based Windows systems.When booting on a UEFI-based computer, Windows may show a vendor-defined logo which is stored on the UEFI firmware in a section called Boot Graphics Resource Table (BGRT). It's usually very difficult to change the image permanently, but a custom UEFI application may be used to overwrite it during the boot. HackBGRT does exactly that."
+                       TextWrapping="Wrap"
+                       FontSize="14"/>
+                    </Grid>
+                </Expander.Content>
+            </Expander>
+
+                <!-- Expander AtlasOS -->
+                <Expander x:Name="AtlasOS" HorizontalAlignment="Stretch" Margin="0,0,0,5">
+                <Expander.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <!-- Image -->
+                            <ColumnDefinition Width="Auto" />
+                            <!-- Text -->
+                            <ColumnDefinition Width="*" />
+                            <!-- Download Button -->
+                        </Grid.ColumnDefinitions>
+
+                        <Image Source="https://atlasos.net/_astro/logomark.DhokPZay_Z2q7sCK.svg"
+       Width="50" Height="50" 
+       Margin="5"
+       VerticalAlignment="Center"/>
+
+                        <TextBlock Text="AtlasOS"
+           Grid.Column="1"
+           FontSize="16"
+           FontWeight="Bold"
+           VerticalAlignment="Center"
+           Margin="10,0,0,0"/>
+
+                        <HyperlinkButton Content="Download"
+                 Grid.Column="2"
+                 Margin="5"
+                 NavigateUri="https://atlasos.net/"
+                 HorizontalAlignment="Right"/>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <Grid Margin="10">
+                        <TextBlock TextAlignment="Left"
+           Text="Atlas turns off many unnecessary Windows components and features for optimal performance, usability, and privacy."
+           TextWrapping="Wrap"
+           FontSize="14"/>
+                    </Grid>
+                </Expander.Content>
+            </Expander>
+
+                <!-- Expander JoyXoff -->
+                <Expander x:Name="JoyXoff" HorizontalAlignment="Stretch" Margin="0,0,0,5">
+                <Expander.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <!-- Image -->
+                            <ColumnDefinition Width="Auto" />
+                            <!-- Text -->
+                            <ColumnDefinition Width="*" />
+                            <!-- Download Button -->
+                        </Grid.ColumnDefinitions>
+
+                        <Image Source="https://joyxoff.com/wiki.png"
+Width="50" Height="50" 
+Margin="5"
+VerticalAlignment="Center"/>
+
+                        <TextBlock Text="JoyXoff"
+    Grid.Column="1"
+    FontSize="16"
+    FontWeight="Bold"
+    VerticalAlignment="Center"
+    Margin="10,0,0,0"/>
+
+                        <HyperlinkButton Content="Download"
+          Grid.Column="2"
+          Margin="5"
+          NavigateUri="https://joyxoff.com/en/"
+          HorizontalAlignment="Right"/>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <Grid Margin="10">
+                        <TextBlock TextAlignment="Left"
+    Text="JoyXoff
+is a free and lightweight Xbox controller mapper which allows you to simulate mouse and keyboard events, media functions and create process profiles individually, as well as offer the ability to turn off Xbox 360 wireless Controller. Developed by Diego Ferracini and currently available in English, Brazilian Portuguese, Japanese, German, French, Colombian Spanish, Polish, Russian and Simplified and Traditional Chinese."
+    TextWrapping="Wrap"
+    FontSize="14"/>
+                    </Grid>
+                </Expander.Content>
+            </Expander>
+
+                <!-- Expander SGDBoop -->
+                <Expander x:Name="SGDBoop" HorizontalAlignment="Stretch" Margin="0,0,0,5">
+                <Expander.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <!-- Image -->
+                            <ColumnDefinition Width="Auto" />
+                            <!-- Text -->
+                            <ColumnDefinition Width="*" />
+                            <!-- Download Button -->
+                        </Grid.ColumnDefinitions>
+
+                        <Image Source="https://github.com/SteamGridDB/SGDBoop/raw/main/res/com.steamgriddb.SGDBoop.svg"
+Width="50" Height="50" 
+Margin="5"
+VerticalAlignment="Center"/>
+
+                        <TextBlock Text="SGDBoop"
+    Grid.Column="1"
+    FontSize="16"
+    FontWeight="Bold"
+    VerticalAlignment="Center"
+    Margin="10,0,0,0"/>
+
+                        <HyperlinkButton Content="Download"
+          Grid.Column="2"
+          Margin="5"
+          NavigateUri="https://github.com/SteamGridDB/SGDBoop"
+          HorizontalAlignment="Right"/>
+                    </Grid>
+                </Expander.Header>
+
+                <Expander.Content>
+                    <Grid Margin="10">
+                        <TextBlock TextAlignment="Left"
+    Text="SGDBoop is a tool that automatically applies assets from SteamGridDB directly to your Steam library, removing the need to download and set them manually."
+    TextWrapping="Wrap"
+    FontSize="14"/>
+                    </Grid>
+                </Expander.Content>
+            </Expander>
+            
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

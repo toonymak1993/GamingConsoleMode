@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GAMINGCONSOLEMODE.onboarding"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:GAMINGCONSOLEMODE"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <!-- ScrollViewer hinzugefügt -->
+    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Auto"
+                  ZoomMode="Disabled">
+
+        <Grid Padding="40">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <TextBlock x:Name="HeaderTextBlock"
+                       Text="Welcome to the GCM Onboarding"
+                       FontSize="36"
+                       FontWeight="Bold"
+                       Margin="0,0,0,20"
+                       HorizontalAlignment="Center"/>
+
+            <!-- Image mit abgerundeten Ecken -->
+            <Viewbox Grid.Row="1"
+                     Margin="0,0,0,20"
+                     HorizontalAlignment="Center"
+                     MaxWidth="600"
+                     MaxHeight="400">
+                <!-- Border wraps the image and applies corner radius -->
+                <Border CornerRadius="30"
+                        >
+                    <Image x:Name="OnboardingImage"
+                           Source="/Assets/logo_gcm.png"
+                           Stretch="Uniform"
+                           />
+                </Border>
+            </Viewbox>
+
+            <!-- Description and dynamic content area -->
+            <StackPanel Grid.Row="2"
+                        MaxWidth="800"
+                        HorizontalAlignment="Center"
+                        Spacing="20">
+                <Border Background="#1F000000"
+                        Padding="20"
+                        CornerRadius="12">
+                    <TextBlock x:Name="DescriptionTextBlock"
+                               TextWrapping="WrapWholeWords"
+                               FontSize="18"
+                               LineHeight="28"
+                               Text="This is the first step of your journey..." />
+                </Border>
+
+                <!-- Dynamic content area for extra buttons or controls -->
+                <StackPanel x:Name="CustomContentArea"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"/>
+            </StackPanel>
+
+            <!-- Navigation Buttons -->
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Grid.Row="3"
+                        Margin="0,30,0,0"
+                        Spacing="10">
+                <Button x:Name="BackButton"
+                        Content="Back"
+                        Click="BackButton_Click"
+                        IsEnabled="False"
+                        Width="100"/>
+
+                <Button x:Name="NextButton"
+                        Content="Next"
+                        Click="NextButton_Click"
+                        Width="100"/>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>
