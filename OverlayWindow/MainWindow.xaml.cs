@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -13,10 +14,23 @@ namespace OverlayWindow
         private readonly string shortcutPath;
         public ObservableCollection<Shortcut> Shortcuts { get; set; }
         private DispatcherTimer timer;
+        private bool IsAnotherInstanceRunning()
+        {
+            var current = Process.GetCurrentProcess();
+            var others = Process.GetProcessesByName(current.ProcessName)
+                                .Where(p => p.Id != current.Id);
+            return others.Any();
+        }
+
 
         public MainWindow()
         {
             InitializeComponent();
+            //Overlaywindow_test
+            if (IsAnotherInstanceRunning())
+            {
+                this.Close();
+            }
             shortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "shortcuts");
             Shortcuts = new ObservableCollection<Shortcut>();
             ShortcutCarousel.Items.Clear();

@@ -14,18 +14,21 @@
 
             
             <TextBlock Text="Seamless Switch"/>
-            <StackPanel Background="#1E1E1E" Padding="20" Spacing="16">
+            <StackPanel CornerRadius="5" Background="DarkSlateBlue"  Padding="20" Spacing="16">
                 <TextBlock Text="Seamless Switch"
                            Foreground="White"
-                           FontSize="18"
+                           FontSize="20"
                            FontWeight="SemiBold"
                            HorizontalAlignment="Center"/>
-
                 <TextBlock Text="Seamless switching between modes"
-           Foreground="White"
-           FontSize="13"
-           FontWeight="SemiBold"
-           HorizontalAlignment="Center"/>
+Foreground="White"
+FontSize="13"
+FontWeight="SemiBold"
+HorizontalAlignment="Center"/>
+
+                <Image x:Name="WebImage" Width="100" Height="50" />
+
+                
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
                     
