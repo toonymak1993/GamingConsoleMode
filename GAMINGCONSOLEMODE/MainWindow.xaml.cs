@@ -55,7 +55,7 @@ namespace GAMINGCONSOLEMODE
                     if (AppSettings.Load<bool>("onboarding") == true)
                     {
                         // Navigate to the 'startup' page on app launch
-                        contentFrame.Navigate(typeof(Home), null, new SlideNavigationTransitionInfo()
+                        contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
                         {
                             Effect = SlideNavigationTransitionEffect.FromRight
                         });
@@ -107,7 +107,6 @@ namespace GAMINGCONSOLEMODE
                     Type pageType = selectedTag switch
                     {
                         "OnboardingPage" => typeof(onboarding),
-                        "GCMPage" => typeof(Home),
                         "LauncherPage" => typeof(launcher),
                         "shortcuts" => typeof(shortcuts),
                         "StartupPage" => typeof(startup),

@@ -15,6 +15,7 @@ using System.Windows.Forms;
 using Button = Microsoft.UI.Xaml.Controls.Button;
 using ComboBox = Microsoft.UI.Xaml.Controls.ComboBox;
 using Orientation = Microsoft.UI.Xaml.Controls.Orientation;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace GAMINGCONSOLEMODE
 {
@@ -58,6 +59,11 @@ namespace GAMINGCONSOLEMODE
             Debug.WriteLine("Page loaded → calling LoadExistingShortcuts()");
             LoadExistingShortcuts();
             insertgamepaddata();
+
+            var uri = new Uri("https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Windows365-logo.svg/960px-Windows365-logo.svg.png");
+            var bitmap = new BitmapImage(uri);
+            WebImage.Source = bitmap;
+
         }
 
 

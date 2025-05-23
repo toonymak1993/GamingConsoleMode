@@ -2499,17 +2499,50 @@ namespace gcmloader
 
         }
         #endregion shortcut overlay
+        #region backtowin
+        [DllImport("user32.dll")]
+        private static extern void LockWorkStation();
+
+        private const byte VK_LWIN = 0x5B;
+        private const byte D_KEY = 0x44;
+
+        public static void MinimizeAllViaShortcut()
+        {
+            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(D_KEY, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(D_KEY, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
         private void Triggerbacktowin()
         {
-            // back to windows 
-            displayfusion("end");
-            BackToWindows();
+
+            string useuac = AppSettings.Load<string>("launcher");
+            if(useuac == "steam")
+            {
+
+            }
+            else if (useuac == "playnite")
+            {
+            }
+            else if (useuac == "otherlauncher")
+            {
+            }
+            else if (useuac == "none")
+            {
+
+            }
+
+                // back to windows 
+                displayfusion("end");
             CleanupLogging();
             try
             {
                 StartupVideo.RenameSteamStartupVideo_End();
             }
-            catch { }
+            catch 
+            { 
+
+            }
             preaudio(false, true);
 
             #region Handheld
@@ -2543,10 +2576,13 @@ namespace gcmloader
 
 
             #endregion uac
-            //minimize all
             StopOverlay();
-            this.Close();
+
+            //this.Close();
+            //minimize all
+            MinimizeAllViaShortcut();
         }
+        #endregion backtowin
         #endregion shortcuts
 
 
