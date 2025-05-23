@@ -3,6 +3,7 @@ using Microsoft.Win32.TaskScheduler;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Security.Principal;
 
@@ -12,6 +13,9 @@ namespace TaskHelper
     {
         static void Main(string[] args)
         {
+
+
+
             Logger.Init(); // start new log file
             Logger.Write("Program started.");
 

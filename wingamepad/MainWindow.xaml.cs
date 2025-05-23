@@ -37,7 +37,13 @@ namespace wingamepad
             ["LeftShoulder"] = GamepadButtonFlags.LeftShoulder,
             ["RightShoulder"] = GamepadButtonFlags.RightShoulder
         };
-
+        private bool IsAnotherInstanceRunning()
+        {
+            var current = Process.GetCurrentProcess();
+            var others = Process.GetProcessesByName(current.ProcessName)
+                                .Where(p => p.Id != current.Id);
+            return others.Any();
+        }
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
@@ -48,6 +54,11 @@ namespace wingamepad
             Log("Application started.");
             LoadWinmodeShortcuts();
             SetupGamepadWatcher();
+
+            if (IsAnotherInstanceRunning())
+            {
+                Environment.Exit(0);
+            }
         }
 
         private void LoadWinmodeShortcuts()

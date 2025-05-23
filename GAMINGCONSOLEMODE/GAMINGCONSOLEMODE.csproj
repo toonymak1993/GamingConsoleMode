@@ -235,11 +235,6 @@
     </Page>
   </ItemGroup>
   <ItemGroup>
-    <Page Update="Home.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="startup.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -294,6 +289,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PRIResource Remove="functions\ffmpeg\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Home.xaml.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Remove="Home.xaml" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\rogally\allybackside.png">

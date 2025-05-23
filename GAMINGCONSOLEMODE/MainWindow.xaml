@@ -31,7 +31,7 @@
             <Image Source="Assets/logo_gcm.png" Height="60" Margin="25,5"/>
 
             <!-- Right Button with VisualStateManager -->
-            <Button x:Name="MenuButton" Grid.Column="2" Content="START GCM" Margin="10" Background="DodgerBlue"  CornerRadius="10" BorderThickness="0"  Foreground="White" Padding="12,6" Click="TopbarButton_Click" Height="50" Width="200">
+            <Button x:Name="MenuButton" Grid.Column="2" Content="START GCM" Margin="10" Background="DarkSlateBlue"  CornerRadius="10" BorderThickness="0"  Foreground="White" Padding="12,6" Click="TopbarButton_Click" Height="50" Width="200">
                 <VisualStateManager.VisualStateGroups>
                     <VisualStateGroup x:Name="CommonStates">
                         <VisualState x:Name="Normal" />
@@ -86,7 +86,6 @@
                         <NavigationViewItem Content="Rog Ally" Icon="DockBottom" Tag="RogAllyPage" />
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
-                <NavigationViewItem Content="Start GCM" Icon="Play"  Tag="GCMPage"/>
                 <NavigationViewItemSeparator />
                 <NavigationViewItem Content="additional features" Icon="ViewAll" Tag="Handheld">
                     <NavigationViewItem.MenuItems>

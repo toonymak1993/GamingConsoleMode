@@ -97,43 +97,6 @@ namespace GAMINGCONSOLEMODE
                     {
                     }
                 },
-                //flow launcher
-                new OnboardingStep
-                {
-                    Title = "Flow Launcher (Only Keyboard)",
-                    Description = "GCM uses Flow Launcher for monitor players to access apps and additional functions. This allows you to avoid navigating " +
-                    "the Windows interface and ensures a seamless experience with gcm when you have access to a keyboard. You can install and activate Flow Launcher " +
-                    "using the button below. If you don't need it, feel free to skip this step. " +
-                    "please note that the flow launcher is not available via controller, " +
-                    "there will be an integrated app launcher for the controller later.",
-                    ImagePath = "ms-appx:///Assets/onboarding/flowlauncher.png",
-                    ShowActionButton = true,
-                    ActionButtonText = "Configure Flow Launcher",
-                    ActionButtonCallback = () =>
-                    {
-                        string flowLauncherPath = Path.Combine(currentDirectory, "flowlauncher", "Flow.Launcher.exe");
-
-        if (File.Exists(flowLauncherPath))
-        {
-            try
-            {
-                Process.Start(flowLauncherPath);
-                AppSettings.Save("useflowlauncher", true);
-                Console.WriteLine("Flow Launcher start");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error at start {ex.Message}");
-                AppSettings.Save("useflowlauncher", false);
-            }
-        }
-        else
-        {
-            Console.WriteLine("Flow Launcher not found");
-            AppSettings.Save("useflowlauncher", false);
-        }
-                    }
-                },
                 //Discord
                 new OnboardingStep
                 {
