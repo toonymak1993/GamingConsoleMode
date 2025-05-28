@@ -20,7 +20,7 @@
         </Grid.RowDefinitions>
 
         <!-- Topbar -->
-        <Grid Grid.Row="0" Background="#333" Height="70" VerticalAlignment="Top">
+        <Grid Grid.Row="0" Background="#333" Height="120" VerticalAlignment="Top">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -30,25 +30,109 @@
             <!-- Left Logo -->
             <Image Source="Assets/logo_gcm.png" Height="60" Margin="25,5"/>
 
-            <!-- Right Button with VisualStateManager -->
-            <Button x:Name="MenuButton" Grid.Column="2" Content="START GCM" Margin="10" Background="DarkSlateBlue"  CornerRadius="10" BorderThickness="0"  Foreground="White" Padding="12,6" Click="TopbarButton_Click" Height="50" Width="200">
-                <VisualStateManager.VisualStateGroups>
-                    <VisualStateGroup x:Name="CommonStates">
-                        <VisualState x:Name="Normal" />
-                        <VisualState x:Name="PointerOver">
-                            <VisualState.Setters>
-                                <Setter Target="MenuButton.Background" Value="#FF1E90FF" />
-                            </VisualState.Setters>
-                        </VisualState>
-                        <VisualState x:Name="Pressed">
-                            <VisualState.Setters>
-                                <Setter Target="MenuButton.Background" Value="#FF104E8B" />
-                            </VisualState.Setters>
-                        </VisualState>
-                    </VisualStateGroup>
-                </VisualStateManager.VisualStateGroups>
-            </Button>
+            <!-- Right Panel with Button and ToggleSwitch SIDE-BY-SIDE -->
+            <StackPanel Grid.Column="2"
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Margin="10"
+                Spacing="12">
+                <Button Width="28" Height="28"
+HorizontalAlignment="Center"
+VerticalAlignment="Center"
+Padding="0"
+Background="Transparent"
+BorderBrush="Transparent">
+                    <FontIcon Glyph="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="LightGray" FontSize="20"/>
+                    <Button.Flyout>
+                        <Flyout Placement="Top">
+                            <TextBlock Text="You can choose to let GCM disable the default autostart applications to ensure you're not interrupted. Alternatively, you can manage this yourself by making sure no apps pop up that might interfere with GCM. This setting is optional."
+               Width="250"
+               TextWrapping="WrapWholeWords"
+               Foreground="White"
+               FontSize="12"
+               Padding="5"/>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <!-- ToggleSwitch next to Button -->
+                <Border CornerRadius="10"
+        Padding="10"
+        Margin="10"
+        Width="300"
+        Height="80"
+        BorderBrush="SlateGray"
+        BorderThickness="0"
+                        >
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#FF2D2D30" Offset="0.0"/>
+                            <GradientStop Color="#FF3E3E42" Offset="1.0"/>
+                        </LinearGradientBrush>
+                        
+                    </Border.Background>
+
+                    <!-- ToggleSwitch inside the panel -->
+                    <ToggleSwitch x:Name="UsewinpartStartapps"
+                  Header="Disable autostart apps"
+                  OnContent="On"
+                  OffContent="Off"
+                  VerticalAlignment="Center"
+                  HorizontalAlignment="Center"
+                  Toggled="UsewinpartStartapps_Toggled"/>
+
+                    
+
+                </Border>
+
+
+                <!-- START GCM Button mit mehrfarbigem Verlauf -->
+                <Button x:Name="MenuButton"
+        Content="START GCM"
+        CornerRadius="10"
+        BorderBrush="SlateGray"
+        BorderThickness="2"
+        Foreground="White"
+        Padding="12,6"
+        Click="TopbarButton_Click"
+        Height="50"
+        Width="200"
+                        
+                        >
+
+                    <!-- Farbverlauf als Hintergrund -->
+                    <Button.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#FF2D2D30" Offset="0.0"/>
+                            <GradientStop Color="#FF3E3E42" Offset="1.0"/>
+                            <!-- Turquoise -->
+                        </LinearGradientBrush>
+                    </Button.Background>
+
+                    <!-- Hover- und Klickzustände -->
+                    <VisualStateManager.VisualStateGroups>
+                        <VisualStateGroup x:Name="CommonStates">
+                            <VisualState x:Name="Normal" />
+                            <VisualState x:Name="PointerOver">
+                                <VisualState.Setters>
+                                    <Setter Target="MenuButton.Opacity" Value="0.85"/>
+                                </VisualState.Setters>
+                            </VisualState>
+                            <VisualState x:Name="Pressed">
+                                <VisualState.Setters>
+                                    <Setter Target="MenuButton.Opacity" Value="0.6"/>
+                                </VisualState.Setters>
+                            </VisualState>
+                        </VisualStateGroup>
+                    </VisualStateManager.VisualStateGroups>
+                </Button>
+
+
+
+            </StackPanel>
         </Grid>
+
+
 
         <!-- CommandBar at the top -->
         <CommandBar x:Name="UpdateBar" Grid.Row="1" Background="Green" 

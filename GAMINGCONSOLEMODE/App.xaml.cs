@@ -23,7 +23,8 @@ namespace GAMINGCONSOLEMODE
         public App()
         {
             this.InitializeComponent();
-
+            // Erzwinge dunkles Design auch zur Laufzeit (z. B. falls es zur Laufzeit gewechselt wird)
+            Application.Current.RequestedTheme = ApplicationTheme.Dark;
         }
         public static Window? Window { get; private set; }
         /// <summary>

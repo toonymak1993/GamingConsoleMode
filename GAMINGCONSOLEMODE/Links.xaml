@@ -19,13 +19,11 @@
                            FontWeight="Bold"
                            Margin="0,0,0,10"
                            TextAlignment="Left"/>
-
                 <!-- Description -->
                 <TextBlock Text="This is a list of useful programs that can enhance your gaming console experience.Each tool below provides a unique feature to improve performance, usability, or customization of your gaming setup."
                            FontSize="16"
                            TextAlignment="Left"
                            Margin="0,0,0,20"/>
-                
                 <!-- Expander BoilR -->
                 <Expander x:Name="BoilR" HorizontalAlignment="Stretch" Margin="0,0,0,5">
                 <Expander.Header>

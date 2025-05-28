@@ -45,6 +45,12 @@ using Windows.Foundation;
 using Point = System.Drawing.Point;
 using System.Management;
 using System.IO.Pipes;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
+using Windows.Devices.Bluetooth;
+using Windows.Devices.Enumeration;
+using System.Collections.ObjectModel;
+using InTheHand.Bluetooth;
+using BluetoothDevice = InTheHand.Bluetooth.BluetoothDevice;
 
 
 
@@ -54,8 +60,6 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
-
-       
 
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
@@ -133,7 +137,6 @@ namespace gcmloader
 
         public MainWindow()
         {
-            
             this.InitializeComponent();
             this.Activated += MainWindow_Activated;
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
@@ -143,9 +146,42 @@ namespace gcmloader
             SetupGamepad();
             Start();
             //ASYNC PROZES
-            ShowTaskManager(); //after 10 seconds AND Start Windows Partmode
+            ShowTaskManager();
+            //after 10 seconds AND Start Windows Partmode
             StartAsynctasks();
         }
+
+        private void WifiButton_Click(object sender, RoutedEventArgs e)
+        {
+           gcmloader.MainWindow.MinimizeAllWindows();
+            // Öffnet die WLAN-Einstellungen
+            Process.Start(new ProcessStartInfo("ms-settings:network-wifi") { UseShellExecute = true });
+        }
+
+        private void BluetoothButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Öffnet die Bluetooth-Einstellungen
+            Process.Start(new ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
+        }
+
+        private DispatcherTimer _timer;
+        private TimeSpan _elapsedTime;
+        private void StartClock()
+        {
+            _timer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+
+            _timer.Tick += (sender, e) =>
+            {
+                // Zeigt die aktuelle Uhrzeit im Format HH:mm:ss
+                ClockText.Text = DateTime.Now.ToString("HH:mm:ss");
+            };
+
+            _timer.Start();
+        }
+
         #region overlay window
         private static Process _overlayProcess;
         private static void StartOverlay()
@@ -409,67 +445,6 @@ namespace gcmloader
             }
         }
         #endregion rog ally
-        #region flowlauncher
-
-        private void SendAltSpace()
-        {
-            // Press ALT
-            keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-
-            // Press SPACE
-            keybd_event(VK_SPACE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-            keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-
-            // Release ALT
-            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-
-            Console.WriteLine("ALT + SPACE simulated.");
-        }
-
-
-        public async void flowlauncher()
-        {
-
-            bool launcher = AppSettings.Load<bool>("useflowlauncher");
-
-            if (launcher == true)
-            {
-                // Get the base directory where the app was started from
-                string basePath = AppContext.BaseDirectory;
-
-                // Build full path to the Flow Launcher executable
-                string flowLauncherPath = Path.Combine(basePath, "flowlauncher", "Flow.Launcher.exe");
-
-                // Check if the file exists
-                if (File.Exists(flowLauncherPath))
-                {
-                    try
-                    {
-                        // Start the Flow Launcher executable
-                        Process.Start(new ProcessStartInfo
-                        {
-                            FileName = flowLauncherPath,
-                            UseShellExecute = true
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error starting Flow Launcher: {ex.Message}");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Flow Launcher executable not found.");
-                }
-            }
-            else
-            {
-
-                Console.WriteLine("flowlauncher is off or not set");
-            }
-        }
-
-        #endregion flowlauncher
         public void prestartlist()
         {
             try
@@ -752,7 +727,6 @@ namespace gcmloader
                 Console.WriteLine("Wallpaper error: " + ex.Message);
             }
         }
-
         private string Settwallpaper()
         {
             try
@@ -1090,7 +1064,7 @@ namespace gcmloader
                     bool usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
                     if (usewinpartstartapps == true)
                     {
-                        //First Disable all Autostartapps Not POPUPS
+                        //First restore all Autostartapps Not POPUPS
                         StartupControl.RestoreStartupApps();
                     }
                     else
@@ -1102,57 +1076,61 @@ namespace gcmloader
                 {
 
                 }
-               
 
-                const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-                const string valueName = "Shell";
-                const string newValue = @"explorer.exe";
 
-                // Open registry key for writing
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
+                bool usewinpart = AppSettings.Load<bool>("usewinpart");
+                if (usewinpart == true)
                 {
-                    if (key != null)
+
+
+                }
+                else {
+
+
+                    const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+                    const string valueName = "Shell";
+                    const string newValue = @"explorer.exe";
+
+                    // Open registry key for writing
+                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
                     {
-                        Console.WriteLine("Registry key opened successfully.");
-
-                        KillProcess("explorer.exe");
-
-                        // Modify value in registry key
-                        key.SetValue(valueName, newValue, RegistryValueKind.String);
-                        Console.WriteLine($"Value '{valueName}' has been changed to '{newValue}'.");
-
-                        // Verify the change
-                        string currentValue = key.GetValue(valueName)?.ToString();
-                        if (currentValue == newValue)
+                        if (key != null)
                         {
-                            Console.WriteLine($"Successfully set '{valueName}' to '{newValue}'.");
+                            Console.WriteLine("Registry key opened successfully.");
+
+                            // Modify value in registry key
+                            key.SetValue(valueName, newValue, RegistryValueKind.String);
+                            Console.WriteLine($"Value '{valueName}' has been changed to '{newValue}'.");
+
+                            // Verify the change
+                            string currentValue = key.GetValue(valueName)?.ToString();
+                            if (currentValue == newValue)
+                            {
+                                Console.WriteLine($"Successfully set '{valueName}' to '{newValue}'.");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Failed to set '{valueName}'. Current value: {currentValue}");
+                            }
+
+                            //End Decky Loader process if running
+                            Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
+
+                            if (deckyLoaderProcesses.Length > 0)
+                            {
+                                foreach (var process in deckyLoaderProcesses)
+                                {
+                                    process.Kill();
+                                    process.WaitForExit();
+                                    Console.WriteLine("Decky Loader process killed successfully.");
+                                }
+                            }
+
                         }
                         else
                         {
-                            Console.WriteLine($"Failed to set '{valueName}'. Current value: {currentValue}");
+                            Console.WriteLine($"Unable to open registry key '{keyName}'.");
                         }
-
-                        //End Decky Loader process if running
-                        Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
-                      
-                        if (deckyLoaderProcesses.Length > 0)
-                        {
-                            foreach (var process in deckyLoaderProcesses)
-                            {
-                                process.Kill();
-                                process.WaitForExit();
-                                Console.WriteLine("Decky Loader process killed successfully.");
-                            }
-                        }
-
-                        // Restart explorer.exe
-                        Process.Start("explorer.exe");
-                        Console.WriteLine("explorer.exe restarted.");
-                       
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Unable to open registry key '{keyName}'.");
                     }
                 }
             }
@@ -1291,7 +1269,7 @@ namespace gcmloader
                             if (currentValue == targetExecutable)
                             {
 
-                                KillProcess("explorer.exe");
+                                //KillProcess("explorer.exe");
                             }
                             else
                             {
@@ -1428,6 +1406,24 @@ namespace gcmloader
         }
 
         #region winparts
+
+        private const int SW_MINIMIZE = 6;
+
+        // Import Win32 APIs
+     
+
+        public static void MinimizeAllWindows()
+        {
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (IsWindowVisible(hWnd))
+                {
+                    ShowWindow(hWnd, SW_MINIMIZE);
+                }
+                return true;
+            }, IntPtr.Zero);
+        }
+
         //needed
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
@@ -1437,7 +1433,7 @@ namespace gcmloader
         {
             try
             {
-                bool usewinpart = AppSettings.Load<bool>("usewinpart");
+                bool usewinpart = true;
                 
                 if (usewinpart == true)
                 {
@@ -1459,9 +1455,21 @@ namespace gcmloader
                 }
 
                 Console.WriteLine("Starting explorer.exe...");
-                Process.Start("explorer.exe");
 
-                Thread.Sleep(5000);
+                        // Check if explorer.exe is already running
+                        var explorerRunning = Process.GetProcessesByName("explorer").Any();
+
+                        if (!explorerRunning)
+                        {
+                            // Start explorer.exe if not running
+                            Process.Start("explorer.exe");
+                        }
+                        else
+                        {
+                            
+                        }
+
+                            Thread.Sleep(5000);
                 //setTaskbar();
                 //HideShellWindow("Windows.UI.StartMenu");
                 KillProcess("WidgetBoard");
@@ -1870,6 +1878,7 @@ namespace gcmloader
                 {
                     
                     SettingsVerify();
+                    MinimizeAllWindows();
                     Showwinpart();
                     #region pre install/start check if needed
                     if (IsHandheld() == true)
@@ -1920,9 +1929,7 @@ namespace gcmloader
                     //KillTargetProcess("");
                     #endregion kill distubing process
                     cssloader(); //only check if is installed, than start
-                    flowlauncher();
                     StartLauncher();
-                   
                     // TaskManager //
                     LoadTaskManagerList();
                     InitializeTaskManagerRefresh();
@@ -2070,6 +2077,9 @@ namespace gcmloader
                 TaskManagerPanel.Visibility = Visibility.Visible;
             };
             hideTimer.Start();
+
+            StartClock();
+           
         }
 
 
@@ -2519,68 +2529,22 @@ namespace gcmloader
             string useuac = AppSettings.Load<string>("launcher");
             if(useuac == "steam")
             {
-
+                KillProcess("steam.exe");
             }
             else if (useuac == "playnite")
             {
+                KillProcess("Playnite.FullscreenApp.exe");
+                KillProcess("playnite"); 
             }
             else if (useuac == "otherlauncher")
             {
+              string otherlauncher = AppSettings.Load<string>("customlauncherpath");
+                KillProcess("otherlauncher");
             }
             else if (useuac == "none")
             {
 
             }
-
-                // back to windows 
-                displayfusion("end");
-            CleanupLogging();
-            try
-            {
-                StartupVideo.RenameSteamStartupVideo_End();
-            }
-            catch 
-            { 
-
-            }
-            preaudio(false, true);
-
-            #region Handheld
-            #region Ally
-            if (IsHandheld() == true)
-            {
-                KillTargetProcess("AudioSwitch");
-            }
-            #endregion Ally
-            #endregion Handheld
-            #region uac
-            try
-            {
-                bool useuac = AppSettings.Load<bool>("useuac");
-                if (useuac == true)
-                {
-                    //useuac is aktive 
-                    uac("on");
-                }
-                else if (useuac == false)
-                {
-                    uac("off");
-                }
-            }
-            catch
-            {
-                //error in read
-                AppSettings.Save("useuac", true);
-                uac("on");
-            }
-
-
-            #endregion uac
-            StopOverlay();
-
-            //this.Close();
-            //minimize all
-            MinimizeAllViaShortcut();
         }
         #endregion backtowin
         #endregion shortcuts

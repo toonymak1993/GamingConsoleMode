@@ -84,6 +84,7 @@ namespace GAMINGCONSOLEMODE
                 }
                 #endregion onboarding
             _ = UpdateCheck(this);
+            Updateui();
         }
 
         #region programm start
@@ -352,6 +353,44 @@ namespace GAMINGCONSOLEMODE
     }
 
         #endregion topbarbutton
+
+        #region start gcm
+
+        private void Updateui()
+        {   
+            #region autostartapps
+            try
+            {
+                
+                var usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
+                if (usewinpartstartapps)
+                {
+                    UsewinpartStartapps.IsOn = true;
+                }
+                else
+                {
+                    UsewinpartStartapps.IsOn = false;
+                }
+            }
+            catch { 
+            
+            
+            }
+            #endregion autostartapps
+        }
+        private void UsewinpartStartapps_Toggled(object sender, RoutedEventArgs e)
+        {
+            if(UsewinpartStartapps.IsOn)
+            {
+                AppSettings.Save("usewinpartstartapps", true);
+            }
+            else
+            {
+                AppSettings.Save("usewinpartstartapps", false);
+            }
+               
+        }
+        #endregion start
     }
 
     public static class WindowExtensions

@@ -10,32 +10,55 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Hintergrundbild Layer (unterste Ebene) -->
-        <Image
-            x:Name="BackgroundImage"
-            Stretch="UniformToFill"
-            HorizontalAlignment="Stretch"
-            VerticalAlignment="Stretch"
-            Grid.ColumnSpan="2"/>
+        <!-- Hintergrundbild -->
+        <Image x:Name="BackgroundImage"
+               Stretch="UniformToFill"
+               HorizontalAlignment="Stretch"
+               VerticalAlignment="Stretch"
+               Grid.ColumnSpan="2"/>
 
-        <!-- Task Manager Panel (mittlere Ebene) -->
-        <StackPanel
-            x:Name="TaskManagerPanel"
-            Orientation="Vertical"
-            Background="#1E1E1E"
-            HorizontalAlignment="Left"
-            VerticalAlignment="Stretch"
-            Width="auto"
-            Margin="0"
-            Visibility="Collapsed" />
+        <!-- Task Manager Panel -->
+        <StackPanel x:Name="TaskManagerPanel"
+                    Orientation="Vertical"
+                    Background="#1E1E1E"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Stretch"
+                    Width="auto"
+                    Margin="0"
+                    Visibility="Collapsed" />
 
-        <!-- Logo Layer (oberste Ebene) -->
-        <Image
-            Source="Assets/logo_gcm.png"
-            Width="200"
-            Height="200"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            Grid.Column="1"/>
+        <!-- Logo -->
+        <Image Source="Assets/logo_gcm.png"
+               Width="200"
+               Height="200"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Center"
+               Grid.Column="1"/>
+
+        <!-- Info-Leiste mit WLAN, Bluetooth, Uhrzeit -->
+        <Border CornerRadius="10"
+                Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="20"
+                Padding="10"
+                Grid.ColumnSpan="2">
+
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+
+                <!-- WiFi Button -->
+                <Button Content="📶" Width="40" Height="40" Click="WifiButton_Click"/>
+
+                <!-- Bluetooth Button -->
+                <Button Content="🟦" Width="40" Height="40" Click="BluetoothButton_Click"/>
+
+                <!-- Clock -->
+                <TextBlock x:Name="ClockText"
+                           FontSize="24"
+                           FontWeight="SemiBold"
+                           Foreground="White"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
