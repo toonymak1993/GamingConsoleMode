@@ -8,49 +8,31 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Diagnostics;
 using System.IO;
-using Discord;
 using System.Text;
 using Discord.WebSocket;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Metadata;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml;
 using NAudio.CoreAudioApi;
-using Windows.Graphics.Display;
 using Microsoft.UI;
-using Windows.Media.Protection.PlayReady;
 using System.Data;
 using System.Collections.Generic;
 using System.Text.Json;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Microsoft.UI.Windowing;
-using System.Xml.Linq;
 using Windows.System;
 using SharpDX.XInput;
-using System.Timers;
 using Button = Microsoft.UI.Xaml.Controls.Button;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Media;
-using WinRT.Interop;
-using System.Windows.Input;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Windows.Foundation;
 using Point = System.Drawing.Point;
-using System.Management;
 using System.IO.Pipes;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
-using Windows.Devices.Bluetooth;
-using Windows.Devices.Enumeration;
-using System.Collections.ObjectModel;
-using InTheHand.Bluetooth;
-using BluetoothDevice = InTheHand.Bluetooth.BluetoothDevice;
+using Application = Microsoft.UI.Xaml.Application;
 
 
 
@@ -60,6 +42,14 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+
+        private int _selectedCardIndex = 0;
+        private int _selectedButtonIndex = 0;
+        private DispatcherTimer _taskRefreshTimer;
+
+
+
+
 
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
@@ -88,6 +78,34 @@ namespace gcmloader
         private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
 
         #region TaskManager
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        private const uint WM_CLOSE = 0x0010;
+
+
+        private const long WS_EX_TOOLWINDOW = 0x00000080L;
+        private const long WS_EX_APPWINDOW = 0x00040000L;
+
+        private bool IsAltTabWindow(IntPtr hwnd)
+        {
+            if (!IsWindowVisible(hwnd)) return false;
+
+            IntPtr owner = GetWindow(hwnd, GW_OWNER);
+            if (owner != IntPtr.Zero) return false;
+
+            long exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+
+            if ((exStyle & WS_EX_TOOLWINDOW) != 0) return false;
+            if ((exStyle & WS_EX_APPWINDOW) != 0) return true;
+
+            string title = GetWindowTitle(hwnd);
+            return !string.IsNullOrWhiteSpace(title);
+        }
+
+
+
 
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -140,8 +158,6 @@ namespace gcmloader
             this.InitializeComponent();
             this.Activated += MainWindow_Activated;
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
-            this.Content.KeyDown += MainWindow_KeyDown;
-            this.Content.KeyUp += MainWindow_KeyUp;
             LoadShortcutsFromSettings();
             SetupGamepad();
             Start();
@@ -149,6 +165,7 @@ namespace gcmloader
             ShowTaskManager();
             //after 10 seconds AND Start Windows Partmode
             StartAsynctasks();
+            
         }
 
         private void WifiButton_Click(object sender, RoutedEventArgs e)
@@ -1987,8 +2004,6 @@ namespace gcmloader
         }
         #endregion start
         #region TaskManager
-        
-
 
         public bool TaskManagerVisibility;
 
@@ -2060,7 +2075,6 @@ namespace gcmloader
                 }
             }
             catch { }
-
         }
 
         private void ShowTaskManager()
@@ -2072,109 +2086,314 @@ namespace gcmloader
             };
             hideTimer.Tick += (s, e) =>
             {
-                // Stops the timer and shows the StackPanel
                 hideTimer.Stop();
-                TaskManagerPanel.Visibility = Visibility.Visible;
-            };
-            hideTimer.Start();
+                ProgramCardPanel.Visibility = Visibility.Visible;
+                LoadTaskManagerList();
 
+                // ⏳ Wichtig: kleiner Delay mit DispatcherTimer
+                var focusTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(100)
+                };
+
+                focusTimer.Tick += (s2, e2) =>
+                {
+                    focusTimer.Stop();
+
+                    var firstCard = ProgramCardPanel.Children.OfType<StackPanel>().FirstOrDefault();
+                    if (firstCard?.Children.Count >= 3 && firstCard.Children[2] is StackPanel buttons)
+                    {
+                        if (buttons.Children[0] is Button launchButton)
+                        {
+                            Debug.WriteLine("→ Setze Fokus auf Launch-Button");
+                            launchButton.Focus(FocusState.Programmatic);
+                        }
+                    }
+                };
+
+                focusTimer.Start();
+                StartAutoTaskRefresh();
+
+            };
+
+            hideTimer.Start();
             StartClock();
-           
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _selectedCardIndex = 0;
+                HighlightSelectedCard(); // beim Öffnen markieren
+            });
+
         }
 
+        private void StartAutoTaskRefresh()
+        {
+            if (_taskRefreshTimer != null)
+                return;
+
+            _taskRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(2)
+            };
+
+            _taskRefreshTimer.Tick += (s, e) =>
+            {
+                if (IsWindowInForeground())
+                {
+                    LoadTaskManagerList();
+                }
+            };
+
+            _taskRefreshTimer.Start();
+        }
 
 
         // ====================================================================
         // Loads the list of applications
         // ====================================================================
+
+        private static readonly string[] _excludedTitles = new[]
+        {
+    "Windows® Operating System",
+    "System Microsoft® Windows",
+    "Windows®-Betriebssystem",
+    "Windows Operating System",
+    "Windows-Betriebssystem",
+    "ApplicationFrameHost",
+    "ShellExperienceHost",
+    "StartMenuExperienceHost"
+};
+
+        private static readonly Dictionary<string, string> _nameOverrides = new()
+{
+    { "Steam Client WebHelper", "Steam" },
+    { "ApplicationFrameHost", "UWP Host" }
+};
+
         private void LoadTaskManagerList()
         {
-            if (TaskManagerPanel == null) return;
+            if (ProgramCardPanel == null || ProgramScrollViewer == null)
+                return;
 
-            TaskManagerPanel.Children.Clear();
-            _rows.Clear();
+            // 📌 Scrollposition merken
+            double scrollOffset = ProgramScrollViewer.HorizontalOffset;
 
-            // Enumerates windows (P/Invoke already declared elsewhere)
+            // 🔁 Merke aktuellen Index
+            int lastIndex = _selectedCardIndex;
+
+            ProgramCardPanel.Children.Clear();
+
             EnumWindows((hWnd, lParam) =>
             {
-                if (!IsWindowVisible(hWnd)) return true;
-
-                // Ensure it is a main window (no owner and has a title)
-                if (GetWindow(hWnd, GW_OWNER) != IntPtr.Zero || string.IsNullOrWhiteSpace(GetWindowTitle(hWnd)))
-                {
+                if (!IsAltTabWindow(hWnd))
                     return true;
-                }
 
-                // Retrieve the process
-                uint pid;
-                GetWindowThreadProcessId(hWnd, out pid);
-
+                GetWindowThreadProcessId(hWnd, out uint pid);
                 Process p;
-                try
-                {
-                    p = Process.GetProcessById((int)pid);
-                }
-                catch
-                {
-                    return true;
-                }
+                try { p = Process.GetProcessById((int)pid); } catch { return true; }
 
-                // Ignore if it's the current process
                 if (pid == (uint)Process.GetCurrentProcess().Id)
                     return true;
 
-                // Program name
                 string productName;
-                try
-                {
-                    productName = p.MainModule?.FileVersionInfo?.ProductName;
-                }
-                catch
-                {
-                    productName = null;
-                }
-                if (string.IsNullOrWhiteSpace(productName))
-                    productName = p.ProcessName;
+                try { productName = p.MainModule?.FileVersionInfo?.ProductName; } catch { productName = null; }
+                if (string.IsNullOrWhiteSpace(productName)) productName = p.ProcessName;
 
-                // Exclusions
-                if (productName?.Contains("Windows", StringComparison.OrdinalIgnoreCase) == true
-                    || p.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
-                {
+                if (_excludedTitles.Any(t => productName?.Contains(t, StringComparison.OrdinalIgnoreCase) == true))
                     return true;
-                }
-                if (productName?.Contains("ASUS Hotplug Controller", StringComparison.OrdinalIgnoreCase) == true
-                   || p.ProcessName.Equals("ASUS Hotplug Controller", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-                if (productName?.Contains("Steam Client WebHelper", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    productName = "Steam";
-                }
-                if (productName?.Contains("GAMECONSOLEMODE", StringComparison.OrdinalIgnoreCase) == true
-                    || productName?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    return true;
-                }
 
-                // Builds the row
-                var row = CreateProgramRow(productName, p, hWnd);
-                TaskManagerPanel.Children.Add(row.RowPanel);
-                _rows.Add(row);
+                if (_nameOverrides.TryGetValue(productName, out var overrideName))
+                    productName = overrideName;
+
+                if (productName?.Contains("GAMECONSOLEMODE", StringComparison.OrdinalIgnoreCase) == true)
+                    return true;
+
+                AddProgramCard(productName, p.MainModule?.FileName ?? "", p, hWnd);
 
                 return true;
             }, IntPtr.Zero);
 
-            if (_rows.Count > 0)
-            {
-                if (_selectedRow >= _rows.Count)
-                    _selectedRow = _rows.Count - 1;
-                if (_selectedCol > 1)
-                    _selectedCol = 0;
+            // 🔁 Index zurücksetzen
+            if (ProgramCardPanel.Children.Count == 0)
+                _selectedCardIndex = 0;
+            else if (lastIndex >= ProgramCardPanel.Children.Count)
+                _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
+            else
+                _selectedCardIndex = lastIndex;
 
-                UpdateRowSelection();
+            // 🟦 Fokus wiederherstellen – ohne Scrollsprung
+            HighlightSelectedCard(skipScroll: true);
+
+            // 🔄 Scrollposition direkt setzen (ohne Animation, kein Delay)
+            ProgramScrollViewer.ChangeView(scrollOffset, null, null, true);
+        }
+
+
+
+
+
+
+
+        private void AddProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
+        {
+            var icon = GetAppIconAsBitmapImage(exePath);
+
+            // Programmsymbol
+            var image = new Microsoft.UI.Xaml.Controls.Image
+            {
+                Source = icon,
+                Width = 80,
+                Height = 80,
+                Margin = new Thickness(0, 10, 0, 10),
+                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center
+            };
+
+            // Titeltext
+            var title = new Microsoft.UI.Xaml.Controls.TextBlock
+            {
+                Text = name,
+                FontSize = 26,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            };
+
+            // Hinweistext für Controller-Steuerung
+            var hint = new Microsoft.UI.Xaml.Controls.TextBlock
+            {
+                Text = "Press A to Start, B to Close",
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Colors.Gray),
+                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            // Inhalt der Karte
+            var cardContent = new StackPanel
+            {
+                Width = 300,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 30, 30, 30)),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(20),
+                Children = { title, image, hint }
+            };
+
+            // Border für visuelles Highlight
+            var border = new Border
+            {
+                BorderThickness = new Thickness(2),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)), // Unsichtbar, bis selektiert
+                CornerRadius = new CornerRadius(15),
+                Margin = new Thickness(20),
+                Child = cardContent,
+                Tag = (proc, hwnd) // WICHTIG: Prozess + Fensterhandle speichern
+            };
+
+            ProgramCardPanel.Children.Add(border);
+        }
+
+
+        private void HighlightSelectedCard(bool skipScroll = false)
+        {
+            for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
+            {
+                if (ProgramCardPanel.Children[i] is Border border)
+                {
+                    border.BorderBrush = new SolidColorBrush(i == _selectedCardIndex
+                        ? Windows.UI.Color.FromArgb(255, 30, 144, 255) // DodgerBlue
+                        : Windows.UI.Color.FromArgb(0, 0, 0, 0));       // Transparent
+                }
+            }
+
+            // Optionales Scrollen zu ausgewählter Karte
+            if (!skipScroll)
+            {
+                ScrollToCardAnimated(ProgramCardPanel.Children[_selectedCardIndex]);
             }
         }
+
+
+        private void ScrollToCardAnimated(UIElement card)
+        {
+            card.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            var transform = card.TransformToVisual(ProgramCardPanel);
+            var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+
+            double cardX = position.X;
+            double cardWidth = card.DesiredSize.Width;
+
+            double targetOffset = cardX - (ProgramScrollViewer.ActualWidth - cardWidth) / 2;
+
+            // Clamp innerhalb des Scrollbereichs
+            double maxOffset = ProgramScrollViewer.ScrollableWidth;
+            targetOffset = Math.Max(0, Math.Min(targetOffset, maxOffset));
+
+            // Scrollen mit Animation (float!)
+            _ = ProgramScrollViewer.ChangeView((float)targetOffset, null, null, false);
+        }
+
+
+
+
+
+
+
+
+
+
+        private void KillApp(Process proc, IntPtr hwnd)
+        {
+            try
+            {
+                if (proc.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Nur das Fenster schließen, nicht den Prozess
+                    PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                }
+                else
+                {
+                    proc.Kill();
+                }
+            }
+            catch { }
+
+            LoadTaskManagerList();
+        }
+
+
+
+        private BitmapImage GetAppIconAsBitmapImage(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+                return null;
+
+            try
+            {
+                using (var icon = Icon.ExtractAssociatedIcon(exePath))
+                {
+                    using (var bmp = icon.ToBitmap())
+                    using (var ms = new MemoryStream())
+                    {
+                        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                        ms.Seek(0, SeekOrigin.Begin);
+
+                        var bmpImage = new BitmapImage();
+                        bmpImage.SetSource(ms.AsRandomAccessStream());
+                        return bmpImage;
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+
+
+
         private const uint GW_OWNER = 4;
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -2197,194 +2416,6 @@ namespace gcmloader
 
 
 
-
-        private ProgramRow CreateProgramRow(string programName, Process proc, IntPtr hwnd)
-        {
-            double fontSize = 24;
-            int buttonWidth = 120;
-            int rowHeight = 80;
-            var margin = new Thickness(0);
-            var buttonmargin = new Thickness(10);
-
-            // Creation of the row
-            var rowPanel = new StackPanel
-            {
-                Orientation = Microsoft.UI.Xaml.Controls.Orientation.Horizontal,
-                Margin = margin,
-                Height = rowHeight
-            };
-
-            var nameText = new TextBlock
-            {
-                Text = programName,
-                FontSize = fontSize,
-                Width = 400,
-                Margin = new Thickness(20, 0, 20, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            // Base color (very dark) + white text
-            var baseGrey = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 30, 30, 30));
-            var baseText = new SolidColorBrush(Colors.White);
-
-            // Color when selected = lighter gray + black text
-            var highlightGrey = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 210, 210, 210));
-            var highlightText = new SolidColorBrush(Colors.Black);
-
-            var focusButton = new Button
-            {
-                Content = "Show",
-                FontSize = fontSize,
-                Width = buttonWidth,
-                Margin = buttonmargin,
-                Background = baseGrey,
-                Foreground = baseText,
-                Visibility = Visibility.Collapsed
-            };
-            focusButton.Click += (s, e) => SetForegroundWindow(hwnd);
-
-            var killButton = new Button
-            {
-                Content = "Close",
-                FontSize = fontSize,
-                Width = buttonWidth,
-                Margin = margin,
-                Background = baseGrey,
-                Foreground = baseText,
-                Visibility = Visibility.Collapsed
-            };
-            killButton.Click += (s, e) =>
-            {
-                try { proc.Kill(); } catch { }
-                LoadTaskManagerList();
-            };
-
-            rowPanel.Children.Add(nameText);
-            rowPanel.Children.Add(focusButton);
-            rowPanel.Children.Add(killButton);
-
-            return new ProgramRow
-            {
-                RowPanel = rowPanel,
-                NameText = nameText,
-                FocusButton = focusButton,
-                KillButton = killButton,
-                Hwnd = hwnd,
-                Proc = proc
-            };
-        }
-
-        private void UpdateRowSelection()
-        {
-            // Base color (very dark) + white text
-            var baseGrey = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 30, 30, 30));
-            var baseText = new SolidColorBrush(Colors.White);
-
-            // Color when selected = lighter gray + black text
-            var highlightGrey = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 210, 210, 210));
-            var highlightText = new SolidColorBrush(Colors.Black);
-
-            for (int i = 0; i < _rows.Count; i++)
-            {
-                var row = _rows[i];
-                if (i == _selectedRow)
-                {
-                    // Apply a lighter background if you wish to color the entire selected row
-                    row.RowPanel.Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 50, 50, 50));
-
-                    // Show the buttons
-                    row.FocusButton.Visibility = Visibility.Visible;
-                    row.KillButton.Visibility = Visibility.Visible;
-
-                    // Standard color (very dark gray + white text)
-                    row.FocusButton.Background = baseGrey;
-                    row.FocusButton.Foreground = baseText;
-                    row.KillButton.Background = baseGrey;
-                    row.KillButton.Foreground = baseText;
-
-                    // Highlight the selected button (Focus or Kill)
-                    if (_selectedCol == 0)
-                    {
-                        row.FocusButton.Background = highlightGrey;
-                        row.FocusButton.Foreground = highlightText;
-                    }
-                    else
-                    {
-                        row.KillButton.Background = highlightGrey;
-                        row.KillButton.Foreground = highlightText;
-                    }
-                }
-                else
-                {
-                    // Non-selected row:
-                    row.RowPanel.Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 30, 30, 30));
-
-                    // Hide the buttons
-                    row.FocusButton.Visibility = Visibility.Collapsed;
-                    row.KillButton.Visibility = Visibility.Collapsed;
-
-                    // Revert to the base color (dark gray + white text)
-                    row.FocusButton.Background = baseGrey;
-                    row.FocusButton.Foreground = baseText;
-                    row.KillButton.Background = baseGrey;
-                    row.KillButton.Foreground = baseText;
-                }
-            }
-        }
-
-        private void MoveRow(int delta)
-        {
-            if (IsWindowInForeground()) // Checks if the window is in the foreground
-            {
-                PlayNavigationSound();
-                if (_rows.Count == 0) return;
-
-                _selectedRow += delta;
-                if (_selectedRow < 0)
-                    _selectedRow = _rows.Count - 1;
-                else if (_selectedRow >= _rows.Count)
-                    _selectedRow = 0;
-
-                UpdateRowSelection();
-            }
-        }
-
-        private void MoveCol(int delta)
-        {
-            if (IsWindowInForeground()) // Checks if the window is in the foreground
-            {
-                PlayNavigationSound();
-                _selectedCol += delta;
-                if (_selectedCol < 0) _selectedCol = 1;
-                else if (_selectedCol > 1) _selectedCol = 0;
-
-                UpdateRowSelection();
-            }
-        }
-
-
-        private void ExecuteSelectedAction()
-        {
-            if (IsWindowInForeground()) // Checks if the window is in the foreground
-            {
-                PlayActivationSound();
-                if (_selectedRow < 0 || _selectedRow >= _rows.Count) return;
-
-                var row = _rows[_selectedRow];
-                if (_selectedCol == 0)
-                {
-                    // Focus
-                    ShowWindow(row.Hwnd, SW_RESTORE);
-                    SetForegroundWindow(row.Hwnd);
-                }
-                else
-                {
-                    // Kill
-                    try { row.Proc.Kill(); } catch { }
-                    LoadTaskManagerList();
-                }
-            }
-        }
 
         private void PlayNavigationSound()
         {
@@ -2797,12 +2828,6 @@ namespace gcmloader
             var gamepad = state.Gamepad;
             var currentButtons = gamepad.Buttons;
 
-            if ((currentButtons & GamepadButtonFlags.DPadDown) != 0 && (_lastButtonState & GamepadButtonFlags.DPadDown) == 0) MoveRow(1);
-            else if ((currentButtons & GamepadButtonFlags.DPadUp) != 0 && (_lastButtonState & GamepadButtonFlags.DPadUp) == 0) MoveRow(-1);
-            else if ((currentButtons & GamepadButtonFlags.DPadLeft) != 0 && (_lastButtonState & GamepadButtonFlags.DPadLeft) == 0) MoveCol(-1);
-            else if ((currentButtons & GamepadButtonFlags.DPadRight) != 0 && (_lastButtonState & GamepadButtonFlags.DPadRight) == 0) MoveCol(1);
-            else if ((currentButtons & GamepadButtonFlags.A) != 0 && (_lastButtonState & GamepadButtonFlags.A) == 0) ExecuteSelectedAction();
- 
             foreach (var pair in _activeShortcuts)
             {
                 var key1 = pair.Key.Item1;
@@ -2841,41 +2866,138 @@ namespace gcmloader
                 }
             }
 
+            if (IsWindowInForeground()) // only when taskmanager visible
+            {
+                // DPad Navigation
+                if ((currentButtons & GamepadButtonFlags.DPadRight) != 0 && (_lastButtonState & GamepadButtonFlags.DPadRight) == 0)
+                {
+                    _selectedCardIndex++;
+                    if (_selectedCardIndex >= ProgramCardPanel.Children.Count)
+                        _selectedCardIndex = 0;
+                    PlayNavigationSound();
+                    HighlightSelectedCard();
+                }
+                else if ((currentButtons & GamepadButtonFlags.DPadLeft) != 0 && (_lastButtonState & GamepadButtonFlags.DPadLeft) == 0)
+                {
+                    _selectedCardIndex--;
+                    if (_selectedCardIndex < 0)
+                        _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
+                    PlayNavigationSound();
+                    HighlightSelectedCard();
+                }
+
+                // A = Start
+                if ((currentButtons & GamepadButtonFlags.A) != 0 && (_lastButtonState & GamepadButtonFlags.A) == 0)
+                {
+                    TriggerCardAction(_selectedCardIndex, true);
+                }
+
+                // B = Close
+                if ((currentButtons & GamepadButtonFlags.B) != 0 && (_lastButtonState & GamepadButtonFlags.B) == 0)
+                {
+                    TriggerCardAction(_selectedCardIndex, false);
+                }
+
+                // DPad Up = vorheriger Button (z. B. Close → Start)
+                if ((currentButtons & GamepadButtonFlags.DPadUp) != 0 && (_lastButtonState & GamepadButtonFlags.DPadUp) == 0)
+                {
+                    _selectedButtonIndex = 0;
+                    HighlightSelectedCard();
+                }
+
+                // DPad Down = nächster Button (z. B. Start → Close)
+                else if ((currentButtons & GamepadButtonFlags.DPadDown) != 0 && (_lastButtonState & GamepadButtonFlags.DPadDown) == 0)
+                {
+                    _selectedButtonIndex = 1;
+                    HighlightSelectedCard();
+                }
+            }
+
+
+         
             _lastButtonState = currentButtons;
+
         }
+
+        private void FocusCard(int index)
+        {
+            if (ProgramCardPanel.Children.Count == 0) return;
+
+            for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
+            {
+                if (ProgramCardPanel.Children[i] is StackPanel card)
+                {
+                    // Standardfarbe
+                    card.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 30, 30, 30));
+
+                    // Fokussiert? → Farbe ändern
+                    if (i == index)
+                    {
+                        card.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 70, 70, 70));
+
+                        if (card.Children[2] is StackPanel buttons &&
+                            buttons.Children[0] is Button launchButton)
+                        {
+                            launchButton.Focus(FocusState.Programmatic);
+                        }
+                    }
+                }
+            }
+        }
+
+
+        private void TriggerCardAction(int index, bool launch)
+        {
+            if (index < 0 || index >= ProgramCardPanel.Children.Count)
+                return;
+
+            if (ProgramCardPanel.Children[index] is Border border && border.Tag is ValueTuple<Process, IntPtr> tuple)
+            {
+                var (proc, hwnd) = tuple;
+
+                if (launch)
+                {
+                    // Bring window to front
+                    ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
+                }
+                else
+                {
+                    try
+                    {
+                        // Sonderfall: explorer.exe nur das Fenster schließen, nicht den Prozess
+                        if (proc.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
+                        {
+                            PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                        }
+                        else
+                        {
+                            proc.Kill(); // Andere Prozesse normal beenden
+                        }
+                    }
+                    catch { }
+
+                    LoadTaskManagerList(); // Liste neu laden
+                }
+            }
+        }
+
+
+
+
+
+
+
+        private void LaunchApp(Process proc, IntPtr hwnd)
+        {
+            ShowWindow(hwnd, SW_RESTORE);
+            SetForegroundWindow(hwnd);
+        }
+
+
+
 
         private bool _altPressed = false;
-
-        private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
-        {
-            // Handle other keys
-            switch (e.Key)
-            {
-                case VirtualKey.Down:
-                    MoveRow(1);
-                    break;
-                case VirtualKey.Up:
-                    MoveRow(-1);
-                    break;
-                case VirtualKey.Left:
-                    MoveCol(-1);
-                    break;
-                case VirtualKey.Right:
-                    MoveCol(1);
-                    break;
-                case VirtualKey.Enter:
-                    ExecuteSelectedAction();
-                    break;
-            }
-        }
-
-        private void MainWindow_KeyUp(object sender, KeyRoutedEventArgs e)
-        {
-            if (e.Key == VirtualKey.Menu) // ALT released
-            {
-                _altPressed = false;
-            }
-        }
 
 
         private void BringWindowToForeground()
