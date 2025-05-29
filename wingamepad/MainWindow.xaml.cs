@@ -197,7 +197,7 @@ namespace wingamepad
         {
             try
             {
-                string loaderPath = @"C:\\Program Files (x86)\\GCMcrew\\GCM\\GCM\\gcmloader.exe";
+                string loaderPath = @"C:\\Program Files (x86)\\GCMcrew\\GCM\\GCM\\gcmloader\\gcmloader.exe";
 
                 Log($"Executing winmodechange: launching {loaderPath}");
 

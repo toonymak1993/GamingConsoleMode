@@ -31,6 +31,7 @@
     <None Remove="Assets\activation.wav" />
     <None Remove="Assets\GCM_Startup_Video.webm" />
     <None Remove="Assets\navigation.wav" />
+    <None Remove="nircmd.exe" />
     <None Remove="Settings.xml" />
   </ItemGroup>
 
@@ -66,6 +67,9 @@
     <EmbeddedResource Include="Assets\xbox-controller.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="nircmd.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Settings.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -87,6 +91,7 @@
     <PackageReference Include="ClickableTransparentOverlay" Version="11.1.0" />
     <PackageReference Include="Discord.Net" Version="3.17.1" />
     <PackageReference Include="Discord.Net.Core" Version="3.17.1" />
+    <PackageReference Include="InTheHand.BluetoothLE" Version="4.0.41" />
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.106">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

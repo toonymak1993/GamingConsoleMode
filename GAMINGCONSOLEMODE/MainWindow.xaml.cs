@@ -1,4 +1,4 @@
-using Microsoft.UI;
+Ôªøusing Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -84,6 +84,7 @@ namespace GAMINGCONSOLEMODE
                 }
                 #endregion onboarding
             _ = UpdateCheck(this);
+            Updateui();
         }
 
         #region programm start
@@ -223,12 +224,12 @@ namespace GAMINGCONSOLEMODE
                 };
                 Process.Start(startInfo);
 
-                // Schlieﬂe die aktuelle Anwendung
+                // Schlie√üe die aktuelle Anwendung
                 Application.Current.Exit();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erreur lors de l'exÈcution de la mise ‡ jour : {ex.Message}");
+                Console.WriteLine($"Erreur lors de l'ex√©cution de la mise √† jour : {ex.Message}");
             }
         }
 
@@ -336,7 +337,7 @@ namespace GAMINGCONSOLEMODE
 
         #region topbarbutton
 
-        static string exeFolder()
+        private static string exeFolder()
         {
             string exePath = Assembly.GetExecutingAssembly().Location;
             string folderPath = Path.GetDirectoryName(exePath);
@@ -345,13 +346,63 @@ namespace GAMINGCONSOLEMODE
 
         private void TopbarButton_Click(object sender, RoutedEventArgs e)
         {
-           
+            // Navigiere zum Unterordner "gcmloader" und starte die EXE darin
+            string fullExePath = Path.Combine(exeFolder(), "gcmloader", "gcmloader.exe");
 
-            Process.Start(new ProcessStartInfo(Path.Combine(exeFolder(), "gcmloader.exe")));
-        
-    }
+            if (File.Exists(fullExePath))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = fullExePath,
+                    UseShellExecute = true
+                });
+            }
+            else
+            {
+                Debug.WriteLine($"‚ùå Datei nicht gefunden: {fullExePath}");
+            }
+        }
+
 
         #endregion topbarbutton
+
+        #region start gcm
+
+        private void Updateui()
+        {   
+            #region autostartapps
+            try
+            {
+                
+                var usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
+                if (usewinpartstartapps)
+                {
+                    UsewinpartStartapps.IsOn = true;
+                }
+                else
+                {
+                    UsewinpartStartapps.IsOn = false;
+                }
+            }
+            catch { 
+            
+            
+            }
+            #endregion autostartapps
+        }
+        private void UsewinpartStartapps_Toggled(object sender, RoutedEventArgs e)
+        {
+            if(UsewinpartStartapps.IsOn)
+            {
+                AppSettings.Save("usewinpartstartapps", true);
+            }
+            else
+            {
+                AppSettings.Save("usewinpartstartapps", false);
+            }
+               
+        }
+        #endregion start
     }
 
     public static class WindowExtensions
@@ -387,7 +438,7 @@ namespace GAMINGCONSOLEMODE
 
             child.Activate();
 
-            // Kurze Verzˆgerung, damit Fensterhandle g¸ltig und sichtbar ist
+            // Kurze Verz√∂gerung, damit Fensterhandle g√ºltig und sichtbar ist
             await Task.Delay(100);
             ShowWindow(hwndChild, SW_SHOWNORMAL);
             SetForegroundWindow(hwndChild);

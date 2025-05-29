@@ -13,12 +13,12 @@
     <ScrollViewer HorizontalScrollBarVisibility="Auto"
                   VerticalScrollBarVisibility="Auto"
                   ZoomMode="Disabled">
-
+        
         <Grid Padding="40">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
@@ -35,7 +35,7 @@
                      Margin="0,0,0,20"
                      HorizontalAlignment="Center"
                      MaxWidth="600"
-                     MaxHeight="400">
+                     MaxHeight="250">
                 <!-- Border wraps the image and applies corner radius -->
                 <Border CornerRadius="30"
                         >

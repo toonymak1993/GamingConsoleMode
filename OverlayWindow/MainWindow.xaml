@@ -42,8 +42,5 @@
 
         </StackPanel>
 
-        <!-- Schließen-Button oben rechts -->
-        <Button Content="X" Width="42" Height="35" FontSize="18" FontWeight="Bold" Background="#FF4444" Foreground="White" Cursor="Hand"
-                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,20,18,0" Click="Button_Click"/>
     </Grid>
 </Window>
