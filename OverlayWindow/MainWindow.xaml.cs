@@ -70,10 +70,7 @@ namespace OverlayWindow
             }
         }
 
-        private void Button_Click(object sender, RoutedEventArgs e)
-        {
-            this.Close();
-        }
+       
 
         private void StartPipeServer()
         {

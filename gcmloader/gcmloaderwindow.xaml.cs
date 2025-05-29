@@ -33,6 +33,7 @@ using System.Media;
 using Point = System.Drawing.Point;
 using System.IO.Pipes;
 using Application = Microsoft.UI.Xaml.Application;
+using Image = Microsoft.UI.Xaml.Controls.Image;
 
 
 
@@ -156,6 +157,9 @@ namespace gcmloader
         public MainWindow()
         {
             this.InitializeComponent();
+            // Catch unhandled exceptions
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+            Application.Current.UnhandledException += CurrentApp_UnhandledException;
             this.Activated += MainWindow_Activated;
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
             LoadShortcutsFromSettings();
@@ -165,9 +169,112 @@ namespace gcmloader
             ShowTaskManager();
             //after 10 seconds AND Start Windows Partmode
             StartAsynctasks();
-            
         }
 
+        #region mainwindow design
+        #region mini launcher
+        //AssignLauncherApp(0, @"C:\Users\luis\AppData\Local\Playnite\Playnite.DesktopApp.exe");
+        private void AssignLauncherApp(int index, string exePath, string optionalIconPath = null)
+        {
+            // 🔍 Ziel-Element finden
+            Border tile = index switch
+            {
+                0 => LauncherTile0,
+                1 => LauncherTile1,
+                2 => LauncherTile2,
+                3 => LauncherTile3,
+                4 => LauncherTile4,
+                _ => null
+            };
+
+            if (tile == null || !File.Exists(exePath))
+                return;
+
+            try
+            {
+                BitmapImage bitmap = null;
+
+                // 🎯 1. Versuche benutzerdefiniertes Icon zu laden
+                if (!string.IsNullOrEmpty(optionalIconPath) && File.Exists(optionalIconPath))
+                {
+                    bitmap = new BitmapImage(new Uri(optionalIconPath, UriKind.Absolute));
+                }
+                else
+                {
+                    // 🧩 2. Fallback: Icon aus .exe extrahieren
+                    var icon = Icon.ExtractAssociatedIcon(exePath);
+                    if (icon != null)
+                    {
+                        using (var ms = new MemoryStream())
+                        {
+                            icon.ToBitmap().Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                            ms.Position = 0;
+
+                            bitmap = new BitmapImage();
+                            bitmap.SetSource(ms.AsRandomAccessStream());
+                        }
+                    }
+                }
+
+                if (bitmap != null)
+                {
+                    // 🖼️ Image erzeugen
+                    var image = new Image
+                    {
+                        Source = bitmap,
+                        Width = 64,
+                        Height = 64,
+                        HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+
+                    // 🧼 Kachelinhalt setzen
+                    tile.Child = image;
+
+                    // 🖱️ Klick zum Starten
+                    tile.PointerPressed += (s, e) =>
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo
+                            {
+                                FileName = exePath,
+                                UseShellExecute = true
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"❌ Failed to launch {exePath}: {ex.Message}");
+                        }
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"❌ Icon handling failed: {ex.Message}");
+            }
+        }
+        #endregion mini launcher
+
+        private void CurrentDomain_UnhandledException(object sender, System.UnhandledExceptionEventArgs e)
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "crash.log");
+            File.AppendAllText(path, $"[DOMAIN EXCEPTION] {DateTime.Now}: {e.ExceptionObject}\n");
+
+            // Öffne crash.log automatisch
+            Process.Start("notepad.exe", path);
+        }
+
+        private void CurrentApp_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "crash.log");
+            File.AppendAllText(path, $"[UI EXCEPTION] {DateTime.Now}: {e.Message}\n");
+
+            // Öffne crash.log automatisch
+            Process.Start("notepad.exe", path);
+
+            e.Handled = true; // verhindert App-Absturz (optional)
+        }
         private void WifiButton_Click(object sender, RoutedEventArgs e)
         {
            gcmloader.MainWindow.MinimizeAllWindows();
@@ -177,6 +284,7 @@ namespace gcmloader
 
         private void BluetoothButton_Click(object sender, RoutedEventArgs e)
         {
+            gcmloader.MainWindow.MinimizeAllWindows();
             // Öffnet die Bluetooth-Einstellungen
             Process.Start(new ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
         }
@@ -198,37 +306,51 @@ namespace gcmloader
 
             _timer.Start();
         }
-
+        #endregion mainwindow design
         #region overlay window
         private static Process _overlayProcess;
         private static void StartOverlay()
         {
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string overlayPath = Path.Combine(baseDir, "overlaywindow", "OverlayWindow.exe");
-
-            if (!File.Exists(overlayPath))
-                throw new FileNotFoundException($"OverlayWindow.exe nicht gefunden unter: {overlayPath}");
-
-            _overlayProcess = new Process
+            try
             {
-                StartInfo = new ProcessStartInfo
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string overlayPath = Path.Combine(baseDir, "overlaywindow", "OverlayWindow.exe");
+
+                if (!File.Exists(overlayPath))
+                    throw new FileNotFoundException($"OverlayWindow.exe nicht gefunden unter: {overlayPath}");
+
+                _overlayProcess = new Process
                 {
-                    FileName = overlayPath,
-                    WorkingDirectory = Path.GetDirectoryName(overlayPath),
-                    UseShellExecute = false
-                }
-            };
-            _overlayProcess.Start();
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = overlayPath,
+                        WorkingDirectory = Path.GetDirectoryName(overlayPath),
+                        UseShellExecute = false
+                    }
+                };
+                _overlayProcess.Start();
+            }
+            catch
+            {
+                Console.WriteLine("problem with the start overlay");
+            }
         }
 
         private static void StopOverlay()
         {
-            if (_overlayProcess != null && !_overlayProcess.HasExited)
+            try
             {
-                _overlayProcess.Kill();
-                _overlayProcess.WaitForExit();
-                _overlayProcess.Dispose();
-                _overlayProcess = null;
+                if (_overlayProcess != null && !_overlayProcess.HasExited)
+                {
+                    _overlayProcess.Kill();
+                    _overlayProcess.WaitForExit();
+                    _overlayProcess.Dispose();
+                    _overlayProcess = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Overlay error: {ex.Message}");
             }
         }
 
@@ -574,7 +696,7 @@ namespace gcmloader
             }
             catch
             {
-
+                Console.WriteLine("no preaudio set or problem");
             }
         }
         public void WaitForLauncherToClose()
@@ -582,7 +704,7 @@ namespace gcmloader
 
             string Launcher = AppSettings.Load<string>("launcher");
             Process[] processes;
-
+            
             if (Launcher == "custom")
             {
                 Launcher = Path.GetFileName(AppSettings.Load<string>("customlauncherpath"));
@@ -629,6 +751,7 @@ namespace gcmloader
                 } while (processes.Length > 0);
 
                 // back to windows 
+                Console.WriteLine("--Launcher Close--");
                 displayfusion("end");
                 BackToWindows();
                 CleanupLogging();
@@ -684,66 +807,69 @@ namespace gcmloader
             try
             {
                 bool gcmwallpaper = AppSettings.Load<bool>("gcmwallpaper");
-                if (gcmwallpaper == true)
+
+                string imagePath;
+
+                if (gcmwallpaper)
                 {
-                    // Create an Image control
-                    Microsoft.UI.Xaml.Controls.Image backgroundImage = new Microsoft.UI.Xaml.Controls.Image();
+                    // Custom GCM wallpaper logic
+                    imagePath = Settwallpaper(); // <- deine eigene Methode
+                }
+                else
+                {
+                    // Fallback: get the current desktop wallpaper from registry
+                    imagePath = Registry.GetValue(
+                        @"HKEY_CURRENT_USER\Control Panel\Desktop",
+                        "WallPaper",
+                        "") as string;
+                }
 
-                    string getwallpaper = Settwallpaper();
-                    // Absolute path of the background image
-                    string imagePath = getwallpaper;
+                if (!File.Exists(imagePath))
+                {
+                    Debug.WriteLine("Wallpaper path not found: " + imagePath);
+                    return;
+                }
 
-                    // Ensure the path is valid
-                    if (System.IO.File.Exists(imagePath))
+                // Create an Image control
+                var backgroundImage = new Microsoft.UI.Xaml.Controls.Image
+                {
+                    Source = new BitmapImage(new Uri(imagePath, UriKind.Absolute)),
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch
+                };
+
+                backgroundImage.SetValue(Canvas.ZIndexProperty, -1);
+
+                if (this.Content is Grid mainGrid)
+                {
+                    var existingBackground = mainGrid.Children.OfType<Microsoft.UI.Xaml.Controls.Image>().FirstOrDefault();
+                    if (existingBackground != null)
                     {
-                        // Set the image source
-                        backgroundImage.Source = new BitmapImage(new Uri(imagePath, UriKind.Absolute));
-
-                        // Fill the entire space while maintaining aspect ratio
-                        backgroundImage.Stretch = Stretch.UniformToFill;
-                        backgroundImage.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
-                        backgroundImage.VerticalAlignment = VerticalAlignment.Stretch;
-                        backgroundImage.SetValue(Canvas.ZIndexProperty, -1);
-
-                        // Check if the main content is already a Grid
-                        if (this.Content is Grid mainGrid)
-                        {
-                            // Check if a background image already exists
-                            var existingBackground = mainGrid.Children.OfType<Microsoft.UI.Xaml.Controls.Image>().FirstOrDefault();
-                            if (existingBackground != null)
-                            {
-                                // Update the existing background
-                                existingBackground.Source = backgroundImage.Source;
-                            }
-                            else
-                            {
-                                // Insert the new background at index 0
-                                mainGrid.Children.Insert(0, backgroundImage);
-                            }
-                        }
-                        else
-                        {
-                            // Create a new Grid container
-                            Grid grid = new Grid();
-                            grid.Children.Add(backgroundImage);
-
-                            if (this.Content != null)
-                                grid.Children.Add((UIElement)this.Content);
-
-                            this.Content = grid;
-                        }
+                        existingBackground.Source = backgroundImage.Source;
                     }
                     else
                     {
-                        System.Diagnostics.Debug.WriteLine($"Image path not found: {imagePath}");
+                        mainGrid.Children.Insert(0, backgroundImage);
                     }
+                }
+                else
+                {
+                    Grid grid = new Grid();
+                    grid.Children.Add(backgroundImage);
+
+                    if (this.Content != null)
+                        grid.Children.Add((UIElement)this.Content);
+
+                    this.Content = grid;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Wallpaper error: " + ex.Message);
+                Debug.WriteLine("Error setting wallpaper: " + ex.Message);
             }
         }
+
         private string Settwallpaper()
         {
             try
@@ -1049,7 +1175,7 @@ namespace gcmloader
                 // If no "explorer" process found, exit loop
                 if (!explorerProcesses.Any())
                 {
-                    Console.WriteLine("All explorer.exe processes have been successfully killed.");
+                    Console.WriteLine(explorerProcesses + " process have been successfully killed.");
                     explorersStillRunning = false;
                 }
                 else
@@ -1061,7 +1187,7 @@ namespace gcmloader
                         {
                             process.Kill();
                             process.WaitForExit(); // Optional, to ensure process is terminated
-                            Console.WriteLine("Explorer.exe process killed successfully.");
+                            Console.WriteLine(process + "process killed successfully.");
                         }
                         catch (Exception ex)
                         {
@@ -1095,61 +1221,40 @@ namespace gcmloader
                 }
 
 
-                bool usewinpart = AppSettings.Load<bool>("usewinpart");
-                if (usewinpart == true)
+                const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+                const string valueName = "Shell";
+                const string newValue = @"explorer.exe";
+
+                // Open registry key for writing
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
                 {
-
-
-                }
-                else {
-
-
-                    const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-                    const string valueName = "Shell";
-                    const string newValue = @"explorer.exe";
-
-                    // Open registry key for writing
-                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
+                    if (key != null)
                     {
-                        if (key != null)
+                        Console.WriteLine("Registry key opened successfully.");
+
+                        // Modify value in registry key
+                        key.SetValue(valueName, newValue, RegistryValueKind.String);
+                        Console.WriteLine($"Value '{valueName}' has been changed to '{newValue}'.");
+                        //End Decky Loader process if running
+                        Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
+
+                        if (deckyLoaderProcesses.Length > 0)
                         {
-                            Console.WriteLine("Registry key opened successfully.");
-
-                            // Modify value in registry key
-                            key.SetValue(valueName, newValue, RegistryValueKind.String);
-                            Console.WriteLine($"Value '{valueName}' has been changed to '{newValue}'.");
-
-                            // Verify the change
-                            string currentValue = key.GetValue(valueName)?.ToString();
-                            if (currentValue == newValue)
+                            foreach (var process in deckyLoaderProcesses)
                             {
-                                Console.WriteLine($"Successfully set '{valueName}' to '{newValue}'.");
+                                process.Kill();
+                                process.WaitForExit();
+                                Console.WriteLine("Decky Loader process killed successfully.");
                             }
-                            else
-                            {
-                                Console.WriteLine($"Failed to set '{valueName}'. Current value: {currentValue}");
-                            }
-
-                            //End Decky Loader process if running
-                            Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
-
-                            if (deckyLoaderProcesses.Length > 0)
-                            {
-                                foreach (var process in deckyLoaderProcesses)
-                                {
-                                    process.Kill();
-                                    process.WaitForExit();
-                                    Console.WriteLine("Decky Loader process killed successfully.");
-                                }
-                            }
-
                         }
-                        else
-                        {
-                            Console.WriteLine($"Unable to open registry key '{keyName}'.");
-                        }
+
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Unable to open registry key '{keyName}'.");
                     }
                 }
+
             }
             catch (UnauthorizedAccessException)
             {
@@ -1160,35 +1265,42 @@ namespace gcmloader
                 Console.WriteLine($"Error: {ex.Message}");
             }
 
-            //restart wingamepad when needed.
-            bool usewingamepad = AppSettings.Load<bool>("useseamlessswitchtogcm");
-            if(usewingamepad)
+            try
             {
-                try
+                //restart wingamepad when needed.
+                bool usewingamepad = AppSettings.Load<bool>("useseamlessswitchtogcm");
+                if (usewingamepad)
                 {
-                    string exePath = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\wingamepad\wingamepad.exe";
-
-                    if (!File.Exists(exePath))
+                    try
                     {
-                        throw new FileNotFoundException("wingamepad.exe not found.", exePath);
+                        string exePath = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\wingamepad\wingamepad.exe";
+
+                        if (!File.Exists(exePath))
+                        {
+                            throw new FileNotFoundException("wingamepad.exe not found.", exePath);
+                        }
+
+                        var startInfo = new ProcessStartInfo
+                        {
+                            FileName = exePath,
+                            UseShellExecute = true,
+                            Verb = "runas"
+                        };
+
+                        Process.Start(startInfo);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[ERROR] Failed to launch wingamepad.exe: {ex.Message}");
                     }
 
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = exePath,
-                        UseShellExecute = true,
-                        Verb = "runas" 
-                    };
-
-                    Process.Start(startInfo);
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[ERROR] Failed to launch wingamepad.exe: {ex.Message}");
-                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"No useseamlessswitchtogcm setting set ");
 
             }
-
         }
         static void StartLauncher()
         {
@@ -1261,13 +1373,11 @@ namespace gcmloader
                     const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
                     const string valueName = "Shell";
 
-                    // Get the path of the current directory and append the target executable name
-                    string currentDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                    string targetExecutable = Path.Combine(currentDirectory, "gcmloader.exe");
+                string targetExecutable = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\gcmloader\gcmloader.exe";
 
 
 
-                    if (!File.Exists(targetExecutable))
+                if (!File.Exists(targetExecutable))
                     {
                         //Logger.Logger.Log($"Error: The file '{targetExecutable}' does not exist.");
                         return;
@@ -1491,13 +1601,16 @@ namespace gcmloader
                 //HideShellWindow("Windows.UI.StartMenu");
                 KillProcess("WidgetBoard");
                 KillProcess("WidgetService");
-                //HideShellWindow("Shell_SecondaryTrayWnd");
-                //HideShellWindow("Progman");
-                //HideShellWindow("NotifyIconOverflowWindow");
-                //HideShellWindow("Windows.UI.Core.CoreWindow");
-                //HideWorkerWindows();
+                // Make taskbar invisible
+                TaskbarVisibility.HideTaskbar();
 
-                Console.WriteLine("Shell windows hidden.");
+                        //HideShellWindow("Shell_SecondaryTrayWnd");
+                        //HideShellWindow("Progman");
+                        //HideShellWindow("NotifyIconOverflowWindow");
+                        //HideShellWindow("Windows.UI.Core.CoreWindow");
+                        //HideWorkerWindows();
+
+                        Console.WriteLine("Shell windows hidden.");
             }
             catch (Exception ex)
             {
@@ -1510,13 +1623,12 @@ namespace gcmloader
                 const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
                 const string valueName = "Shell";
 
-                // Get the path of the current directory and append the target executable name
-                string currentDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string targetExecutable = Path.Combine(currentDirectory, "gcmloader.exe");
+                        // Get the path of the current directory and append the target executable name
+                        // Get the directory of the current executable
+                        string targetExecutable = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\gcmloader\gcmloader.exe";
 
 
-
-                if (!File.Exists(targetExecutable))
+                        if (!File.Exists(targetExecutable))
                 {
                     //Logger.Logger.Log($"Error: The file '{targetExecutable}' does not exist.");
                     return;
@@ -1896,7 +2008,10 @@ namespace gcmloader
                     
                     SettingsVerify();
                     MinimizeAllWindows();
+                   
+                    Console.WriteLine("--Start showwinpart--");
                     Showwinpart();
+                    Console.WriteLine("--preinstall check--");
                     #region pre install/start check if needed
                     if (IsHandheld() == true)
                     {
@@ -1938,33 +2053,44 @@ namespace gcmloader
 
                     }
                     #endregion pre install/start check if needed
+                    Console.WriteLine("--startupvideo--");
                     StartupVideo.Play();
+                    Console.WriteLine("--displayfusion--");
                     displayfusion("start");
+                    Console.WriteLine("--joyxoff--");
                     IsJoyxoffInstalledAndStart(); //only check if is installed, than start
+                    Console.WriteLine("--startlauncher--");
+                    StartLauncher();
+                    Console.WriteLine("--overlay--");
                     StartOverlay();
+                    Console.WriteLine("--kill--");
                     #region kill distubing process
                     //KillTargetProcess("");
                     #endregion kill distubing process
+                    Console.WriteLine("--cssloader--");
                     cssloader(); //only check if is installed, than start
-                    StartLauncher();
-                    // TaskManager //
-                    LoadTaskManagerList();
-                    InitializeTaskManagerRefresh();
+                    
                     ///////////////
+                    Console.WriteLine("--modetoshell--");
                     ConsoleModeToShell();
-                    LoadTaskManagerList();
+                    Console.WriteLine("--preaudio--");
                     preaudio(true,false);
+                    Console.WriteLine("--prestartlist--");
                     prestartlist();
+                    Console.WriteLine("--waitclose--");
                     await Task.Run(() =>
                     {
                         WaitForLauncherToClose();
 
                     });
+                    Console.WriteLine("--startupvideoend--");
                     try
                     {
                         StartupVideo.RenameSteamStartupVideo_End();
                     }
                     catch { }
+
+                    Console.WriteLine("--end--");
                     preaudio(false, true);
 
                     #region Handheld
@@ -1998,6 +2124,8 @@ namespace gcmloader
                     }
                     #endregion uac
                     StopOverlay();
+                    // Show taskbar again
+                    TaskbarVisibility.ShowTaskbar();
                     this.Close();
                 }
             }
@@ -2173,9 +2301,7 @@ namespace gcmloader
 
         private void LoadTaskManagerList()
         {
-            if (ProgramCardPanel == null || ProgramScrollViewer == null)
-                return;
-
+ 
             // 📌 Scrollposition merken
             double scrollOffset = ProgramScrollViewer.HorizontalOffset;
 
@@ -2317,6 +2443,13 @@ namespace gcmloader
 
         private void ScrollToCardAnimated(UIElement card)
         {
+            if (card == null)
+            {
+                Debug.WriteLine("ScrollToCardAnimated: card is null – aborting.");
+                return;
+            }
+
+
             card.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
             var transform = card.TransformToVisual(ProgramCardPanel);
             var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
@@ -3540,6 +3673,47 @@ namespace gcmloader
             }
 
             Directory.Delete(StartupBackupFolder, recursive: true);
+        }
+    }
+    // Taskbar
+    public static class TaskbarVisibility
+    {
+        [DllImport("user32.dll")]
+        static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+            int X, int Y, int cx, int cy, uint uFlags);
+
+        const int SW_HIDE = 0;
+        const int SW_SHOW = 5;
+
+        const uint SWP_HIDEWINDOW = 0x0080;
+        const uint SWP_SHOWWINDOW = 0x0040;
+
+        static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+
+        public static void HideTaskbar()
+        {
+            IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
+            if (taskbarHandle != IntPtr.Zero)
+            {
+                ShowWindow(taskbarHandle, SW_HIDE);
+                SetWindowPos(taskbarHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_HIDEWINDOW);
+            }
+        }
+
+        public static void ShowTaskbar()
+        {
+            IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
+            if (taskbarHandle != IntPtr.Zero)
+            {
+                ShowWindow(taskbarHandle, SW_SHOW);
+                SetWindowPos(taskbarHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW);
+            }
         }
     }
 
