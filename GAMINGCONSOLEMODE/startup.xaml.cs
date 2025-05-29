@@ -48,9 +48,8 @@ namespace GAMINGCONSOLEMODE
             this.Loaded += (s, e) =>
             {
                 allDashboardButtons = DashboardItems.Items.OfType<Button>().ToList();
-            };
-
-
+            }; 
+            
         }
 
 
@@ -628,64 +627,7 @@ namespace GAMINGCONSOLEMODE
             }
 
             #endregion preloadlist
-            #region winpart
-            try
-            {
-                bool usewinpart = AppSettings.Load<bool>("usewinpart");
-                if (usewinpart == true)
-                {
-                    text_install_state_winpart.Text = "ACTIVATED";
-                    border_install_state_winpart.Background = new SolidColorBrush(Colors.Green);
-                    use_winpart.IsOn = true;
-
-
-                    //Dashboardgrid
-                    winpartbutton.Tag = "ENABLED";
-                    winpartstate_color.Background = new SolidColorBrush(Colors.Green);
-                    winpartstate_text.Text = "ENABLED";
-
-
-                    bool usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
-                    try
-                    {
-                        if(usewinpartstartapps == true)
-                        {
-
-                            use_winpart_startapps.IsOn = true;
-                        }
-                        else
-                        {
-                            use_winpart_startapps.IsOn = false;
-                        }
-
-                    }
-                    catch
-                    {
-                        use_winpart_startapps.IsOn = false;
-                    }
-
-                }
-                else
-                {
-                    text_install_state_winpart.Text = "DISABLED";
-                    border_install_state_winpart.Background = new SolidColorBrush(Colors.Brown);
-                    use_winpart.IsOn = false;
-
-                    //Dashboardgrid
-                    winpartbutton.Tag = "DISABLED";
-                    winpartstate_color.Background = new SolidColorBrush(Colors.Orange);
-                    winpartstate_text.Text = "DISABLED";
-                }
-
-            }
-            catch
-            {
-                Console.WriteLine("preloadlist gui error");
-                AppSettings.Save("usewinpart", false);
-                AppSettings.Save("usewinpartstartapps", false);
-            }
-
-            #endregion winpart
+            
         }
         #endregion update ui
         #endregion code functions
@@ -1461,33 +1403,6 @@ namespace GAMINGCONSOLEMODE
 
         }
         #endregion joyxoff
-        #region winpart
-        private void use_winpart_Toggled(object sender, RoutedEventArgs e)
-        {
-
-            if (use_winpart.IsOn == true)
-            {
-                AppSettings.Save("usewinpart", true);
-            }
-            else
-            {
-                AppSettings.Save("usewinpart", false);
-                AppSettings.Save("usewinpartstartapps", false);
-            }
-        }
-
-        private void use_winpart_startapps_Toggled(object sender, RoutedEventArgs e)
-        {
-            if (use_winpart_startapps.IsOn == true)
-            {
-                AppSettings.Save("usewinpartstartapps", true);
-            }
-            else
-            {
-                AppSettings.Save("usewinpartstartapps", false);
-            }
-        }
-        #endregion winpart
         #endregion function
 
         #region codebehind Function Dashboard
@@ -1566,42 +1481,50 @@ namespace GAMINGCONSOLEMODE
         private void cssloader_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("cssloader");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "CSSLoader" };
         }
 
         private void preloadlist_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("preloadlist");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Preload List" };
         }
 
         private void gcmwallpaperbutton_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("gcmwallpaper");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", " Task Manager Wallpaper" };
         }
 
         private void joyxoffbutton_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("JoyxoffPanel");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "JoyXOff" };
         }
 
         private void deckyloaderbutton_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("deckyloader");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Decky Loader" };
 
         }
 
         private void preaudiobutton_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("preaudio");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Audio Device" };
         }
 
         private void displayfusionbutton_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("displayfusion");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "DisplayFusion" };
         }
 
         private void startupvideobutton_Click(object sender, RoutedEventArgs e)
         {
             Openpanel("startupvideo");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Startup Video" };
         }
 
         private void winpartbutton_Click(object sender, RoutedEventArgs e)
@@ -1609,9 +1532,31 @@ namespace GAMINGCONSOLEMODE
             Openpanel("winpart");
         }
 
+
         #endregion codebehind Function Dashboard
 
-      
+        private void BreadcrumbBar1_ItemClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
+        {
+            if (args.Item is string clickedItem)
+            {
+                if (clickedItem == "Extensions")
+                {
+
+                    var storyboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
+                    storyboard.Completed += (s, args) =>
+                    {
+                        PanelView.Visibility = Visibility.Collapsed;
+                    };
+                    //collaps all
+                    filterbuttonall.Visibility = Visibility.Visible;
+                    filterbuttonenabled.Visibility = Visibility.Visible;
+                    filterbuttondisabled.Visibility = Visibility.Visible;
+                    SearchBox.Visibility = Visibility.Visible;
+
+                    storyboard.Begin();
+                }
+            }
+        }
     }
 
     //region nircmd code
