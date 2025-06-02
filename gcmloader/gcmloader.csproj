@@ -19,18 +19,18 @@
     <Compile Remove="OverlayWindow.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Content Remove="Assets\activation.wav" />
     <Content Remove="Assets\GCM_Startup_Video.webm" />
     <Content Remove="Assets\logo.ico" />
     <Content Remove="Assets\logo_gcm.png" />
-    <Content Remove="Assets\navigation.wav" />
+    <Content Remove="Assets\nav.wav" />
+    <Content Remove="Assets\play.wav" />
     <Content Remove="Assets\xbox-controller.png" />
   </ItemGroup>
   <ItemGroup>
     <None Remove="asforally.exe" />
-    <None Remove="Assets\activation.wav" />
     <None Remove="Assets\GCM_Startup_Video.webm" />
-    <None Remove="Assets\navigation.wav" />
+    <None Remove="Assets\nav.wav" />
+    <None Remove="Assets\play.wav" />
     <None Remove="nircmd.exe" />
     <None Remove="Settings.xml" />
   </ItemGroup>
@@ -52,16 +52,16 @@
     <EmbeddedResource Include="asforally.exe">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
-    <EmbeddedResource Include="Assets\activation.wav">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
     <EmbeddedResource Include="Assets\GCM_Startup_Video.webm">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\logo_gcm.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
-    <EmbeddedResource Include="Assets\navigation.wav">
+    <EmbeddedResource Include="Assets\nav.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\play.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\xbox-controller.png">

@@ -311,7 +311,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
                                     <Grid Padding="24">
 
@@ -405,7 +405,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
                                     <Grid Padding="24">
 
@@ -500,7 +500,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
                                     <Grid Padding="24">
 
@@ -588,7 +588,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
                                     
                                     <Grid Padding="24">
                                         
@@ -695,7 +695,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
                                     <Grid Padding="24">
 
@@ -768,7 +768,7 @@
                                                               Unchecked="UseSteamStartupVideoCheckBox_Unchecked"
                                                               Margin="0,0,0,10"
                                                               HorizontalAlignment="Center"/>
-                                                    
+
                                                     <Button x:Name="Injectstartupvideo_button"
                                                             Content="Inject video"
                                                             Click="Injectstartupvideo_button_Click"
@@ -777,8 +777,8 @@
                                                             HorizontalAlignment="Left"/>
                                                 </StackPanel>
                                             </controls:SettingsCard>
-                                            
-                                            
+
+
                                             <ProgressBar x:Name="Injectstartupvideo_ProgressBar"
                                                          Width="300"
                                                          Value="0"
@@ -793,9 +793,9 @@
                                                        Visibility="Collapsed"
                                                        Margin="0,5,0,0"
                                                        HorizontalAlignment="Center"/>
-                                            
-                                            
-                                            
+
+
+
                                             <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
 
                                             <InfoBar IsOpen="True"
@@ -829,158 +829,6 @@
 
                                 </ScrollViewer>
                             </Grid>
-                            <!--<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
-
-                                        <controls:SettingsCard Header="STARTUP VIDEO"
-                                   Description="Show a short video while your launcher boots in the background"
-                                   Width="900"
-                                   HorizontalAlignment="Stretch"
-                                   Margin="20,0"
-                                   Padding="20"
-                                   FontSize="30"
-                                   CornerRadius="15">
-
-                                            <StackPanel Spacing="20" HorizontalAlignment="Center" MaxWidth="700">
-
-                                                --><!-- Icon + Install-Badge --><!--
-                                                <StackPanel Spacing="10" HorizontalAlignment="Center">
-                                                    <Image Source="/functions/Startup_Video.gif"
-                               Width="100"
-                               Height="100"        
-                               HorizontalAlignment="Center"/>
-
-                                                    <Border x:Name="border_install_state_Startup_Video"
-                                Background="Brown"
-                                CornerRadius="10"
-                                Padding="12,6"
-                                Margin="0"
-                                HorizontalAlignment="Center">
-                                                        <TextBlock x:Name="text_install_state_Startup_Video"
-                                       Text="DISABLED"
-                                       Foreground="White"
-                                       FontSize="14"
-                                       FontWeight="Bold"
-                                       TextAlignment="Center"/>
-                                                    </Border>
-                                                </StackPanel>
-
-                                                --><!-- Toggle --><!--
-                                                <TextBlock Text="Enable Startup Video"
-                               FontSize="14"
-                               Foreground="#CCCCCC"
-                               TextAlignment="Center"/>
-                                                <ToggleSwitch x:Name="use_startup_video"
-                                  Toggled="use_startup_video_Toggled"
-                                  HorizontalAlignment="Center"/>
-
-                                                --><!-- Unterbereich für Video Path etc. --><!--
-                                                <Border CornerRadius="15"
-        Padding="10"
-                                                            Width="500"
-                                                            Height="460"
-        Background="#1F1F1F"
-        Margin="0,0,0,0">
-
-                                                    <StackPanel Spacing="10">
-
-                                                        --><!-- Sektionstitel --><!--
-                                                        <TextBlock Text="Select Video Path"
-                   FontSize="14"
-                   FontWeight="Bold"
-                   Foreground="White"
-                   Margin="0,0,0,5"/>
-
-                                                        --><!-- Buttons --><!--
-                                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                                            <Button x:Name="pichstartupvideopath"
-                    Content="Select a file"
-                    Click="pichstartupvideopath_Click"
-                    Style="{StaticResource AccentButtonStyle}"/>
-                                                            <Button x:Name="Resetstartupvideopath"
-                    Content="Reset"
-                    Click="Resetstartupvideopath_Click"
-                    Style="{StaticResource AccentButtonStyle}"/>
-                                                        </StackPanel>
-
-                                                        --><!-- Info --><!--
-                                                        <InfoBar IsOpen="True"
-                 Severity="Informational"
-                 Title="Important"
-                 Message="If not used with Steam, please avoid .webm format"
-                 Margin="0,5,0,0"
-                 HorizontalAlignment="Stretch"/>
-
-                                                        --><!-- Dateipfad-Vorschau --><!--
-                                                        <TextBlock x:Name="textbox_select_startupvideo_path"
-                   TextWrapping="Wrap"
-                   Foreground="White"
-                   FontSize="13"/>
-
-                                                        --><!-- Eingabefeld --><!--
-                                                        <TextBox x:Name="textbox_startupvideo_path"
-                 IsReadOnly="True"
-                 PlaceholderText="Enter the Path"
-                 TextChanged="textbox_startupvideo_path_TextChanged"
-                 Foreground="Black"
-                 Background="White"
-                 Padding="6"
-                 Margin="0,5,0,0"/>
-
-                                                        --><!-- Linie --><!--
-                                                        <Line Margin="0,10,0,10"
-              Stroke="#333"
-              X1="0" Y1="0"
-              X2="700" Y2="0"
-              StrokeThickness="1.5"/>
-
-                                                        --><!-- Steam-Hinweis --><!--
-                                                        <TextBlock Text="For Steam only:"
-                   FontSize="13"
-                   FontWeight="Bold"
-                   Foreground="White"
-                   Margin="0,5,0,0"/>
-
-                                                        <TextBlock Text="The selected video must be in WebM format. It replaces the default Steam intro video in GCM."
-                   TextWrapping="Wrap"
-                   Foreground="#CCCCCC"
-                   FontSize="13"/>
-
-                                                        --><!-- Checkbox + Aktion --><!--
-                                                        <CheckBox x:Name="UseSteamStartupVideo"
-                  Content="Use this method"
-                  Checked="UseSteamStartupVideoCheckBox_Checked"
-                  Unchecked="UseSteamStartupVideoCheckBox_Unchecked"
-                  Margin="0,5,0,0"/>
-
-                                                        <Button x:Name="Injectstartupvideo_button"
-                Content="Inject video"
-                Click="Injectstartupvideo_button_Click"
-                Style="{StaticResource AccentButtonStyle}"
-                Width="150"
-                HorizontalAlignment="Left"/>
-
-                                                        --><!-- Fortschritt --><!--
-                                                        <ProgressBar x:Name="Injectstartupvideo_ProgressBar"
-                     Width="300"
-                     Value="0"
-                     Margin="0,10,0,0"
-                     Background="#444"
-                     Visibility="Collapsed"/>
-
-                                                        <TextBlock x:Name="Injectstartupvideo_Text"
-                   Text="Conversion"
-                   Foreground="#CCCCCC"
-                   FontSize="12"
-                   Visibility="Collapsed"
-                   Margin="0,5,0,0"/>
-                                                    </StackPanel>
-                                                </Border>
-
-                                            </StackPanel>
-                                        </controls:SettingsCard>
-                                    </Grid>
-                                </ScrollViewer>-->
                             <!--Display fusion video-->
                             <Grid x:Name="displayfusion" Visibility="Collapsed"
                                   xmlns:controls="using:CommunityToolkit.WinUI.Controls">
@@ -993,7 +841,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
                                     <Grid Padding="24">
 
@@ -1100,7 +948,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
 
                                     <Grid Padding="24">
@@ -1180,7 +1028,7 @@
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
-                                              Height="580">
+                                              Height="400">
 
 
                                     <Grid Padding="24">

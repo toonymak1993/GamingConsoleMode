@@ -30,6 +30,25 @@
                        Margin="0,0,0,20"
                        HorizontalAlignment="Center"/>
 
+            <!-- Navigation Buttons -->
+            <StackPanel Orientation="Horizontal"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Grid.Row="3"
+            Margin="0,10,0,0"
+            Spacing="10">
+                <Button x:Name="BackButton"
+            Content="Back"
+            Click="BackButton_Click"
+            IsEnabled="False"
+            Width="100"/>
+
+                <Button x:Name="NextButton"
+            Content="Next"
+            Click="NextButton_Click"
+            Width="100"/>
+            </StackPanel>
+
             <!-- Image mit abgerundeten Ecken -->
             <Viewbox Grid.Row="1"
                      Margin="0,0,0,20"
@@ -67,23 +86,7 @@
                             VerticalAlignment="Bottom"/>
             </StackPanel>
 
-            <!-- Navigation Buttons -->
-            <StackPanel Orientation="Horizontal"
-                        HorizontalAlignment="Right"
-                        Grid.Row="3"
-                        Margin="0,30,0,0"
-                        Spacing="10">
-                <Button x:Name="BackButton"
-                        Content="Back"
-                        Click="BackButton_Click"
-                        IsEnabled="False"
-                        Width="100"/>
-
-                <Button x:Name="NextButton"
-                        Content="Next"
-                        Click="NextButton_Click"
-                        Width="100"/>
-            </StackPanel>
+            
         </Grid>
     </ScrollViewer>
 </Page>

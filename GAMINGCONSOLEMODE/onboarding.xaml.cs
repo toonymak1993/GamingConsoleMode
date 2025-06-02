@@ -64,10 +64,11 @@ namespace GAMINGCONSOLEMODE
                     " It can be operated using either a keyboard or a controller. The purpose of the task manager is to let you easily switch back and forth " +
                     "between your launcher and any game that might start in the background.",
                     ImagePath = "ms-appx:///Assets/onboarding/taskmanager_gcmloader.png",
-                    ShowActionButton = false,
+                    ShowActionButton = true,
                     ActionButtonText = "Start Now",
                     ActionButtonCallback = () =>
                     {
+                    
                     }
                 },
                 //Functions
@@ -92,9 +93,10 @@ namespace GAMINGCONSOLEMODE
                     Description = "GCM Shortcuts offers you a shortcut function, please be sure to create shortcuts to use the task manager as an example and much more",
                     ImagePath = "ms-appx:///Assets/onboarding/shortcuts.png",
                     ShowActionButton = false,
-                    ActionButtonText = "Start Now",
+                    ActionButtonText = "Config Keyboard",
                     ActionButtonCallback = () =>
-                    {
+                    { 
+
                     }
                 },
                 //Discord

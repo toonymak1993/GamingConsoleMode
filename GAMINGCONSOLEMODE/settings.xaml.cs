@@ -87,31 +87,21 @@ namespace GAMINGCONSOLEMODE
 
         private void windowsloginwithoutpassword_Click(object sender, RoutedEventArgs e)
         {
-            string url = "https://usblogon.quadsoft.org/de/downloads/USBLogonSetup.exe"; // URL of the installer
-            string tempPath = Path.Combine(Path.GetTempPath(), "USBLogonSetup.exe"); // Save path in temp folder
-
             try
             {
-                Console.WriteLine("Downloading USBLogonSetup.exe...");
+                // Define the URL to the USBLogon Setup
+                string url = "https://usblogon.quadsoft.org/de/downloads/USBLogonSetup.exe";
 
-                using (WebClient client = new WebClient())
+                // Open the URL in the default browser
+                Process.Start(new ProcessStartInfo
                 {
-                    client.DownloadFile(url, tempPath);
-                }
-
-                Console.WriteLine("Download complete. Launching installer...");
-
-                // Start the installer
-                Process process = new Process();
-                process.StartInfo.FileName = tempPath;
-                process.StartInfo.UseShellExecute = true; // Ensures it runs with UI
-                process.Start();
-
-                Console.WriteLine("Installer started successfully.");
+                    FileName = url,
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error: " + ex.Message);
+               
             }
         }
 
@@ -150,7 +140,7 @@ namespace GAMINGCONSOLEMODE
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\TaskHelper.exe",
+                    FileName = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\taskhelper\TaskHelper.exe",
                     Arguments = "--uac=disable",
                     Verb = "runas",              // triggers UAC prompt
                     UseShellExecute = true
@@ -167,7 +157,7 @@ namespace GAMINGCONSOLEMODE
                 else
                 {
                     // Optionally: Wait or log that it started successfully
-                    MessageBox.Show("UAC has been disabled,A system restart is required for the change to take effect");
+                    MessageBox.Show("UAC ON - has been set");
                 }
             }
             catch (System.ComponentModel.Win32Exception ex)
@@ -193,7 +183,7 @@ namespace GAMINGCONSOLEMODE
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\TaskHelper.exe", // change this path accordingly
+                    FileName = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\taskhelper\TaskHelper.exe", // change this path accordingly
                     Arguments = "--uac=enable",
                     Verb = "runas",               // triggers UAC prompt
                     UseShellExecute = true        // required for runas
@@ -208,7 +198,7 @@ namespace GAMINGCONSOLEMODE
                 }
                 else
                 {
-                    MessageBox.Show("UAC has been enabled,A system restart is required for the change to take effect");
+                    MessageBox.Show("UAC OFF - has been set");
                 }
             }
             catch (System.ComponentModel.Win32Exception ex)

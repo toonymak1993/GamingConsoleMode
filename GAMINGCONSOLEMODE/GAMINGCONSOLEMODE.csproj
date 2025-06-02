@@ -89,6 +89,7 @@
     <None Remove="settings.xaml" />
     <None Remove="shortcuts.xaml" />
     <None Remove="startup.xaml" />
+    <None Remove="taskmanager.xaml" />
     <None Remove="version_news.xaml" />
   </ItemGroup>
 
@@ -300,6 +301,11 @@
     <EmbeddedResource Include="Assets\rogally\allybackside.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="taskmanager.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
   <ItemGroup>
     <Page Update="version_news.xaml">

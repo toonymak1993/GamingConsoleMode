@@ -34,6 +34,8 @@ using Point = System.Drawing.Point;
 using System.IO.Pipes;
 using Application = Microsoft.UI.Xaml.Application;
 using Image = Microsoft.UI.Xaml.Controls.Image;
+using Microsoft.Windows.AppNotifications.Builder;
+using Microsoft.Windows.AppNotifications;
 
 
 
@@ -140,8 +142,12 @@ namespace gcmloader
         [DllImport("kernel32.dll")]
         private static extern uint GetCurrentThreadId();
 
+        //alt Tab
+        private bool _altTabCycleActive = false;
+        private CancellationTokenSource _altTabTokenSource;
+
         #endregion TaskManager
-        
+
 
         [DllImport("gdi32.dll")]
         private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
@@ -165,6 +171,7 @@ namespace gcmloader
             LoadShortcutsFromSettings();
             SetupGamepad();
             Start();
+
             //ASYNC PROZES
             ShowTaskManager();
             //after 10 seconds AND Start Windows Partmode
@@ -309,32 +316,55 @@ namespace gcmloader
         #endregion mainwindow design
         #region overlay window
         private static Process _overlayProcess;
-        private static void StartOverlay()
+
+        private static async Task StartOverlayAsync()
         {
             try
             {
-                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string overlayPath = Path.Combine(baseDir, "overlaywindow", "OverlayWindow.exe");
+                string overlayPath = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\overlaywindow\OverlayWindow.exe";
 
                 if (!File.Exists(overlayPath))
-                    throw new FileNotFoundException($"OverlayWindow.exe nicht gefunden unter: {overlayPath}");
+                {
+                    Console.WriteLine($"[ERROR] OverlayWindow.exe not found at: {overlayPath}");
+                    return;
+                }
 
+                // Start overlay process
                 _overlayProcess = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = overlayPath,
                         WorkingDirectory = Path.GetDirectoryName(overlayPath),
-                        UseShellExecute = false
+                        UseShellExecute = false,
+                        CreateNoWindow = true
                     }
                 };
+
                 _overlayProcess.Start();
+                Console.WriteLine("[INFO] OverlayWindow started.");
+
+                // Wait a moment to allow it to initialize
+                await Task.Delay(500); // give it time to start the pipe server
+
+                // Send WELCOME mode to overlay
+                using var pipeClient = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
+                pipeClient.Connect(2000); // wait up to 2s
+                using var writer = new StreamWriter(pipeClient) { AutoFlush = true };
+                writer.WriteLine("WELCOME");
+                Console.WriteLine("[INFO] Sent WELCOME command to overlay.");
+
+                // Wait for welcome animation to complete (e.g. 6 seconds)
+                await Task.Delay(6000);
             }
-            catch
+            catch (Exception ex)
             {
-                Console.WriteLine("problem with the start overlay");
+                Console.WriteLine("[ERROR] Problem starting OverlayWindow: " + ex.Message);
             }
         }
+
+
+
 
         private static void StopOverlay()
         {
@@ -430,6 +460,23 @@ namespace gcmloader
         #endregion needed
         #region methodes
         #region methodes for code
+
+        public static void SendOverlayNotification(string message)
+        {
+            try
+            {
+                using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
+                client.Connect(1000);
+                using var writer = new StreamWriter(client) { AutoFlush = true };
+                writer.WriteLine("NOTIFY:" + message);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Could not send toast to overlay: " + ex.Message);
+            }
+        }
+
+
         private Task messagebox(string dialog)
         {
             var messagebox = new ContentDialog
@@ -1521,9 +1568,6 @@ namespace gcmloader
         {
             try
             {
-              
-
-
 
             }
             catch (Exception ex)
@@ -2008,7 +2052,8 @@ namespace gcmloader
                     
                     SettingsVerify();
                     MinimizeAllWindows();
-                   
+                    Console.WriteLine("--overlay--");
+                    await StartOverlayAsync();
                     Console.WriteLine("--Start showwinpart--");
                     Showwinpart();
                     Console.WriteLine("--preinstall check--");
@@ -2061,8 +2106,6 @@ namespace gcmloader
                     IsJoyxoffInstalledAndStart(); //only check if is installed, than start
                     Console.WriteLine("--startlauncher--");
                     StartLauncher();
-                    Console.WriteLine("--overlay--");
-                    StartOverlay();
                     Console.WriteLine("--kill--");
                     #region kill distubing process
                     //KillTargetProcess("");
@@ -2471,7 +2514,7 @@ namespace gcmloader
 
 
 
-
+     
 
 
 
@@ -2554,7 +2597,7 @@ namespace gcmloader
         {
             try
             {
-                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\navigation.wav"));
+                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\nav.wav"));
                 player.Play();
             }
             catch { }
@@ -2564,7 +2607,7 @@ namespace gcmloader
         {
             try
             {
-                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\activation.wav"));
+                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\play.wav"));
                 player.Play();
             }
             catch { }
@@ -2585,24 +2628,54 @@ namespace gcmloader
 
         private const uint KEYEVENTF_KEYDOWN = 0x0000;
         private const uint KEYEVENTF_KEYUP = 0x0002;
-       
+
         private void SendAltTab()
         {
-            // Press ALT
-            keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            //usernotification
+            SendOverlayNotification("Shortcut: Switch Tab");
 
-            // Press TAB
-            keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            if (!_altTabCycleActive)
+            {
+                // Start Alt+Tab loop
+                _altTabCycleActive = true;
+                _altTabTokenSource = new CancellationTokenSource();
+                var token = _altTabTokenSource.Token;
 
-            // Release ALT
-            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                // Press ALT + TAB once to open the switcher
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                // Start loop to press TAB every 1.5 seconds
+                Task.Run(async () =>
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                        keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                        await Task.Delay(1500); // ← 1.5 seconds delay
+                    }
+                }, token);
+            }
+            else
+            {
+                // Stop Alt+Tab loop
+                _altTabCycleActive = false;
+                _altTabTokenSource?.Cancel();
+                _altTabTokenSource?.Dispose();
+                _altTabTokenSource = null;
+
+                // Release ALT to confirm window selection
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
         }
-
         #endregion alt tab
         #region performance overlay shortcut AHK
         private void TriggerPerformanceOverlay()
         {
+            //usernotification
+            SendOverlayNotification("Shortcut: Performance Overlay");
+
             // Build full path to the overlay .exe located in the same folder 
             string overlayPath = Path.Combine(AppContext.BaseDirectory, "amdnvidiap.exe");
 
@@ -2635,6 +2708,7 @@ namespace gcmloader
         {
             try
             {
+               
                 var enumerator = new MMDeviceEnumerator();
                 var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 string currentName = defaultDevice.FriendlyName;
@@ -2653,7 +2727,9 @@ namespace gcmloader
                 string cleanedDeviceName = rawDeviceName.Split('(')[0].Trim();
                 NirCmdUtil.NirCmdHelper.ExecuteCommand($"setdefaultsounddevice \"{cleanedDeviceName}\"");
                 Console.WriteLine($"Switched to audio device: {cleanedDeviceName}");
-                NativeToastOverlay.Show("Switched to: " + cleanedDeviceName, SystemIcons.Information);
+                //usernotification
+                SendOverlayNotification("Switched to:" + cleanedDeviceName);
+
             }
             catch (Exception ex)
             {
@@ -2664,8 +2740,8 @@ namespace gcmloader
         #region shortcut overlay
         public static void showoverlay()
         {
-            
-                using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
+
+            using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
                 client.Connect(100); // max 100ms warten
                 using var writer = new StreamWriter(client);
                 writer.WriteLine("TOGGLE");
@@ -2689,6 +2765,8 @@ namespace gcmloader
         }
         private void Triggerbacktowin()
         {
+            //usernotification
+            SendOverlayNotification("Shortcut: Back to Windows");
 
             string useuac = AppSettings.Load<string>("launcher");
             if(useuac == "steam")
@@ -3023,12 +3101,14 @@ namespace gcmloader
                 if ((currentButtons & GamepadButtonFlags.A) != 0 && (_lastButtonState & GamepadButtonFlags.A) == 0)
                 {
                     TriggerCardAction(_selectedCardIndex, true);
+                    PlayActivationSound();
                 }
 
                 // B = Close
                 if ((currentButtons & GamepadButtonFlags.B) != 0 && (_lastButtonState & GamepadButtonFlags.B) == 0)
                 {
                     TriggerCardAction(_selectedCardIndex, false);
+                    PlayActivationSound();
                 }
 
                 // DPad Up = vorheriger Button (z. B. Close → Start)
@@ -3412,189 +3492,7 @@ namespace gcmloader
             }
         }
     }
-    //Toast code
-    public static class NativeToastOverlay
-    {
-        private static readonly object syncLock = new();
-        private static readonly List<Form> activeToasts = new();
-
-        public static void Show(string message, Icon icon = null)
-        {
-            Thread toastThread = new Thread(() =>
-            {
-                Form toastForm = new Form
-                {
-                    Width = 520,
-                    Height = 80,
-                    FormBorderStyle = FormBorderStyle.None,
-                    TopMost = true,
-                    ShowInTaskbar = false,
-                    BackColor = System.Drawing.Color.Black,
-                    Opacity = 0, // Start transparent for fade-in
-                    StartPosition = FormStartPosition.Manual
-                };
-
-                // Layout
-                System.Windows.Forms.Panel panel = new System.Windows.Forms.Panel
-                {
-                    Dock = DockStyle.Fill,
-                    Padding = new Padding(10),
-                    BackColor = System.Drawing.Color.Black
-                };
-
-                PictureBox iconBox = new PictureBox
-                {
-                    Width = 32,
-                    Height = 32,
-                    Margin = new Padding(0, 0, 10, 0),
-                    SizeMode = PictureBoxSizeMode.StretchImage,
-                    Visible = icon != null
-                };
-
-                if (icon != null)
-                    iconBox.Image = icon.ToBitmap();
-
-                Label label = new Label
-                {
-                    Text = message,
-                    ForeColor = System.Drawing.Color.White,
-                    AutoSize = true,
-                    Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Font = new Font("Segoe UI", 12),
-                    MinimumSize = new System.Drawing.Size(0, 32)
-
-                };
-
-                FlowLayoutPanel flow = new FlowLayoutPanel
-                {
-                    Dock = DockStyle.Fill,
-                    FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight
-                };
-
-                flow.Controls.Add(iconBox);
-                flow.Controls.Add(label);
-                panel.Controls.Add(flow);
-                toastForm.Controls.Add(panel);
-
-                // Stack positioning
-                lock (syncLock)
-                {
-                    var screen = Screen.PrimaryScreen.WorkingArea;
-                    int offset = (activeToasts.Count * (toastForm.Height + 10)) + 20;
-                    toastForm.Location = new System.Drawing.Point(screen.Right - toastForm.Width - 20, screen.Bottom - offset);
-                    activeToasts.Add(toastForm);
-                }
-
-                toastForm.Load += (s, e) => SetWindowStyles(toastForm);
-
-                toastForm.Shown += (s, e) =>
-                {
-                    FadeIn(toastForm, () =>
-                    {
-                        System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 3000 };
-                        timer.Tick += (s2, e2) =>
-                        {
-                            timer.Stop();
-                            FadeOut(toastForm, () =>
-                            {
-                                lock (syncLock)
-                                {
-                                    activeToasts.Remove(toastForm);
-                                    RepositionToasts();
-                                }
-                                toastForm.Close();
-                            });
-                        };
-                        timer.Start();
-                    });
-                };
-
-                System.Windows.Forms.Application.Run(toastForm);
-            });
-
-            toastThread.SetApartmentState(ApartmentState.STA);
-            toastThread.IsBackground = true;
-            toastThread.Start();
-        }
-
-        private static void RepositionToasts()
-        {
-            var screen = Screen.PrimaryScreen.WorkingArea;
-            for (int i = 0; i < activeToasts.Count; i++)
-            {
-                var f = activeToasts[i];
-                f.Invoke(() =>
-                {
-                    int offset = (i * (f.Height + 10)) + 20;
-                    f.Location = new Point(screen.Right - f.Width - 20, screen.Bottom - offset);
-                });
-            }
-        }
-
-        private static void FadeIn(Form form, Action onComplete)
-        {
-            System.Windows.Forms.Timer fadeIn = new System.Windows.Forms.Timer { Interval = 15 };
-            fadeIn.Tick += (s, e) =>
-            {
-                form.Opacity += 0.05;
-                if (form.Opacity >= 0.95)
-                {
-                    form.Opacity = 0.95;
-                    fadeIn.Stop();
-                    onComplete?.Invoke();
-                }
-            };
-            fadeIn.Start();
-        }
-
-        private static void FadeOut(Form form, Action onComplete)
-        {
-            System.Windows.Forms.Timer fadeOut = new System.Windows.Forms.Timer { Interval = 15 };
-            fadeOut.Tick += (s, e) =>
-            {
-                form.Opacity -= 0.05;
-                if (form.Opacity <= 0)
-                {
-                    fadeOut.Stop();
-                    onComplete?.Invoke();
-                }
-            };
-            fadeOut.Start();
-        }
-
-        private static void SetWindowStyles(Form form)
-        {
-            IntPtr hwnd = form.Handle;
-            int exStyle = (int)GetWindowLong(hwnd, GWL_EXSTYLE);
-            exStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
-            SetWindowLong(hwnd, GWL_EXSTYLE, (IntPtr)exStyle);
-
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        }
-
-        private const int GWL_EXSTYLE = -20;
-        private const int WS_EX_TOOLWINDOW = 0x00000080;
-        private const int WS_EX_NOACTIVATE = 0x08000000;
-        private const int WS_EX_TOPMOST = 0x00000008;
-
-        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOACTIVATE = 0x0010;
-        private const uint SWP_SHOWWINDOW = 0x0040;
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetWindowLong(IntPtr hWnd, int nIndex);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr SetWindowLong(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
-            int X, int Y, int cx, int cy, uint uFlags);
-    }
+   
     //startup apps controll
     public static class StartupControl
     {
@@ -3716,5 +3614,4 @@ namespace gcmloader
             }
         }
     }
-
 }
