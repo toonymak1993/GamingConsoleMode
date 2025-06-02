@@ -21,6 +21,7 @@ using gcmloader;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using System.Reflection;
+using Newtonsoft.Json.Linq;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -37,7 +38,7 @@ namespace GAMINGCONSOLEMODE
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 
-        string owner = "Kosnix";  // Repository owner
+        string owner = "toonymak1993";  // Repository owner
     string repo = "GameConsoleMode";  // Repository name
     string currentVersion = "2.1.1";  // Your current version // <change when new Verison
         public MainWindow()
@@ -113,6 +114,7 @@ namespace GAMINGCONSOLEMODE
                         "StartupPage" => typeof(startup),
                         "LinksPage" => typeof(Links),
                         "RogAllyPage" => typeof(rogally),
+                        "TaskManagerPage" => typeof(taskmanager),
                         _ => null
                     };
 
@@ -209,7 +211,9 @@ namespace GAMINGCONSOLEMODE
 
         private void UpdateButton_Click(object sender, RoutedEventArgs e)
         {
-            _ = DownloadLatestRelease(owner, repo, UpdateProgressBar);
+            UpdateButton.IsEnabled = false;
+             _ = DownloadLatestRelease(owner, repo, UpdateProgressBar);
+          
         }
 
         private void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
@@ -229,7 +233,7 @@ namespace GAMINGCONSOLEMODE
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erreur lors de l'exécution de la mise à jour : {ex.Message}");
+                Console.WriteLine($"problem in updates");
             }
         }
 
@@ -245,7 +249,6 @@ namespace GAMINGCONSOLEMODE
             if (!string.IsNullOrEmpty(downloadUrl))
             {
                 string fileName = Path.GetFileName(new Uri(downloadUrl).AbsolutePath);
-                // Download in den AppData\gcmsettings Ordner
                 string updateDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
                 if (!Directory.Exists(updateDir))
                 {
@@ -254,22 +257,43 @@ namespace GAMINGCONSOLEMODE
 
                 string filePath = Path.Combine(updateDir, "Update.exe");
 
-                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                using var httpStream = await client.GetStreamAsync(downloadUrl);
+                var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+                var httpResponse = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                httpResponse.EnsureSuccessStatusCode();
 
-                var buffer = new byte[8192];
+                long totalBytes = httpResponse.Content.Headers.ContentLength ?? -1;
+                double totalMB = totalBytes / 1024d / 1024d;
+
+                using var httpStream = await httpResponse.Content.ReadAsStreamAsync();
+                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+
+                byte[] buffer = new byte[8192];
                 long totalBytesRead = 0;
                 int bytesRead;
+                var stopwatch = Stopwatch.StartNew();
 
                 progressBar.Visibility = Visibility.Visible;
+                DownloadProgressText.Visibility = Visibility.Visible;
+
                 while ((bytesRead = await httpStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
                     await fileStream.WriteAsync(buffer, 0, bytesRead);
                     totalBytesRead += bytesRead;
-                    progressBar.Value = (double)totalBytesRead / fileStream.Length * 100;
+
+                    double percent = (double)totalBytesRead / totalBytes * 100;
+                    progressBar.Value = percent;
+
+                    double downloadedMB = totalBytesRead / 1024d / 1024d;
+
+                    double speed = totalBytesRead / stopwatch.Elapsed.TotalSeconds; // bytes/sec
+                    double secondsLeft = (totalBytes - totalBytesRead) / speed;
+
+                    DownloadProgressText.Text = $"{downloadedMB:F2} MB / {totalMB:F2} MB - ~{secondsLeft:F0}s left";
                 }
 
+                stopwatch.Stop();
                 progressBar.Visibility = Visibility.Collapsed;
+                DownloadProgressText.Visibility = Visibility.Collapsed;
                 InstallUpdateButton.Visibility = Visibility.Visible;
                 UpdateButton.Visibility = Visibility.Collapsed;
                 UpdateBarText.Text = "Install";
@@ -280,6 +304,7 @@ namespace GAMINGCONSOLEMODE
                 Console.WriteLine("Could not find a valid download URL.");
             }
         }
+
 
         private string ExtractDownloadUrl(string jsonResponse)
         {

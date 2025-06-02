@@ -7,6 +7,9 @@
     <None Update="App.xaml">
       <SubType>Designer</SubType>
     </None>
+    <Page Update="taskmanager.xaml">
+      <SubType>Designer</SubType>
+    </Page>
     <Page Update="version_news.xaml">
       <SubType>Designer</SubType>
     </Page>

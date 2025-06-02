@@ -27,12 +27,28 @@ namespace GAMINGCONSOLEMODE
         {
             this.InitializeComponent();
             LoadVersionNews();
+            
         }
 
         private void LoadVersionNews()
         {
             var items = new List<VersionNewsItem>
     {
+                 new VersionNewsItem
+        {
+            Title = "Version 2.1.2",
+            Date = "2025-06-02",
+            ContentItems = new List<NewsContentItem>
+            {
+               new NewsContentItem { Icon = "🔊", Text = "Volume Button functionality added for ROG Ally and MSI Claw." },
+new NewsContentItem { Icon = "🎯", Text = "Custom shortcuts can now be defined for all functions. (Note: Task Manager also requires a custom shortcut.)" },
+new NewsContentItem { Icon = "⚡", Text = "Task Manager performance significantly improved for smoother usage." },
+new NewsContentItem { Icon = "🆕", Text = "Initial detection and landing page for ROG Ally added. (Note: No features available on this page yet.)" },
+new NewsContentItem { Icon = "🛠️", Text = "The GCM settings can now be reset under Settings" },
+new NewsContentItem { Icon = "🛠️", Text = "General software stability improvements." }
+
+            }
+        },
         new VersionNewsItem
         {
             Title = "Version 2.1.1",

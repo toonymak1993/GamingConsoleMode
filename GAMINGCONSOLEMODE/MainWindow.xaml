@@ -135,20 +135,68 @@ BorderBrush="Transparent">
 
 
         <!-- CommandBar at the top -->
-        <CommandBar x:Name="UpdateBar" Grid.Row="1" Background="Green" 
-            HorizontalAlignment="Stretch" OverflowButtonVisibility="Collapsed" Visibility="Collapsed">
+        <!-- CommandBar for Update Status -->
+        <CommandBar x:Name="UpdateBar"
+            Grid.Row="1"
+            Background="DarkOliveGreen"
+            HorizontalAlignment="Stretch"
+            OverflowButtonVisibility="Collapsed"
+            Visibility="Collapsed">
+
             <CommandBar.PrimaryCommands>
+                <!-- Progress display with text info -->
                 <AppBarElementContainer>
-                    <ProgressBar x:Name="UpdateProgressBar" Width="500" Height="20" Value="0" Visibility="Collapsed"/>
+                    <StackPanel Orientation="Vertical" HorizontalAlignment="Left">
+                        <ProgressBar x:Name="UpdateProgressBar"
+                             Width="500"
+                             Height="20"
+                             Value="0"
+                             IsIndeterminate="False"
+                             ShowPaused="False"
+                             ShowError="False"
+                             Visibility="Collapsed"/>
+                        <TextBlock x:Name="DownloadProgressText"
+                           Foreground="White"
+                           FontSize="12"
+                           Visibility="Collapsed"
+                           Margin="0,4,0,0"
+                           Text="0 MB / 0 MB"/>
+                    </StackPanel>
                 </AppBarElementContainer>
+
+                <!-- Update Info Text -->
                 <AppBarElementContainer>
-                    <TextBlock x:Name="UpdateBarText" Text="Update Available" Foreground="White" FontSize="16" 
-                               VerticalAlignment="Center" HorizontalAlignment="Center" Margin="10"/>
+                    <TextBlock x:Name="UpdateBarText"
+                       Text="Update Available"
+                       Foreground="White"
+                       FontSize="16"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"
+                       Margin="10"/>
                 </AppBarElementContainer>
-                <AppBarButton x:Name="UpdateButton" Background="White" Foreground="Green" Visibility="Visible"
-                              Icon="Download" Label="Update" Click="UpdateButton_Click"/>
-                <AppBarButton x:Name="InstallUpdateButton" Background="White" Foreground="Green" Visibility="Collapsed"
-                              Icon="OpenFile" Label="Install" Click="InstallUpdateButton_Click"/>
+
+                <!-- Update Trigger Button -->
+                <AppBarButton x:Name="UpdateButton"
+              Background="White"
+              Foreground="Green"
+              Visibility="Visible"
+              Icon="Download"
+              Label="Update"
+              Click="UpdateButton_Click">
+                    <AppBarButton.RenderTransform>
+                        <ScaleTransform x:Name="UpdateButtonScale" ScaleX="1" ScaleY="1"/>
+                    </AppBarButton.RenderTransform>
+                </AppBarButton>
+
+
+                <!-- Install Trigger Button -->
+                <AppBarButton x:Name="InstallUpdateButton"
+                      Background="White"
+                      Foreground="Green"
+                      Visibility="Collapsed"
+                      Icon="OpenFile"
+                      Label="Install"
+                      Click="InstallUpdateButton_Click"/>
             </CommandBar.PrimaryCommands>
         </CommandBar>
 
@@ -165,6 +213,7 @@ BorderBrush="Transparent">
                 <NavigationViewItem Content="Launcher" Icon="StopSlideShow" Tag="LauncherPage" />
                 <NavigationViewItem Content="Extensions" Icon="List"  Tag="StartupPage" />
                 <NavigationViewItem Content="GCM Shortcuts" Icon="Add" Tag="shortcuts" />
+                <NavigationViewItem Content="GCM Taskmanager" Icon="Pin"  Tag="TaskManagerPage" />
                 <NavigationViewItem Content="Handheld specific" Icon="SwitchApps" Tag="Handheld">
                     <NavigationViewItem.MenuItems>
                         <NavigationViewItem Content="Rog Ally" Icon="DockBottom" Tag="RogAllyPage" />

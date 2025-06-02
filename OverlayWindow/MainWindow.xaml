@@ -10,15 +10,43 @@
         WindowState="Maximized">
 
     <Grid Background="#80000000">
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,20,0,0" Orientation="Vertical">
-            <!-- Bild und Überschrift nebeneinander zentriert -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,0,0,20">
+
+        <!-- MAIN UI STACK -->
+        <StackPanel x:Name="RootPanel" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,20,0,0" Orientation="Vertical">
+
+            <!-- Controller icon + header -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,20">
                 <Image Source="pack://application:,,,/OverlayWindow;component/Assets/controller.png" Width="201" Height="142"/>
                 <TextBlock Text="GCM SHORTCUTS" FontSize="32" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" Margin="20,0,0,0"/>
             </StackPanel>
 
-            <!-- Grid für 2 Spalten Layout -->
-            <ItemsControl x:Name="ShortcutCarousel" HorizontalAlignment="Center" VerticalAlignment="Center" Background="Transparent" Margin="0,20,0,20">
+            <!-- Welcome title -->
+            <TextBlock x:Name="WelcomeText"
+                       Text="START GCM MODE"
+                       FontSize="48"
+                       FontWeight="ExtraBold"
+                       Foreground="White"
+                       TextAlignment="Center"
+                       Visibility="Collapsed"
+                       Margin="0,0,0,40"/>
+
+            <!-- Animated scroll for welcome -->
+            <ScrollViewer x:Name="WelcomeShortcutScroll"
+                          Visibility="Collapsed"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          Height="240"
+                          VerticalScrollBarVisibility="Hidden">
+                <StackPanel x:Name="WelcomeShortcutViewer"
+                            Orientation="Vertical"/>
+            </ScrollViewer>
+
+            <!-- Static shortcut grid -->
+            <ItemsControl x:Name="ShortcutCarousel"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          Background="Transparent"
+                          Margin="0,20,0,20">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
                         <UniformGrid Columns="2" HorizontalAlignment="Center" />
@@ -41,6 +69,5 @@
             </ItemsControl>
 
         </StackPanel>
-
     </Grid>
 </Window>
