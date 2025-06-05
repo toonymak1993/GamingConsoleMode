@@ -1,36 +1,24 @@
+ï»¿using Microsoft.UI.Text;
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.DirectoryServices.ActiveDirectory;
 using System.IO;
+using Windows.UI;
 
 namespace GAMINGCONSOLEMODE
 {
-
-
-
-    // Data model for a single onboarding step
-    public class OnboardingStep
-    {
-        public string Title { get; set; }
-        public string Description { get; set; }
-        public string ImagePath { get; set; }
-        public bool ShowActionButton { get; set; } = false;
-        public string ActionButtonText { get; set; }
-        public Action ActionButtonCallback { get; set; }
-    }
-
     public sealed partial class onboarding : Page
     {
-        #region need variable
-        string currentDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        #endregion need variable
-
         private int currentStepIndex = 0;
         private List<OnboardingStep> Steps;
+        private Grid OverlayPanel;
+        private Action OverlayAction;
 
         public onboarding()
         {
@@ -38,102 +26,42 @@ namespace GAMINGCONSOLEMODE
             AppSettings.Save("onboarding", true);
             InitializeSteps();
             LoadStep();
+            CreateOverlayPanel();
         }
 
-        // Define all onboarding steps here
         private void InitializeSteps()
         {
             Steps = new List<OnboardingStep>
             {
-                //welcome
                 new OnboardingStep
                 {
                     Title = "Welcome to GCM",
-                    Description = "GCM is a modular program designed to help you focus your PC entirely on gaming. " +
-                    "The main feature of GCM is replacing the Windows desktop with a launcher of your choice. " +
-                    "This unlocks several advantages that are especially valuable for gaming. For example, the Steam overlay " +
-                    "runs more smoothly without interference from the Windows window manager, you're no longer bothered by pop-ups, " +
-                    "and your PC boots up noticeably faster since the launcher becomes your primary interface.",
-                    ImagePath = "ms-appx:///Assets/logo_gcm.png"
+                    Description = "GCM is a modular program designed for gaming...",
+                    ImagePath = "ms-appx:///Assets/logo_gcm.png",
+                    InfoText = "GCM replaces the traditional desktop shell with a performance-focused gaming interface. You can still access all Windows features, but everything is streamlined.",
+                    InfoActionText = "Open Settings",
+                    InfoActionCallback = () => Process.Start(new ProcessStartInfo { FileName = "ms-settings:typing", UseShellExecute = true }),
+                    ShowSecondaryActionButton = true,
+                    SecondaryActionButtonText = "Open Settings Directly",
+                    SecondaryActionButtonCallback = () => Process.Start(new ProcessStartInfo { FileName = "ms-settings:typing", UseShellExecute = true }),
+                    ShowInfoButton = true
                 },
-                //taskmanager
                 new OnboardingStep
                 {
-                    Title = "Taskmanager",
-                    Description = "GCM includes a built-in task manager. You can access it by minimizing the launcher or using the GCM shortcuts function" +
-                    " It can be operated using either a keyboard or a controller. The purpose of the task manager is to let you easily switch back and forth " +
-                    "between your launcher and any game that might start in the background.",
-                    ImagePath = "ms-appx:///Assets/onboarding/taskmanager_gcmloader.png",
-                    ShowActionButton = true,
-                    ActionButtonText = "Start Now",
-                    ActionButtonCallback = () =>
-                    {
-                    
-                    }
+                    Title = "Keyboard problems in GCM mode",
+                    Description = "Too many keyboards for Windows handhelds",
+                    ImagePath = "ms-appx:///Assets/logo_gcm.png",
+                    InfoText = "GCM replaces the traditional desktop shell with a performance-focused gaming interface. You can still access all Windows features, but everything is streamlined.",
+                    InfoActionText = "Open Settings",
+                    InfoActionCallback = () => Process.Start(new ProcessStartInfo { FileName = "ms-settings:typing", UseShellExecute = true }),
+                    ShowSecondaryActionButton = false,
+                    SecondaryActionButtonText = "Open Settings Directly",
+                    SecondaryActionButtonCallback = () => Process.Start(new ProcessStartInfo { FileName = "ms-settings:typing", UseShellExecute = true }),
+                    ShowInfoButton = true
                 },
-                //Functions
-                new OnboardingStep
-                {
-                    Title = "Functions",
-                    Description = "GCM is an app you can think of as a \"build your own gaming experience\" platform. " +
-                    "While it comes with a set of core features like the built-in task manager and customizable shortcuts, it also offers a wide range of useful " +
-                    "tools—such as Decky Loader for Steam, startup videos, and preconfigured audio settings. " +
-                    "At the end of the onboarding process, you'll see all the available features you can choose from.",
-                    ImagePath = "ms-appx:///Assets/onboarding/functions_gcm.png",
-                    ShowActionButton = false,
-                    ActionButtonText = "Start Now",
-                    ActionButtonCallback = () =>
-                    {
-                    }
-                },
-                //Shortcuts
-                new OnboardingStep
-                {
-                    Title = "GCM Shortcuts",
-                    Description = "GCM Shortcuts offers you a shortcut function, please be sure to create shortcuts to use the task manager as an example and much more",
-                    ImagePath = "ms-appx:///Assets/onboarding/shortcuts.png",
-                    ShowActionButton = false,
-                    ActionButtonText = "Config Keyboard",
-                    ActionButtonCallback = () =>
-                    { 
-
-                    }
-                },
-                //Discord
-                new OnboardingStep
-                {
-                    Title = "Connect with us on Discord",
-                    Description = "We've launched a new Discord server where you can connect with us anytime—share your ideas, " +
-                    "report bugs, or just chat. Together, we’re building what Microsoft hasn’t: a true gaming operating system " +
-                    "powered by the amazing compatibility of Windows.",
-
-                    ImagePath = "ms-appx:///Assets/onboarding/discord.jpg",
-                    ShowActionButton = true,
-                    ActionButtonText = "Join GCM Discord Server",
-                    ActionButtonCallback = () =>
-                    {
-                        string discordInvite = "https://discord.gg/FbjYDeEJce";
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = discordInvite,
-                UseShellExecute = true
-            });
-
-            Console.WriteLine("Discord-Server wird geöffnet...");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Fehler beim Öffnen des Links: {ex.Message}");
-        }
-                    }
-                }
             };
         }
 
-        // Load the UI for the current step
         private void LoadStep()
         {
             var step = Steps[currentStepIndex];
@@ -159,8 +87,21 @@ namespace GAMINGCONSOLEMODE
                 };
 
                 actionButton.Click += (s, e) => step.ActionButtonCallback.Invoke();
-
                 CustomContentArea.Children.Add(actionButton);
+            }
+
+            if (step.ShowSecondaryActionButton && step.SecondaryActionButtonCallback != null)
+            {
+                Button secondaryButton = new Button
+                {
+                    Content = step.SecondaryActionButtonText ?? "More...",
+                    Width = 250,
+                    Height = 40,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 10, 0, 0)
+                };
+                secondaryButton.Click += (s, e) => step.SecondaryActionButtonCallback.Invoke();
+                CustomContentArea.Children.Add(secondaryButton);
             }
         }
 
@@ -173,7 +114,6 @@ namespace GAMINGCONSOLEMODE
             }
             else
             {
-                // Finish the onboarding
                 Frame.Navigate(typeof(startup));
             }
         }
@@ -186,5 +126,148 @@ namespace GAMINGCONSOLEMODE
                 LoadStep();
             }
         }
+
+        private void OnboardingImage_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            var step = Steps[currentStepIndex];
+            if (!string.IsNullOrEmpty(step.ImagePath))
+            {
+                try
+                {
+                    var localPath = step.ImagePath.Replace("ms-appx:///,", "Assets/");
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = localPath,
+                        UseShellExecute = true
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("Failed to open image: " + ex.Message);
+                }
+            }
+        }
+
+        private void CreateOverlayPanel()
+        {
+            OverlayPanel = new Grid
+            {
+                Background = new SolidColorBrush(Color.FromArgb(180, 20, 20, 20)),
+                Visibility = Visibility.Collapsed,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+
+            var border = new Border
+            {
+                Background = new SolidColorBrush(Colors.Gray),
+                MaxWidth = 700,
+                MaxHeight = 600,
+                MinHeight = 300,
+                CornerRadius = new CornerRadius(16),
+                Padding = new Thickness(20),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                BorderBrush = new SolidColorBrush(Colors.DarkGray),
+                BorderThickness = new Thickness(1)
+            };
+
+            var stack = new StackPanel { Spacing = 10 };
+            var title = new TextBlock
+            {
+                FontSize = 24,
+                FontWeight = FontWeights.Bold,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Colors.White)
+            };
+            var contentScroll = new ScrollViewer
+            {
+                MaxHeight = 340,
+                Content = new TextBlock
+                {
+                    TextWrapping = TextWrapping.Wrap,
+                    Name = "OverlayDescriptionText",
+                    Foreground = new SolidColorBrush(Colors.White)
+                }
+            };
+
+            var actionButton = new Button
+            {
+                Content = "",
+                Width = 200,
+                Margin = new Thickness(0, 5, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Visibility = Visibility.Collapsed
+            };
+            actionButton.Click += (s, e) => OverlayAction?.Invoke();
+
+            var exitButton = new Button
+            {
+                Content = "âœ•",
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Width = 36,
+                Height = 36,
+                FontSize = 16,
+                VerticalAlignment = VerticalAlignment.Top,
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Foreground = new SolidColorBrush(Colors.White)
+            };
+            exitButton.Click += (s, e) => OverlayPanel.Visibility = Visibility.Collapsed;
+
+            stack.Children.Add(exitButton);
+            stack.Children.Add(title);
+            stack.Children.Add(contentScroll);
+            stack.Children.Add(actionButton);
+
+            border.Child = stack;
+            OverlayPanel.Children.Add(border);
+
+            (this.Content as Panel)?.Children.Add(OverlayPanel);
+        }
+
+        private void ShowOverlayPanel(string titleText, string description, string buttonText, Action buttonAction)
+        {
+            if (OverlayPanel != null)
+            {
+                var stack = (OverlayPanel.Children[0] as Border)?.Child as StackPanel;
+                if (stack != null)
+                {
+                    ((TextBlock)stack.Children[1]).Text = titleText;
+                    ((stack.Children[2] as ScrollViewer).Content as TextBlock).Text = description;
+
+                    var btn = (Button)stack.Children[3];
+                    if (!string.IsNullOrEmpty(buttonText) && buttonAction != null)
+                    {
+                        btn.Content = buttonText;
+                        btn.Visibility = Visibility.Visible;
+                        OverlayAction = buttonAction;
+                    }
+                    else
+                    {
+                        btn.Visibility = Visibility.Collapsed;
+                        OverlayAction = null;
+                    }
+                }
+                OverlayPanel.Visibility = Visibility.Visible;
+            }
+        }
+    }
+
+    public class OnboardingStep
+    {
+        public string Title { get; set; }
+        public string Description { get; set; }
+        public string ImagePath { get; set; }
+        public string InfoText { get; set; }
+        public string InfoActionText { get; set; }
+        public Action InfoActionCallback { get; set; }
+        public bool ShowActionButton { get; set; } = false;
+        public string ActionButtonText { get; set; }
+        public Action ActionButtonCallback { get; set; }
+        public bool ShowSecondaryActionButton { get; set; } = false;
+        public string SecondaryActionButtonText { get; set; }
+        public Action SecondaryActionButtonCallback { get; set; }
+        public bool ShowInfoButton { get; set; } = false;
     }
 }

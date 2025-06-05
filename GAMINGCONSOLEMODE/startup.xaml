@@ -16,17 +16,14 @@
             <Setter Property="Width" Value="220"/>
             <Setter Property="Height" Value="200"/>
             <Setter Property="Margin" Value="8"/>
-            <Setter Property="BorderThickness" Value="4"/>
+            <Setter Property="BorderThickness" Value="0"/>
             
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
             <Setter Property="Background">
                 <Setter.Value>
                     <LinearGradientBrush StartPoint="0,1" EndPoint="0.5,0.5">
-                        <GradientStop Color="#002A2F3D" Offset="0.0"/>
-                        <!-- Unsichtbares Dunkelgraublau -->
-                        <GradientStop Color="#40FFFFFF" Offset="0.3"/>
-                        <!-- 25% Steam-Cyan-Shimmer -->
-                        <GradientStop Color="#002A2F3D" Offset="1.0"/>
+                        <GradientStop Color="#FF2D2D30" Offset="0.2"/>
+                        <GradientStop Color="#FF3E3E42" Offset="0.6"/>
                         <!-- Wieder wegblendend -->
                     </LinearGradientBrush>
 
@@ -196,7 +193,7 @@
 
                         <Button x:Name="gcmwallpaperbutton" Click="gcmwallpaperbutton_Click"  Tag="DISABLED" >
                             <StackPanel x:Name="gcmwallpaperpanel" Tag="DISABLED" >
-                                <TextBlock Text="Task Manager Wallpaper" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
+                                <TextBlock Text="Wallpaper" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
                                 <Image Source="/functions/TV.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
                                     <Border x:Name="gcmwallpaperstate_color" Background="Orange" Padding="5,2" CornerRadius="8">

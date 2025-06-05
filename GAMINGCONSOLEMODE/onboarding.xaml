@@ -9,67 +9,64 @@
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
-    <!-- ScrollViewer hinzugefügt -->
-    <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                  VerticalScrollBarVisibility="Auto"
-                  ZoomMode="Disabled">
-        
-        <Grid Padding="40">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <!-- Header -->
-            <TextBlock x:Name="HeaderTextBlock"
-                       Text="Welcome to the GCM Onboarding"
-                       FontSize="36"
-                       FontWeight="Bold"
-                       Margin="0,0,0,20"
-                       HorizontalAlignment="Center"/>
-
+            <RowDefinition Height="Auto"/>
             <!-- Navigation Buttons -->
-            <StackPanel Orientation="Horizontal"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Top"
-            Grid.Row="3"
-            Margin="0,10,0,0"
-            Spacing="10">
-                <Button x:Name="BackButton"
-            Content="Back"
-            Click="BackButton_Click"
-            IsEnabled="False"
-            Width="100"/>
+            <RowDefinition Height="*"/>
+            <!-- Scrollable Content -->
+        </Grid.RowDefinitions>
 
-                <Button x:Name="NextButton"
-            Content="Next"
-            Click="NextButton_Click"
-            Width="100"/>
-            </StackPanel>
+        <!-- Header -->
+        <TextBlock x:Name="HeaderTextBlock"
+                   Text="Welcome to the GCM Onboarding"
+                   FontSize="36"
+                   FontWeight="Bold"
+                   Margin="0,0,0,20"
+                   HorizontalAlignment="Center"
+                   Grid.Row="0"/>
 
-            <!-- Image mit abgerundeten Ecken -->
-            <Viewbox Grid.Row="1"
-                     Margin="0,0,0,20"
-                     HorizontalAlignment="Center"
-                     MaxWidth="600"
-                     MaxHeight="250">
-                <!-- Border wraps the image and applies corner radius -->
-                <Border CornerRadius="30"
-                        >
-                    <Image x:Name="OnboardingImage"
-                           Source="/Assets/logo_gcm.png"
-                           Stretch="Uniform"
-                           />
-                </Border>
-            </Viewbox>
+        <!-- Navigation Buttons (top) -->
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    Grid.Row="1"
+                    Spacing="10">
+            <Button x:Name="BackButton"
+                    Content="Back"
+                    Click="BackButton_Click"
+                    Width="100"/>
 
-            <!-- Description and dynamic content area -->
-            <StackPanel Grid.Row="2"
-                        MaxWidth="800"
+            <Button x:Name="NextButton"
+                    Content="Next"
+                    Click="NextButton_Click"
+                    Width="100"/>
+
+            
+        </StackPanel>
+
+        <!-- Scrollable content -->
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="ContentPanel"
+                        Padding="20"
+                        Spacing="20"
                         HorizontalAlignment="Center"
-                        Spacing="20">
+                        MaxWidth="800">
+
+                <!-- Onboarding Image with Click-to-Zoom -->
+                <Viewbox MaxHeight="250" MaxWidth="600" Stretch="Uniform">
+                    <Border CornerRadius="30"
+                            Background="Transparent"
+                            Tapped="OnboardingImage_Tapped">
+                        <Image x:Name="OnboardingImage"
+                               Stretch="UniformToFill"/>
+                    </Border>
+                </Viewbox>
+
+                <!-- Description Text -->
                 <Border Background="#1F000000"
                         Padding="20"
                         CornerRadius="12">
@@ -85,8 +82,6 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Bottom"/>
             </StackPanel>
-
-            
-        </Grid>
-    </ScrollViewer>
+        </ScrollViewer>
+    </Grid>
 </Page>

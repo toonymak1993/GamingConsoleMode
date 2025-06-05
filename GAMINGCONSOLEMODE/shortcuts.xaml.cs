@@ -16,6 +16,8 @@ using Button = Microsoft.UI.Xaml.Controls.Button;
 using ComboBox = Microsoft.UI.Xaml.Controls.ComboBox;
 using Orientation = Microsoft.UI.Xaml.Controls.Orientation;
 using Microsoft.UI.Xaml.Media.Imaging;
+using System.Configuration;
+using Windows.Storage.Provider;
 
 namespace GAMINGCONSOLEMODE
 {
@@ -63,10 +65,37 @@ namespace GAMINGCONSOLEMODE
             var uri = new Uri("https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Windows365-logo.svg/960px-Windows365-logo.svg.png");
             var bitmap = new BitmapImage(uri);
             WebImage.Source = bitmap;
-
+            updateui();
         }
 
+        private void updateui()
+        {
+            // Load and apply setting for showshortcutsatstartup
+            try
+            {
+                bool value = AppSettings.Load<bool>("showshortcutsatstartup");
+                showshortcutsatstartup.IsOn = value;
+            }
+            catch
+            {
+                // If not found or invalid, default to false
+                showshortcutsatstartup.IsOn = false;
+                AppSettings.Save("showshortcutsatstartup", false);
+            }
 
+            // Load and apply setting for shortcutpopup
+            try
+            {
+                bool value = AppSettings.Load<bool>("shortcutpopup");
+                shortcutpopup.IsOn = value;
+            }
+            catch
+            {
+                // If not found or invalid, default to false
+                shortcutpopup.IsOn = false;
+                AppSettings.Save("shortcutpopup", false);
+            }
+        }
         private List<string> GetUsedFunctions()
         {
             return ShortcutPanel.Children.OfType<Border>()
@@ -137,9 +166,13 @@ namespace GAMINGCONSOLEMODE
         }
 
 
-
-
-
+        private void SettingsToggle_Click(object sender, RoutedEventArgs e)
+        {
+            // Toggle visibility based on button state
+            SettingsContent.Visibility = SettingsToggle.IsChecked == true
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
 
         private void AddCustomShortcut(object sender, RoutedEventArgs e) => AddCustomShortcut();
 
@@ -149,8 +182,8 @@ namespace GAMINGCONSOLEMODE
             {
                 Background = new SolidColorBrush(ColorHelper.FromArgb(255, 30, 30, 30)),
                 BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 51, 51, 51)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(10)
             };
 
@@ -769,8 +802,49 @@ namespace GAMINGCONSOLEMODE
         }
 
 
+
         #endregion winshortcuts
 
+        #region settings center
+        private void showshortcutsatstartup_Toggled(object sender, RoutedEventArgs e)
+        {
+        
+            // Cast sender to ToggleSwitch to get IsOn value
+            if (sender is ToggleSwitch toggle)
+            {
+                if (toggle.IsOn)
+                {
+                    // Save true if toggled on
+                    AppSettings.Save("showshortcutsatstartup", true);
+                }
+                else
+                {
+                    // Save false if toggled off
+                    AppSettings.Save("showshortcutsatstartup", false);
+                }
+            }
+        
+        }
+
+        private void shortcutpopup_Toggled(object sender, RoutedEventArgs e)
+        {
+            // Cast sender to ToggleSwitch to get the current state
+            if (sender is ToggleSwitch toggle)
+            {
+                if (toggle.IsOn)
+                {
+                    // Save true if the switch is on
+                    AppSettings.Save("shortcutpopup", true);
+                }
+                else
+                {
+                    // Save false if the switch is off
+                    AppSettings.Save("shortcutpopup", false);
+                }
+            }
+        
 
     }
+    #endregion settings center
+}
 }

@@ -12,9 +12,72 @@
                 <TextBlock Text="SHORTCUTS" FontSize="28" FontWeight="Bold" Foreground="White"/>
             </StackPanel>
 
-            
+            <StackPanel Padding="24" Spacing="12" Background="#1E1E1E" CornerRadius="15">
+
+                <!-- ToggleButton to expand/collapse -->
+                <ToggleButton x:Name="SettingsToggle"
+                  Content="Settings Center"
+                  FontSize="15"
+                  VerticalAlignment="Center"
+                  HorizontalAlignment="Center"
+                  FontWeight="Bold"
+                  Foreground="White"
+                  Background="#2A2A2A"
+                  BorderBrush="#555"
+                  BorderThickness="0"
+                  Padding="12"
+                  Click="SettingsToggle_Click"/>
+
+                <!-- Collapsible settings content -->
+                <StackPanel x:Name="SettingsContent" Visibility="Collapsed" Spacing="24" Margin="0,12,0,0">
+
+                    <!-- Setting 1 -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ToggleSwitch x:Name="shortcutpopup" Header="Enable Shortcut Popups"
+                          Toggled="shortcutpopup_Toggled"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Foreground="White"
+                          Grid.Column="0"/>
+                        <TextBlock Text="Turn this on to receive popups when a shortcut is triggered"
+                       Foreground="LightGray"
+                       VerticalAlignment="Center"
+                       Margin="16,0,0,0"
+                       Grid.Column="1"/>
+                    </Grid>
+
+                    <!-- Setting 2 -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ToggleSwitch x:Name="showshortcutsatstartup" Header="Show shortcuts at startup "
+                          Toggled="showshortcutsatstartup_Toggled"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Foreground="White"
+                          Grid.Column="0"/>
+                        <TextBlock Text="Shows all your shortcuts before GCM starts "
+                       Foreground="LightGray"
+                       VerticalAlignment="Center"
+                       Margin="16,0,0,0"
+                       Grid.Column="1"/>
+                    </Grid>
+
+              
+
+                </StackPanel>
+            </StackPanel>
+
+
+
             <TextBlock Text="Seamless Switch"/>
-            <StackPanel CornerRadius="5" Background="DarkSlateBlue"  Padding="20" Spacing="16">
+            <StackPanel CornerRadius="15" Background="#FF3E3E42"  Padding="20" Spacing="16" >
                 <TextBlock Text="Seamless Switch"
                            Foreground="White"
                            FontSize="20"
