@@ -108,8 +108,6 @@ namespace gcmloader
         }
 
 
-
-
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
@@ -180,7 +178,33 @@ namespace gcmloader
 
         #region mainwindow design
         #region mini launcher
-        //AssignLauncherApp(0, @"C:\Users\luis\AppData\Local\Playnite\Playnite.DesktopApp.exe");
+
+
+        private void LoadAllLauncherSettings()
+        {
+            for (int i = 1; i <= 5; i++)
+            {
+                try
+                {
+                    string exe = AppSettings.Load<string>($"button{i}link");
+                    string icon = AppSettings.Load<string>($"button{i}image");
+
+                    if (!string.IsNullOrEmpty(exe) && File.Exists(exe) &&
+                        !string.IsNullOrEmpty(icon) && File.Exists(icon))
+                    {
+                        AssignLauncherApp(i - 1, exe, icon); // Index 0–4
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Launcher {i}] skipped: {ex.Message}");
+                    // Optional: you can log or ignore silently
+                }
+            }
+        }
+
+
+
         private void AssignLauncherApp(int index, string exePath, string optionalIconPath = null)
         {
             // 🔍 Ziel-Element finden
@@ -344,19 +368,34 @@ namespace gcmloader
                 _overlayProcess.Start();
                 Console.WriteLine("[INFO] OverlayWindow started.");
 
-                // Wait a moment to allow it to initialize
-                await Task.Delay(500); // give it time to start the pipe server
 
-                // Send WELCOME mode to overlay
-                using var pipeClient = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
-                pipeClient.Connect(2000); // wait up to 2s
-                using var writer = new StreamWriter(pipeClient) { AutoFlush = true };
-                writer.WriteLine("WELCOME");
-                Console.WriteLine("[INFO] Sent WELCOME command to overlay.");
+                // Load and apply setting for showshortcutsatstartup
+                try
+                {
+                    bool showshortcutsatstartup = AppSettings.Load<bool>("showshortcutsatstartup");
+                    if (showshortcutsatstartup)
+                    {
+                        // Wait a moment to allow it to initialize
+                        await Task.Delay(500); // give it time to start the pipe server
 
-                // Wait for welcome animation to complete (e.g. 6 seconds)
-                await Task.Delay(6000);
+                        // Send WELCOME mode to overlay
+                        using var pipeClient = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
+                        pipeClient.Connect(2000); // wait up to 2s
+                        using var writer = new StreamWriter(pipeClient) { AutoFlush = true };
+                        writer.WriteLine("WELCOME");
+                        Console.WriteLine("[INFO] Sent WELCOME command to overlay.");
+
+                        // Wait for welcome animation to complete (e.g. 6 seconds)
+                        await Task.Delay(6000);
+                    }
+                }    
+            
+            catch
+            {
+                // If not found or invalid, default to false
+                AppSettings.Save("showshortcutsatstartup", false);
             }
+        }
             catch (Exception ex)
             {
                 Console.WriteLine("[ERROR] Problem starting OverlayWindow: " + ex.Message);
@@ -463,16 +502,32 @@ namespace gcmloader
 
         public static void SendOverlayNotification(string message)
         {
+
             try
             {
-                using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
-                client.Connect(1000);
-                using var writer = new StreamWriter(client) { AutoFlush = true };
-                writer.WriteLine("NOTIFY:" + message);
+                bool shortcutpopup = AppSettings.Load<bool>("shortcutpopup");
+
+                if (shortcutpopup)
+                {
+
+                    try
+                    {
+                        using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
+                        client.Connect(1000);
+                        using var writer = new StreamWriter(client) { AutoFlush = true };
+                        writer.WriteLine("NOTIFY:" + message);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Could not send toast to overlay: " + ex.Message);
+                    }
+
+                }
             }
-            catch (Exception ex)
+            catch
             {
-                System.Diagnostics.Debug.WriteLine("Could not send toast to overlay: " + ex.Message);
+
+                AppSettings.Save("shortcutpopup", false);
             }
         }
 
@@ -2280,6 +2335,8 @@ namespace gcmloader
                             launchButton.Focus(FocusState.Programmatic);
                         }
                     }
+
+                    LoadAllLauncherSettings();
                 };
 
                 focusTimer.Start();
