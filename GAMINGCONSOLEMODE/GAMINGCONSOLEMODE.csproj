@@ -76,7 +76,7 @@
     <None Remove="functions\preloadlist.png" />
     <None Remove="functions\rogally_statusicon.png" />
     <None Remove="functions\speaker.png" />
-    <None Remove="functions\Startup_Video.gif" />
+    <None Remove="functions\Startup_Video.png" />
     <None Remove="functions\TV.png" />
     <None Remove="functions\windows_statusicon.png" />
     <None Remove="functions\winpart.png" />

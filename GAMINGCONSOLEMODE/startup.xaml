@@ -119,7 +119,7 @@
                                 Width="400"
                                 Height="40"
                                     Margin="20"          
-                                PlaceholderText="Search for your function here"
+                                PlaceholderText="Search for Extension"
                                 Background="DimGray"
                                 BorderBrush="#FFCCCCCC"
                                 BorderThickness="0"
@@ -155,9 +155,7 @@
                            
                             <ItemsPanelTemplate>
                                 <VariableSizedWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="4" 
-                                 HorizontalAlignment="Center"                      
-                                                       
-                                                       />
+                                                       HorizontalAlignment="Center"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
 
@@ -165,105 +163,113 @@
                             <Style TargetType="Button" BasedOn="{StaticResource DashboardButtonStyle}" />
                         </ItemsControl.Resources>
 
-                        <Button x:Name="cssloaderbutton" Click="cssloader_Click"  Tag="DISABLED">
-                            <StackPanel Tag="DISABLED">
-                                <TextBlock Text="CSS Loader" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/Assets/steambp.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                        <Button x:Name="cssloaderbutton" Click="cssloader_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
+                            <StackPanel Tag="DISABLED" HorizontalAlignment="Left">
+                                <Image Source="/Assets/steambp.png" Width="30" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="CSS Loader" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="A styling engine for Steam on Windows and Linux." Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
 
-                                    <Border x:Name="cssloaderstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
-                                        <TextBlock x:Name="cssloaderstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    <Border x:Name="cssloaderstate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
+                                        <TextBlock x:Name="cssloaderstate_text" Text="DISABLED" Foreground="White" FontSize="12" HorizontalAlignment="Left"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="preloadlistbutton" Click="preloadlist_Click"  Tag="DISABLED">
+                        <Button x:Name="preloadlistbutton" Click="preloadlist_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED">
-                                <TextBlock Text="Preload List" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/preloadlist.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                <Image Source="/functions/preloadlist.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Preload List" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Set files or programs to start with GCM." Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
 
-                                    <Border x:Name="preloadliststate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                    <Border x:Name="preloadliststate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="preloadliststate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="gcmwallpaperbutton" Click="gcmwallpaperbutton_Click"  Tag="DISABLED" >
+                        <Button x:Name="gcmwallpaperbutton" Click="gcmwallpaperbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel x:Name="gcmwallpaperpanel" Tag="DISABLED" >
-                                <TextBlock Text="Wallpaper" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/TV.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
-                                    <Border x:Name="gcmwallpaperstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                <Image Source="/functions/TV.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Wallpaper" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Change your wallpaper inside GCM Mode!" Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
+                                    <Border x:Name="gcmwallpaperstate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="gcmwallpaperstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="joyxoffbutton" Click="joyxoffbutton_Click"  Tag="DISABLED">
+                        <Button x:Name="joyxoffbutton" Click="joyxoffbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED" >
-                                <TextBlock Text="JoyXOff" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/joyxoff_logo.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                <Image Source="/functions/joyxoff_logo.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="JoyXOff" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Integrate your keyboard and mouse in one place." Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
 
-                                    <Border x:Name="joyxoffstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                    <Border x:Name="joyxoffstate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="joyxoffstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="deckyloaderbutton" Click="deckyloaderbutton_Click"  Tag="DISABLED">
+                        <Button x:Name="deckyloaderbutton" Click="deckyloaderbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED">
-                                <TextBlock Text="Decky Loader" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/deckyloader.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                <Image Source="/functions/deckyloader.png" Width="35" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Decky Loader" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Homebrew plugin system for Steam." Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
 
-                                    <Border x:Name="deckyloaderstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                    <Border x:Name="deckyloaderstate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="deckyloaderstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="preaudiobutton" Click="preaudiobutton_Click"  Tag="DISABLED">
+                        <Button x:Name="preaudiobutton" Click="preaudiobutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED">
-                                <TextBlock Text="Audio Device" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/speaker.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                <Image Source="/functions/speaker.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Audio Device" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Switch your audio devices for GCM." Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
 
-                                    <Border x:Name="audiodevicestate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                    <Border x:Name="audiodevicestate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="audiodevicestate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="displayfusionbutton" Click="displayfusionbutton_Click"  Tag="DISABLED">
+                        <Button x:Name="displayfusionbutton" Click="displayfusionbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED">
-                                <TextBlock Text="Display Fusion" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/displayfusion.png" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                <Image Source="/functions/displayfusion.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="DisplayFusion" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Multiple Monitors Made Easy." Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
 
-                                    <Border x:Name="displayfusionstate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                    <Border x:Name="displayfusionstate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="displayfusionstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="startupvideobutton"  Click="startupvideobutton_Click"  Tag="DISABLED">
+                        <Button x:Name="startupvideobutton"  Click="startupvideobutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED">
-                                <TextBlock Text="Startup Video" FontSize="18" FontWeight="Bold" Foreground="White" TextAlignment="Center" Margin="0,0,0,10"/>
-                                <Image Source="/functions/Startup_Video.gif" Width="80" Height="80" Stretch="Uniform" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
-                                    <Border x:Name="startupvideostate_color" Background="Orange" Padding="5,2" CornerRadius="8">
+                                <Image Source="/Assets/Startup_Video.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Startup Video" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Change your startup video when booting into GCM!" Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
+                                    <Border x:Name="startupvideostate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
                                         <TextBlock x:Name="startupvideostate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
                                     </Border>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Button>
                     </ItemsControl>

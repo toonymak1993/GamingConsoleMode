@@ -157,7 +157,7 @@ With USB logon, we have found a way to maintain security while allowing access t
         <StackPanel Grid.Row="0" Background="#111" Padding="15" Spacing="5">
             <TextBlock Text="GAMING CONSOLE MODE - GCM" FontSize="20" FontWeight="Bold" Foreground="White"/>
             <TextBlock Text="Developed by Luis Antonio Garcia Roque" FontSize="14" Foreground="LightGray"/>
-            <TextBlock Text="Developed by Mattioni Nikos" FontSize="14" Foreground="LightGray"/>
+            <TextBlock Text="Developed by Thanh Phi Cao" FontSize="14" Foreground="LightGray"/>
         </StackPanel>
 
         <!-- License info section -->
@@ -171,7 +171,6 @@ With USB logon, we have found a way to maintain security while allowing access t
                 <TextBlock Text="Compiled software supplied" FontWeight="Bold" FontSize="16" Foreground="White" Margin="0,0,0,5"/>
                 <TextBlock Text="• Nircmd - https://nircmd.com/" Foreground="LightGray"/>
                 <TextBlock Text="• AudioSwitch - Apache License - license in the software directory" Foreground="LightGray"/>
-                <TextBlock Text="• Flow Launcher - MIT License - Copyright (c) 2019 Flow-Launcher" Foreground="LightGray"/>
             </StackPanel>
 
         </Border>
