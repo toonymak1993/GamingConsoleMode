@@ -35,7 +35,9 @@ namespace wingamepad
             ["DPadLeft"] = GamepadButtonFlags.DPadLeft,
             ["DPadRight"] = GamepadButtonFlags.DPadRight,
             ["LeftShoulder"] = GamepadButtonFlags.LeftShoulder,
-            ["RightShoulder"] = GamepadButtonFlags.RightShoulder
+            ["RightShoulder"] = GamepadButtonFlags.RightShoulder,
+            ["LeftThumb"] = GamepadButtonFlags.LeftThumb,
+            ["RightThumb"] = GamepadButtonFlags.RightThumb
         };
         private bool IsAnotherInstanceRunning()
         {

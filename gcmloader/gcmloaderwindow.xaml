@@ -7,6 +7,7 @@
     <Grid>
         <StackPanel x:Name="LauncherTileRow"
     Orientation="Horizontal"
+    Visibility="Collapsed"
     HorizontalAlignment="Center"
     VerticalAlignment="Top"
     Margin="0,40,0,0"
@@ -28,14 +29,16 @@
 
         <!-- Info-Leiste oben rechts -->
         <Border CornerRadius="10"
+                x:Name="infopanelright"
                 Background="#88000000"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
+                Visibility="Collapsed"
                 Margin="20"
                 Padding="10">
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                 <Button Content="📶" Width="40" Height="40" Click="WifiButton_Click"/>
-                <Button Content="🟦" Width="40" Height="40" Click="BluetoothButton_Click"/>
+                <Button Content="ᛒ"  Width="40" Height="40" Click="BluetoothButton_Click"/>
                 <TextBlock x:Name="ClockText"
                            FontSize="24"
                            FontWeight="SemiBold"

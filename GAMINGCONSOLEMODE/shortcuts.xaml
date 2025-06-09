@@ -50,24 +50,7 @@
                        Grid.Column="1"/>
                     </Grid>
 
-                    <!-- Setting 2 -->
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="200"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <ToggleSwitch x:Name="showshortcutsatstartup" Header="Show shortcuts at startup "
-                          Toggled="showshortcutsatstartup_Toggled"
-                          OffContent="Disabled"
-                          OnContent="Enabled"
-                          Foreground="White"
-                          Grid.Column="0"/>
-                        <TextBlock Text="Shows all your shortcuts before GCM starts "
-                       Foreground="LightGray"
-                       VerticalAlignment="Center"
-                       Margin="16,0,0,0"
-                       Grid.Column="1"/>
-                    </Grid>
+                   
 
               
 

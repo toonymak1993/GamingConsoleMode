@@ -11,23 +11,20 @@
 
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20" Spacing="20">
 
-        <!-- Bild oben zentriert -->
-        <Image Source="ms-appx:///Assets/rogally/allyfrontside.png" Width="500" Height= "400" HorizontalAlignment="Center"/>
-
         <!-- Modusauswahl -->
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20">
             <RadioButton Content="Handheld Companion" GroupName="Modes" IsEnabled="False"/>
             <RadioButton Content="Armoury Create" GroupName="Modes" IsEnabled="False"/>
             <RadioButton Content="G Helper" GroupName="Modes" IsEnabled="False"/>
         </StackPanel>
-
-        <!-- Trennlinie -->
-        <Rectangle Width="800" Height="1" Fill="Gray" Margin="0,0,0,10"/>
-
         <StackPanel Spacing="10" HorizontalAlignment="Center">
             <TextBlock Text="Nothing to see here yet - but soon..." FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
-            
+
         </StackPanel>
+        <!-- Bild oben zentriert -->
+        <Image Source="ms-appx:///Assets/rogally/allyfrontside.png" Width="500" Height= "400" HorizontalAlignment="Center"/>
+
+      
    
 
 

@@ -9,44 +9,24 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using SharpDX.XInput;
 
 namespace OverlayWindow
 {
     public partial class MainWindow : Window
     {
-
-        private bool isInNotificationMode = false;
-
-
-        private readonly StackPanel toastContainer = new StackPanel
-        {
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Orientation = Orientation.Vertical,
-            Margin = new Thickness(0, 0, 0, 0),
-            IsHitTestVisible = false
-        };
-
-
+        private Controller controller = new Controller(UserIndex.One);
+        private State previousState;
+        private DispatcherTimer gamepadTimer;
+        private DispatcherTimer timer;
         private readonly string shortcutPath;
         public ObservableCollection<Shortcut> Shortcuts { get; set; }
-
-        private DispatcherTimer timer;
-        private bool isWelcomeMode = false;
-        private DispatcherTimer welcomeAutoCloseTimer;
-        private ProgressBar welcomeProgressBar;
-
-        // Check if another instance of this overlay is already running
-        private bool IsAnotherInstanceRunning()
-        {
-            var current = Process.GetCurrentProcess();
-            var others = Process.GetProcessesByName(current.ProcessName)
-                                .Where(p => p.Id != current.Id);
-            return others.Any();
-        }
+        private int currentExpanderIndex = 0;
+        private Expander[] categoryExpanders;
 
         public MainWindow()
         {
@@ -57,41 +37,31 @@ namespace OverlayWindow
                 this.Close();
                 return;
             }
-            RootPanel.Children.Add(toastContainer);
 
-            // Setup shortcut loading
             shortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "shortcuts");
             Shortcuts = new ObservableCollection<Shortcut>();
-            ShortcutCarousel.Items.Clear();
-            ShortcutCarousel.ItemsSource = Shortcuts;
+            ShortcutList.ItemsSource = Shortcuts;
 
-            // Styled welcome bar
-            welcomeProgressBar = new ProgressBar
-            {
-                Height = 6,
-                Margin = new Thickness(20),
-                Foreground = new SolidColorBrush(Color.FromRgb(0, 120, 215)),
-                Background = new SolidColorBrush(Color.FromRgb(50, 50, 50)),
-                Minimum = 0,
-                Maximum = 100,
-                Value = 0,
-                Visibility = Visibility.Collapsed
-            };
-            RootPanel.Children.Insert(1, welcomeProgressBar);
-
-            // Load shortcuts without showing anything
             LoadShortcuts();
-
-            // Start watchers
             StartShortcutWatcher();
             StartPipeServer();
 
-            // Ensure overlay remains hidden until a Pipe command comes
             this.Visibility = Visibility.Hidden;
+
+            // Gamepad UI setup
+            categoryExpanders = new[] { ShortcutExpander };
+            InitGamepadControl();
+
+           
         }
 
 
-        // Monitor shortcut directory continuously
+        private bool IsAnotherInstanceRunning()
+        {
+            var current = Process.GetCurrentProcess();
+            return Process.GetProcessesByName(current.ProcessName).Any(p => p.Id != current.Id);
+        }
+
         private void StartShortcutWatcher()
         {
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0) };
@@ -99,31 +69,26 @@ namespace OverlayWindow
             timer.Start();
         }
 
-        // Load all .json shortcut definitions
         private void LoadShortcuts()
         {
             try
             {
                 Shortcuts.Clear();
                 var files = Directory.GetFiles(shortcutPath, "*.json");
-
                 foreach (var file in files)
                 {
-                    string content = File.ReadAllText(file);
+                    var content = File.ReadAllText(file);
                     var shortcut = JsonSerializer.Deserialize<Shortcut>(content);
                     if (shortcut != null && shortcut.Enabled)
-                    {
                         Shortcuts.Add(shortcut);
-                    }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error loading shortcuts: " + ex.Message);
+                Console.WriteLine("Shortcut load error: " + ex.Message);
             }
         }
 
-        // Start named pipe server to receive overlay commands (TOGGLE, WELCOME)
         private void StartPipeServer()
         {
             Task.Run(() =>
@@ -141,245 +106,219 @@ namespace OverlayWindow
                         Dispatcher.Invoke(() =>
                         {
                             if (command == "TOGGLE")
-                            {
                                 ToggleOverlay();
-                            }
-                            else if (command == "WELCOME")
-                            {
-                                ToggleWelcomeMode();
-                            }
                             else if (command.StartsWith("NOTIFY:"))
-                            {
-                                string msg = command.Substring("NOTIFY:".Length).Trim();
-
-                                Application.Current.Dispatcher.Invoke(() =>
-                                {
-                                    var popup = new ToastPopup(msg, "🎮"); // Optional icon
-                                    popup.Show(); // Show the toast without stealing focus
-                                });
-                            }
-
-
-
+                                ShowToast(command.Substring(7));
                         });
                     }
-                    catch { /* Ignore pipe errors */ }
+                    catch { }
                 }
             });
         }
 
-        private void ShowToastNotification(string message)
+        private void ToggleOverlay()
         {
-            var popup = new ToastPopup(message);
+            double screenWidth = SystemParameters.PrimaryScreenWidth;
+            double targetLeft = screenWidth - this.Width;
+
+            if (this.Visibility == Visibility.Visible)
+            {
+                var slideOut = new DoubleAnimation
+                {
+                    To = screenWidth,
+                    Duration = TimeSpan.FromMilliseconds(300),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+                };
+                slideOut.Completed += (s, e) => this.Visibility = Visibility.Hidden;
+                this.BeginAnimation(Window.LeftProperty, slideOut);
+            }
+            else
+            {
+                this.Left = screenWidth; // Start off-screen
+                this.Visibility = Visibility.Visible;
+                this.Topmost = true;
+                this.Show();
+
+                // Focus handling (robust native version)
+                var helper = new System.Windows.Interop.WindowInteropHelper(this);
+                NativeMethods.SetForegroundWindow(helper.Handle); // Native call
+
+                this.Focus();
+                Keyboard.Focus(this);
+
+                Debug.WriteLine($"[DEBUG] Overlay is active: {this.IsActive}");
+                Debug.WriteLine($"[DEBUG] Focused element: {Keyboard.FocusedElement}");
+
+                var slideIn = new DoubleAnimation
+                {
+                    To = targetLeft,
+                    Duration = TimeSpan.FromMilliseconds(300),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                };
+                this.BeginAnimation(Window.LeftProperty, slideIn);
+            }
+        }
+
+
+
+
+        private void ShowToast(string message)
+        {
+            var popup = new ToastPopup(message, "🎮");
             popup.Show();
         }
 
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr SetWindowLong(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetWindowLong(IntPtr hWnd, int nIndex);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
-            int X, int Y, int cx, int cy, uint uFlags);
-
-        private const int GWL_EXSTYLE = -20;
-        private const int WS_EX_NOACTIVATE = 0x08000000;
-        private const int WS_EX_TOOLWINDOW = 0x00000080;
-        private const int WS_EX_TOPMOST = 0x00000008;
-
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_NOZORDER = 0x0004;
-        private const uint SWP_NOACTIVATE = 0x0010;
-        private const uint SWP_SHOWWINDOW = 0x0040;
-
-        private static void MakeWindowNoActivate(IntPtr hwnd)
+        private void InitGamepadControl()
         {
-            var exStyle = (int)GetWindowLong(hwnd, GWL_EXSTYLE);
-            exStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
-            SetWindowLong(hwnd, GWL_EXSTYLE, (IntPtr)exStyle);
+            gamepadTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+            gamepadTimer.Tick += GamepadTick;
 
-            SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            // Controller-Polling nur aktiv, wenn sichtbar
+            this.IsVisibleChanged += (s, e) =>
+            {
+                if (this.IsVisible)
+                {
+                    gamepadTimer.Start();
+                    FocusFirstExpander();
+                }
+                else
+                {
+                    gamepadTimer.Stop();
+                }
+            };
         }
-        private int activeToastCount = 0;
+
+        private void FocusFirstExpander()
+        {
+            if (categoryExpanders.Length > 0)
+            {
+                currentExpanderIndex = 0;
+                HighlightCurrentExpander();
+            }
+        }
+
+        private bool aWasPressed = false;
+        private bool bWasPressed = false;
+        private bool upWasPressed = false;
+        private bool downWasPressed = false;
+
+        private int lastPacketNumber = -1;
+
+        private void GamepadTick(object sender, EventArgs e)
+        {
+            if (!controller.IsConnected)
+            {
+                Debug.WriteLine("[DEBUG] Controller not connected");
+                controller = new Controller(UserIndex.One);
+                return;
+            }
+
+            var state = controller.GetState();
+
+            // Debug packet number
+            if (state.PacketNumber == lastPacketNumber)
+            {
+                Debug.WriteLine("[DEBUG] No new input (PacketNumber unchanged)");
+                return;
+            }
+
+            Debug.WriteLine($"[DEBUG] PacketNumber changed: {lastPacketNumber} -> {state.PacketNumber}");
+            lastPacketNumber = state.PacketNumber;
+
+            var buttons = state.Gamepad.Buttons;
+            var prevButtons = previousState.Gamepad.Buttons;
+
+            Debug.WriteLine($"[DEBUG] Current Buttons: {buttons}");
+
+            // DPad Down
+            if ((buttons & GamepadButtonFlags.DPadDown) != 0)
+                Console.WriteLine("[DEBUG] DPadDown PRESSED");
+            if ((buttons & GamepadButtonFlags.DPadDown) != 0 && (prevButtons & GamepadButtonFlags.DPadDown) == 0)
+            {
+                Debug.WriteLine("[DEBUG] DPadDown NEW PRESS → FocusNextCategory()");
+                FocusNextCategory();
+            }
+
+            // DPad Up
+            if ((buttons & GamepadButtonFlags.DPadUp) != 0)
+                Debug.WriteLine("[DEBUG] DPadUp PRESSED");
+            if ((buttons & GamepadButtonFlags.DPadUp) != 0 && (prevButtons & GamepadButtonFlags.DPadUp) == 0)
+            {
+                Debug.WriteLine("[DEBUG] DPadUp NEW PRESS → FocusPreviousCategory()");
+                FocusPreviousCategory();
+            }
+
+            // A Button
+            if ((buttons & GamepadButtonFlags.A) != 0)
+                Debug.WriteLine("[DEBUG] A PRESSED");
+            if ((buttons & GamepadButtonFlags.A) != 0 && (prevButtons & GamepadButtonFlags.A) == 0)
+            {
+                Debug.WriteLine("[DEBUG] A NEW PRESS → ToggleCurrentCategory()");
+                ToggleCurrentCategory();
+            }
+
+            // B Button
+            if ((buttons & GamepadButtonFlags.B) != 0)
+                Console.WriteLine("[DEBUG] B PRESSED");
+            if ((buttons & GamepadButtonFlags.B) != 0 && (prevButtons & GamepadButtonFlags.B) == 0)
+            {
+                Console.WriteLine("[DEBUG] B NEW PRESS → CollapseCurrentCategory()");
+                CollapseCurrentCategory();
+            }
+
+            previousState = state;
+        }
 
 
-        // Toggle regular shortcut overlay on/off
-        private void ToggleOverlay()
+
+
+
+        private void FocusNextCategory()
+        {
+            currentExpanderIndex = (currentExpanderIndex + 1) % categoryExpanders.Length;
+            HighlightCurrentExpander();
+        }
+
+        private void FocusPreviousCategory()
+        {
+            currentExpanderIndex = (currentExpanderIndex - 1 + categoryExpanders.Length) % categoryExpanders.Length;
+            HighlightCurrentExpander();
+        }
+
+        private void ToggleCurrentCategory()
+        {
+            if (categoryExpanders.Length == 0) return;
+            var exp = categoryExpanders[currentExpanderIndex];
+            exp.IsExpanded = !exp.IsExpanded;
+        }
+
+        private void CollapseCurrentCategory()
+        {
+            if (categoryExpanders.Length == 0) return;
+            categoryExpanders[currentExpanderIndex].IsExpanded = false;
+        }
+
+        private void HighlightCurrentExpander()
+        {
+            for (int i = 0; i < categoryExpanders.Length; i++)
+            {
+                categoryExpanders[i].BorderThickness = (i == currentExpanderIndex) ? new Thickness(3) : new Thickness(1);
+                categoryExpanders[i].BorderBrush = (i == currentExpanderIndex) ? Brushes.DodgerBlue : Brushes.Gray;
+            }
+
+            categoryExpanders[currentExpanderIndex].Focus();
+        }
+
+        private void Window_Deactivated(object sender, EventArgs e)
         {
             if (this.Visibility == Visibility.Visible)
             {
-                this.Hide();
+                Debug.WriteLine("[DEBUG] Lost focus → overlay will close");
+                ToggleOverlay();
             }
-            else
-            {
-                isWelcomeMode = false;
-                WelcomeText.Visibility = Visibility.Collapsed;
-                WelcomeShortcutScroll.Visibility = Visibility.Collapsed;
-                ShortcutCarousel.Visibility = Visibility.Visible;
-                welcomeProgressBar.Visibility = Visibility.Collapsed;
-
-                this.Show();
-                this.Topmost = true;
-                this.Activate();
-            }
-        }
-
-        // Toggle animated welcome mode
-        private void ToggleWelcomeMode()
-        {
-            if (isWelcomeMode && this.Visibility == Visibility.Visible)
-            {
-                CloseWelcome();
-            }
-            else
-            {
-                WelcomeText.Visibility = Visibility.Visible;
-                WelcomeShortcutScroll.Visibility = Visibility.Visible;
-                ShortcutCarousel.Visibility = Visibility.Collapsed;
-                welcomeProgressBar.Visibility = Visibility.Visible;
-
-                this.Show();
-                this.Topmost = true;
-                this.Activate();
-
-                isWelcomeMode = true;
-                StartWelcomeSlide();
-
-                // Calculate total animation duration
-                double totalDuration = Shortcuts.Count * 1.5 + 1.5;
-                double interval = totalDuration / 100.0;
-
-                welcomeProgressBar.Value = 0;
-
-                welcomeAutoCloseTimer = new DispatcherTimer
-                {
-                    Interval = TimeSpan.FromSeconds(interval)
-                };
-
-                welcomeAutoCloseTimer.Tick += (s, e) =>
-                {
-                    welcomeProgressBar.Value += 1;
-                    if (welcomeProgressBar.Value >= 100)
-                    {
-                        welcomeAutoCloseTimer.Stop();
-                        CloseWelcome();
-                    }
-                };
-
-                welcomeAutoCloseTimer.Start();
-            }
-        }
-
-        // Hides welcome mode but keeps the app running
-        private void CloseWelcome()
-        {
-            WelcomeText.Visibility = Visibility.Collapsed;
-            WelcomeShortcutScroll.Visibility = Visibility.Collapsed;
-            ShortcutCarousel.Visibility = Visibility.Collapsed;
-            welcomeProgressBar.Visibility = Visibility.Collapsed;
-            isWelcomeMode = false;
-            this.Visibility = Visibility.Hidden;
-        }
-
-        // Slide through all shortcuts in welcome scroll viewer
-        private void StartWelcomeSlide()
-        {
-            if (Shortcuts.Count == 0)
-                return;
-
-            WelcomeShortcutViewer.Children.Clear();
-
-            foreach (var shortcut in Shortcuts)
-            {
-                var panel = CreateShortcutPanel(shortcut);
-                WelcomeShortcutViewer.Children.Add(panel);
-            }
-
-            double targetOffset = Math.Max(0, (Shortcuts.Count - 2) * 120);
-            ScrollAnimationHelper.AnimateVerticalScroll(WelcomeShortcutScroll, 0, targetOffset, Shortcuts.Count * 1.5);
-            WelcomeShortcutScroll.ScrollToVerticalOffset(0);
-        }
-
-        // Create one visual tile for each shortcut
-        private UIElement CreateShortcutPanel(Shortcut shortcut)
-        {
-            var border = new Border
-            {
-                Background = new LinearGradientBrush(
-                    Color.FromRgb(40, 45, 60),
-                    Color.FromRgb(25, 25, 35),
-                    new Point(0, 0),
-                    new Point(1, 1)),
-                Width = 420,
-                Height = 110,
-                CornerRadius = new CornerRadius(20),
-                Padding = new Thickness(15),
-                Margin = new Thickness(10),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0, 120, 215)),
-                BorderThickness = new Thickness(2)
-            };
-
-            var stack = new StackPanel();
-            var keyText = new TextBlock
-            {
-                FontSize = 26,
-                Foreground = new SolidColorBrush(Color.FromRgb(200, 220, 255)),
-                FontWeight = FontWeights.SemiBold,
-                TextAlignment = TextAlignment.Center,
-                Text = $"{shortcut.Key1} + {shortcut.Key2}"
-            };
-
-            var functionText = new TextBlock
-            {
-                FontSize = 20,
-                Foreground = new SolidColorBrush(Color.FromRgb(170, 170, 170)),
-                TextAlignment = TextAlignment.Center,
-                Margin = new Thickness(0, 8, 0, 0),
-                Text = shortcut.Function
-            };
-
-            stack.Children.Add(keyText);
-            stack.Children.Add(functionText);
-            border.Child = stack;
-            return border;
         }
     }
 
-    // Helper class to scroll vertically via animation
-    public static class ScrollAnimationHelper
-    {
-        private static readonly DependencyProperty DummyOffsetProperty =
-            DependencyProperty.RegisterAttached(
-                "DummyOffset", typeof(double), typeof(ScrollAnimationHelper),
-                new PropertyMetadata(0.0, OnDummyOffsetChanged));
-
-        private static void OnDummyOffsetChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            if (d is ScrollViewer scrollViewer)
-            {
-                scrollViewer.ScrollToVerticalOffset((double)e.NewValue);
-            }
-        }
-
-        public static void AnimateVerticalScroll(ScrollViewer scrollViewer, double from, double to, double durationSeconds)
-        {
-            var animation = new DoubleAnimation
-            {
-                From = from,
-                To = to,
-                Duration = TimeSpan.FromSeconds(durationSeconds),
-                RepeatBehavior = RepeatBehavior.Forever
-            };
-            scrollViewer.BeginAnimation(DummyOffsetProperty, animation);
-        }
-    }
-
-    // Data model for shortcuts
     public class Shortcut
     {
         public string Key1 { get; set; }
@@ -387,10 +326,10 @@ namespace OverlayWindow
         public string Function { get; set; }
         public bool Enabled { get; set; }
     }
+}
 
-    
-    
-    }
-
-
-
+internal static class NativeMethods
+{
+    [DllImport("user32.dll")]
+    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+}

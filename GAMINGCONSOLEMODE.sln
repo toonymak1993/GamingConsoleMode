@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaskHelper", "TaskHelper\Ta
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OverlayWindow", "OverlayWindow\OverlayWindow.csproj", "{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "gcminstaller", "gcminstaller\gcminstaller.csproj", "{8D17534F-B5A0-4FDC-8B86-1830B07F5306}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM64 = Debug|ARM64
@@ -95,6 +97,18 @@ Global
 		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x64.Build.0 = Release|Any CPU
 		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x86.ActiveCfg = Release|Any CPU
 		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x86.Build.0 = Release|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Debug|x64.Build.0 = Debug|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Debug|x86.Build.0 = Debug|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Release|ARM64.Build.0 = Release|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Release|x64.ActiveCfg = Release|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Release|x64.Build.0 = Release|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Release|x86.ActiveCfg = Release|Any CPU
+		{8D17534F-B5A0-4FDC-8B86-1830B07F5306}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

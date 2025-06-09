@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="SharpDX.XInput" Version="4.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Resource Include="Assets\controller.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Resource>
