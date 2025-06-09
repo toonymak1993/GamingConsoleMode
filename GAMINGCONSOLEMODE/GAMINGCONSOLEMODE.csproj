@@ -34,6 +34,7 @@
     <Content Remove="Assets\onboarding\flowlauncher.png" />
     <Content Remove="Assets\onboarding\functions_gcm.png" />
     <Content Remove="Assets\onboarding\shortcuts.png" />
+    <Content Remove="Assets\onboarding\shortcutsnorm.png" />
     <Content Remove="Assets\onboarding\taskmanager_gcmloader.png" />
     <Content Remove="Assets\Play.png" />
     <Content Remove="Assets\playnite_logo.png" />
@@ -117,6 +118,9 @@
     <EmbeddedResource Include="Assets\onboarding\functions_gcm.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\shortcutsnorm.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\shortcuts.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -196,6 +200,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="nircmd.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\onscreenkeyboard.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
   </ItemGroup>

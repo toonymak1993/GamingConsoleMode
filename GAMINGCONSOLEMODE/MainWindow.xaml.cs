@@ -22,6 +22,8 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
+using Windows.Media.Capture;
+using System.Collections.Generic;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -40,7 +42,7 @@ namespace GAMINGCONSOLEMODE
 
         string owner = "toonymak1993";  // Repository owner
     string repo = "GameConsoleMode";  // Repository name
-    string currentVersion = "2.1.1";  // Your current version // <change when new Verison
+    string currentVersion = "2.2.0";  // Your current version // <change when new Verison
         public MainWindow()
         {
             this.InitializeComponent();
@@ -86,6 +88,7 @@ namespace GAMINGCONSOLEMODE
                 #endregion onboarding
             _ = UpdateCheck(this);
             Updateui();
+            initialshortcuts();
         }
 
         #region programm start
@@ -428,7 +431,55 @@ namespace GAMINGCONSOLEMODE
                
         }
         #endregion start
+
+        #region initialshortcuts
+
+        public class Shortcut
+        {
+            public string Key1 { get; set; }
+            public string Key2 { get; set; }
+            public string Function { get; set; }
+            public bool Enabled { get; set; }
+        }
+
+        private void initialshortcuts()
+        {
+            try
+            {
+                // Zielpfad im AppData-Verzeichnis (benutzerspezifisch)
+                string targetDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "shortcuts");
+
+                // Quellpfad im Installationsverzeichnis
+                string sourceDir = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\shortcutsinitial";
+
+                // Sicherheitscheck: existiert das Zielverzeichnis?
+                if (!Directory.Exists(targetDir))
+                    Directory.CreateDirectory(targetDir);
+
+                // Dateinamen, die geprüft und ggf. kopiert werden sollen
+                string[] requiredFiles = { "taskmanager.json", "show overlay.json" };
+
+                foreach (var fileName in requiredFiles)
+                {
+                    string targetFile = Path.Combine(targetDir, fileName);
+                    string sourceFile = Path.Combine(sourceDir, fileName);
+
+                    // Nur kopieren, wenn nicht bereits vorhanden
+                    if (!File.Exists(targetFile) && File.Exists(sourceFile))
+                    {
+                        File.Copy(sourceFile, targetFile);
+                        Console.WriteLine($"[OK] Copied missing file: {fileName}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] {ex.Message}");
+            }
+        }
     }
+        #endregion initialshortcuts
+    
 
     public static class WindowExtensions
     {

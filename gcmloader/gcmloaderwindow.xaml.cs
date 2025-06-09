@@ -471,25 +471,51 @@ namespace gcmloader
         private DiscordSocketClient _client;
 
         #region Handhelds
-        public static bool   IsHandheld()
+        public static bool IsHandheld()
         {
             try
             {
                 using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS");
                 if (key != null)
                 {
+                    // Read known identifiers from BIOS
                     string family = key.GetValue("SystemFamily")?.ToString() ?? string.Empty;
+                    string product = key.GetValue("SystemProductName")?.ToString() ?? string.Empty;
+                    string sku = key.GetValue("SystemSKU")?.ToString() ?? string.Empty;
 
+                    // Check original known handhelds
                     if (!string.IsNullOrEmpty(family))
                     {
-                        return family.Contains("ROG Ally", StringComparison.OrdinalIgnoreCase) ||
-                               family.Contains("Claw", StringComparison.OrdinalIgnoreCase);
+                        if (family.Contains("ROG Ally", StringComparison.OrdinalIgnoreCase) ||
+                            family.Contains("Claw", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+
+                    // Check against list of known handheld identifiers
+                    string[] handheldIdentifiers = new[]
+                    {
+                "rog ally", "claw", "steam deck", "one-netbook", "onexplayer", "ayaneo"
+            };
+
+                    // Check all values for known handheld strings
+                    foreach (string value in new[] { family, product, sku })
+                    {
+                        foreach (string id in handheldIdentifiers)
+                        {
+                            if (!string.IsNullOrEmpty(value) &&
+                                value.Contains(id, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return true;
+                            }
+                        }
                     }
                 }
             }
             catch
             {
-                // fail silently
+                // fail silently if registry access fails
             }
 
             return false;
@@ -579,6 +605,8 @@ namespace gcmloader
         #endregion methodes for code
         #region functions
         #region rog ally
+
+        // not needed in Hybrid version
         private void allybuttonfix()
         {
             string audioSwitchExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "AudioSwitch", "AudioSwitch.exe");
@@ -908,9 +936,17 @@ namespace gcmloader
         {
             try
             {
-                bool gcmwallpaper = AppSettings.Load<bool>("gcmwallpaper");
+                try
+                {
+                    bool gcmwallpapercheck = AppSettings.Load<bool>("gcmwallpaper");
+                }
+                catch
+                {    // If the setting is not found, default to false
+                    AppSettings.Save("gcmwallpaper", false);
+                }
 
                 string imagePath;
+                bool gcmwallpaper = AppSettings.Load<bool>("gcmwallpaper");
 
                 if (gcmwallpaper)
                 {
@@ -2115,42 +2151,27 @@ namespace gcmloader
                     #region pre install/start check if needed
                     if (IsHandheld() == true)
                     {
-                        //Device is Rog ally
-                        // check for Audio Button Software
-                        // Define the path to the AudioSwitch executable
-                        string exePath = Path.Combine(
-                            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                            "AudioSwitch",
-                            "AudioSwitch.exe"
-                        );
-
-                        // path to audioswitch settings
-                        string settingsPath = Path.Combine(
-                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                            "AudioSwitch",
-                            "Settings.xml"
-                        );
-
-                        // Check if both the executable and the settings file exist
-                        if (File.Exists(exePath) && File.Exists(settingsPath))
-                        {
+                       
+                        // Handheld Launcher
                             try
                             {
-                                // Start the AudioSwitch executable
-                                Process.Start(exePath);
-                            }
-                            catch (Exception ex)
+                            bool handheldlauncher = AppSettings.Load<bool>("handheldtouchlauncher");
+                            if(handheldlauncher)
                             {
-                                // Log any error while trying to start the process
-                                Console.WriteLine("Failed to start AudioSwitch: " + ex.Message);
+                                LauncherTileRow.Visibility = Visibility.Visible;
+                                infopanelright.Visibility = Visibility.Visible;
                             }
-                        }
-                        else
-                        {
-                            //install and start the fix
-                            allybuttonfix();
-                        }
+                            else
+                            {
+                                LauncherTileRow.Visibility = Visibility.Collapsed;
+                                infopanelright.Visibility = Visibility.Collapsed;
+                            }
 
+                            }
+                            catch
+                            {
+                            AppSettings.Save("handheldtouchlauncher", false);
+                            }
                     }
                     #endregion pre install/start check if needed
                     Console.WriteLine("--startupvideo--");
@@ -2195,7 +2216,7 @@ namespace gcmloader
                     #region Ally
                     if(IsHandheld() == true)
                     {
-                        KillTargetProcess("AudioSwitch");
+                       
                     }
                     #endregion Ally
                     #endregion Handheld
@@ -2390,6 +2411,7 @@ namespace gcmloader
     "Windows-Betriebssystem",
     "ApplicationFrameHost",
     "ShellExperienceHost",
+    "Realtek Audio Console",
     "StartMenuExperienceHost"
 };
 

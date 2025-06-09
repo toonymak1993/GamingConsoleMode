@@ -1,87 +1,42 @@
-<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="GAMINGCONSOLEMODE.onboarding"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:GAMINGCONSOLEMODE"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d"
-    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    xmlns:local="using:GAMINGCONSOLEMODE">
 
     <Grid>
+        <!-- Hintergrund Steam Gradient -->
+        <Grid.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#1B2838" Offset="0.0"/>
+                <GradientStop Color="#2A475E" Offset="0.5"/>
+                <GradientStop Color="#171A21" Offset="1.0"/>
+            </LinearGradientBrush>
+        </Grid.Background>
+
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <!-- Header -->
-            <RowDefinition Height="Auto"/>
-            <!-- Navigation Buttons -->
             <RowDefinition Height="*"/>
-            <!-- Scrollable Content -->
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header -->
-        <TextBlock x:Name="HeaderTextBlock"
-                   Text="Welcome to the GCM Onboarding"
-                   FontSize="36"
-                   FontWeight="Bold"
-                   Margin="0,0,0,20"
-                   HorizontalAlignment="Center"
-                   Grid.Row="0"/>
+        <!-- SLIDE HOST -->
+        <ScrollViewer Grid.Row="0"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <Grid x:Name="SlideContainer"
+                  HorizontalAlignment="Center"
+                  MaxWidth="800"
+                  Padding="20"/>
+        </ScrollViewer>
 
-        <!-- Navigation Buttons (top) -->
+        <!-- Navigation Buttons -->
         <StackPanel Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     Grid.Row="1"
-                    Spacing="10">
-            <Button x:Name="BackButton"
-                    Content="Back"
-                    Click="BackButton_Click"
-                    Width="100"/>
-
-            <Button x:Name="NextButton"
-                    Content="Next"
-                    Click="NextButton_Click"
-                    Width="100"/>
-
-            
+                    Spacing="20"
+                    Margin="0,10,0,20">
+            <Button Content="Back" Click="BackButton_Click"/>
+            <Button Content="Next" Click="NextButton_Click"/>
         </StackPanel>
-
-        <!-- Scrollable content -->
-        <ScrollViewer Grid.Row="2"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled">
-            <StackPanel x:Name="ContentPanel"
-                        Padding="20"
-                        Spacing="20"
-                        HorizontalAlignment="Center"
-                        MaxWidth="800">
-
-                <!-- Onboarding Image with Click-to-Zoom -->
-                <Viewbox MaxHeight="250" MaxWidth="600" Stretch="Uniform">
-                    <Border CornerRadius="30"
-                            Background="Transparent"
-                            Tapped="OnboardingImage_Tapped">
-                        <Image x:Name="OnboardingImage"
-                               Stretch="UniformToFill"/>
-                    </Border>
-                </Viewbox>
-
-                <!-- Description Text -->
-                <Border Background="#1F000000"
-                        Padding="20"
-                        CornerRadius="12">
-                    <TextBlock x:Name="DescriptionTextBlock"
-                               TextWrapping="WrapWholeWords"
-                               FontSize="18"
-                               LineHeight="28"
-                               Text="This is the first step of your journey..." />
-                </Border>
-
-                <!-- Dynamic content area for extra buttons or controls -->
-                <StackPanel x:Name="CustomContentArea"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Bottom"/>
-            </StackPanel>
-        </ScrollViewer>
     </Grid>
 </Page>

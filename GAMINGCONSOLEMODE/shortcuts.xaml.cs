@@ -18,6 +18,7 @@ using Orientation = Microsoft.UI.Xaml.Controls.Orientation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Configuration;
 using Windows.Storage.Provider;
+using Microsoft.UI.Text;
 
 namespace GAMINGCONSOLEMODE
 {
@@ -32,7 +33,7 @@ namespace GAMINGCONSOLEMODE
 
         private readonly string[] gamepadButtonswin = new[]
         {
-            "DPadUp", "DPadDown", "DPadLeft", "DPadRight",
+            "DPadUp", "DPadDown", "DPadLeft","LeftThumb","RightThumb","DPadRight",
             "Start", "Back","A", "B", "X", "Y"
         };
 
@@ -70,18 +71,7 @@ namespace GAMINGCONSOLEMODE
 
         private void updateui()
         {
-            // Load and apply setting for showshortcutsatstartup
-            try
-            {
-                bool value = AppSettings.Load<bool>("showshortcutsatstartup");
-                showshortcutsatstartup.IsOn = value;
-            }
-            catch
-            {
-                // If not found or invalid, default to false
-                showshortcutsatstartup.IsOn = false;
-                AppSettings.Save("showshortcutsatstartup", false);
-            }
+            
 
             // Load and apply setting for shortcutpopup
             try
@@ -228,12 +218,14 @@ namespace GAMINGCONSOLEMODE
 
             var removeBtn = new Button
             {
-                Content = "DEL",
-                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 51, 51, 51)),
+                Content = "✕", // Unicode X (schöner als normales X)
+                Background = new SolidColorBrush(Colors.Brown),
                 Foreground = new SolidColorBrush(Colors.White),
-                Padding = new Thickness(5, 5, 5, 5),
+                Padding = new Thickness(5),
                 BorderThickness = new Thickness(0),
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold
             };
             removeBtn.Click += (s, args) => {
                 ShortcutPanel.Children.Remove(border);
@@ -806,25 +798,6 @@ namespace GAMINGCONSOLEMODE
         #endregion winshortcuts
 
         #region settings center
-        private void showshortcutsatstartup_Toggled(object sender, RoutedEventArgs e)
-        {
-        
-            // Cast sender to ToggleSwitch to get IsOn value
-            if (sender is ToggleSwitch toggle)
-            {
-                if (toggle.IsOn)
-                {
-                    // Save true if toggled on
-                    AppSettings.Save("showshortcutsatstartup", true);
-                }
-                else
-                {
-                    // Save false if toggled off
-                    AppSettings.Save("showshortcutsatstartup", false);
-                }
-            }
-        
-        }
 
         private void shortcutpopup_Toggled(object sender, RoutedEventArgs e)
         {

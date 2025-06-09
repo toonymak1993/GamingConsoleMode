@@ -9,79 +9,80 @@
     Background="#FF1E1E1E">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
+        
         <StackPanel Padding="24" Spacing="24">
-            <TextBlock Text="Launcher" HorizontalAlignment="Center" FontSize="25"/>
-
+            <TextBlock Text="Handheld Touch Launcher" HorizontalAlignment="Center" FontSize="25"/>
+            <ToggleSwitch x:Name="handheldtouchlauncher" VerticalAlignment="Center" HorizontalAlignment="Center" Toggled="handheldtouchlauncher_Toggled"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
 
                 <!-- Launcher 1 -->
-                <StackPanel Width="100" Spacing="6" HorizontalAlignment="Center">
-                    <Border Width="100" Height="120" CornerRadius="15" Background="#444">
+                <StackPanel Width="120" Spacing="6" HorizontalAlignment="Center">
+                    <Border Width="120" Height="120" CornerRadius="15" Background="#444">
                         <Image x:Name="Image1"
        Stretch="Uniform"
        HorizontalAlignment="Center"
        VerticalAlignment="Center"/>
                     </Border>
-                    <Button Click="SelectImage1_Click" FontSize="12" Padding="6" MinWidth="100" Content="📂 Image"/>
-                    <Button Click="SelectLink1_Click" FontSize="12" Padding="6" MinWidth="100" Content="🔗 Link"/>
-                    <Button Click="Test1_Click" FontSize="12" Padding="6" MinWidth="100" Content="▶ Test" Background="#007ACC" Foreground="White"/>
-                    <Button Click="Reset1_Click" FontSize="12" Padding="6" MinWidth="100" Content="🗑 Reset" Background="#993333" Foreground="White"/>
+                    <Button Click="SelectImage1_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
+                    <Button Click="SelectLink1_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                    <Button Click="Test1_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
+                    <Button Click="Reset1_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
                 </StackPanel>
 
                 <!-- Launcher 2 -->
-                <StackPanel Width="100" Spacing="6" HorizontalAlignment="Center">
-                    <Border Width="100" Height="120" CornerRadius="15" Background="#444">
+                <StackPanel Width="120" Spacing="6" HorizontalAlignment="Center">
+                    <Border Width="120" Height="120" CornerRadius="15" Background="#444">
                         <Image x:Name="Image2"
        Stretch="Uniform"
        HorizontalAlignment="Center"
        VerticalAlignment="Center"/>
                     </Border>
-                    <Button Click="SelectImage2_Click" FontSize="12" Padding="6" MinWidth="100" Content="📂 Image"/>
-                    <Button Click="SelectLink2_Click" FontSize="12" Padding="6" MinWidth="100" Content="🔗 Link"/>
-                    <Button Click="Test2_Click" FontSize="12" Padding="6" MinWidth="100" Content="▶ Test" Background="#007ACC" Foreground="White"/>
-                    <Button Click="Reset2_Click" FontSize="12" Padding="6" MinWidth="100" Content="🗑 Reset" Background="#993333" Foreground="White"/>
+                    <Button Click="SelectImage2_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
+                    <Button Click="SelectLink2_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                    <Button Click="Test2_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
+                    <Button Click="Reset2_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
                 </StackPanel>
 
                 <!-- Launcher 3 -->
-                <StackPanel Width="100" Spacing="6" HorizontalAlignment="Center">
-                    <Border Width="100" Height="120" CornerRadius="15" Background="#444">
+                <StackPanel Width="120" Spacing="6" HorizontalAlignment="Center">
+                    <Border Width="120" Height="120" CornerRadius="15" Background="#444">
                         <Image x:Name="Image3"
        Stretch="Uniform"
        HorizontalAlignment="Center"
        VerticalAlignment="Center"/>
                     </Border>
-                    <Button Click="SelectImage3_Click" FontSize="12" Padding="6" MinWidth="100" Content="📂 Image"/>
-                    <Button Click="SelectLink3_Click" FontSize="12" Padding="6" MinWidth="100" Content="🔗 Link"/>
-                    <Button Click="Test3_Click" FontSize="12" Padding="6" MinWidth="100" Content="▶ Test" Background="#007ACC" Foreground="White"/>
-                    <Button Click="Reset3_Click" FontSize="12" Padding="6" MinWidth="100" Content="🗑 Reset" Background="#993333" Foreground="White"/>
+                    <Button Click="SelectImage3_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
+                    <Button Click="SelectLink3_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                    <Button Click="Test3_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
+                    <Button Click="Reset3_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
                 </StackPanel>
 
                 <!-- Launcher 4 -->
-                <StackPanel Width="100" Spacing="6" HorizontalAlignment="Center">
-                    <Border Width="100" Height="120" CornerRadius="15" Background="#444">
+                <StackPanel Width="120" Spacing="6" HorizontalAlignment="Center">
+                    <Border Width="120" Height="120" CornerRadius="15" Background="#444">
                         <Image x:Name="Image4"
        Stretch="Uniform"
        HorizontalAlignment="Center"
        VerticalAlignment="Center"/>
                     </Border>
-                    <Button Click="SelectImage4_Click" FontSize="12" Padding="6" MinWidth="100" Content="📂 Image"/>
-                    <Button Click="SelectLink4_Click" FontSize="12" Padding="6" MinWidth="100" Content="🔗 Link"/>
-                    <Button Click="Test4_Click" FontSize="12" Padding="6" MinWidth="100" Content="▶ Test" Background="#007ACC" Foreground="White"/>
-                    <Button Click="Reset4_Click" FontSize="12" Padding="6" MinWidth="100" Content="🗑 Reset" Background="#993333" Foreground="White"/>
+                    <Button Click="SelectImage4_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
+                    <Button Click="SelectLink4_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                    <Button Click="Test4_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
+                    <Button Click="Reset4_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
                 </StackPanel>
 
                 <!-- Launcher 5 -->
-                <StackPanel Width="100" Spacing="6" HorizontalAlignment="Center">
-                    <Border Width="100" Height="120" CornerRadius="15" Background="#444">
+                <StackPanel Width="120" Spacing="6" HorizontalAlignment="Center">
+                    <Border Width="120" Height="120" CornerRadius="15" Background="#444">
                         <Image x:Name="Image5"
        Stretch="Uniform"
        HorizontalAlignment="Center"
        VerticalAlignment="Center"/>
                     </Border>
-                    <Button Click="SelectImage5_Click" FontSize="12" Padding="6" MinWidth="100" Content="📂 Image"/>
-                    <Button Click="SelectLink5_Click" FontSize="12" Padding="6" MinWidth="100" Content="🔗 Link"/>
-                    <Button Click="Test5_Click" FontSize="12" Padding="6" MinWidth="100" Content="▶ Test" Background="#007ACC" Foreground="White"/>
-                    <Button Click="Reset5_Click" FontSize="12" Padding="6" MinWidth="100" Content="🗑 Reset" Background="#993333" Foreground="White"/>
+                    <Button Click="SelectImage5_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
+                    <Button Click="SelectLink5_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                    <Button Click="Test5_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
+                    <Button Click="Reset5_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
                 </StackPanel>
             </StackPanel>
         </StackPanel>

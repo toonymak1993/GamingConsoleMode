@@ -26,9 +26,65 @@ namespace GAMINGCONSOLEMODE
             LoadImageIfExists(Image3, "button3");
             LoadImageIfExists(Image4, "button4");
             LoadImageIfExists(Image5, "button5");
+            LoadHandheldTouchLauncherSetting();
+
         }
         #endregion update ui
         #region launcher
+
+        private void LoadHandheldTouchLauncherSetting()
+        {
+            try
+            {
+                // Try to load the saved setting; default to false if it fails
+                bool isOn = false;
+
+                try
+                {
+                    isOn = AppSettings.Load<bool>("handheldtouchlauncher");
+                }
+                catch
+                {
+                    isOn = false; // fallback if key doesn't exist or fails
+                }
+
+                // Apply the value to the ToggleSwitch's IsOn property
+                handheldtouchlauncher.IsOn = isOn;
+            }
+            catch
+            {
+                // fail silently to avoid crashing
+            }
+        }
+
+
+
+        private void handheldtouchlauncher_Toggled(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Cast sender to ToggleSwitch
+                if (sender is ToggleSwitch toggle)
+                {
+                    if (toggle.IsOn)
+                    {
+                        // Save true if switch is turned on
+                        AppSettings.Save("handheldtouchlauncher", true);
+                    }
+                    else
+                    {
+                        // Save false if switch is turned off
+                        AppSettings.Save("handheldtouchlauncher", false);
+                    }
+                }
+            }
+            catch
+            {
+                // Silent fail, optional logging can be added here
+            }
+        }
+
+
         // Helper method to load image if path exists
         private void LoadImageIfExists(Image imageControl, string keyName)
         {
@@ -168,5 +224,6 @@ namespace GAMINGCONSOLEMODE
 
         #endregion launcher
 
+       
     }
 }

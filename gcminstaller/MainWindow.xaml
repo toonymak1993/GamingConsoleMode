@@ -1,0 +1,62 @@
+﻿<Window x:Class="gcminstaller.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="GameConsoleMode Installer"
+        Height="600" Width="600"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#f3f3f3"
+        FontFamily="Segoe UI"
+        Loaded="Window_Loaded">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- Header -->
+            <RowDefinition Height="150"/>
+            <!-- Changelog -->
+            <RowDefinition Height="*"/>
+            <!-- Content -->
+            <RowDefinition Height="Auto"/>
+            <!-- Footer -->
+        </Grid.RowDefinitions>
+
+        <!-- HEADER mit PNG-Logo -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Top" Margin="0,0,0,10">
+            <Image Source="/logo.png" Width="67" Height="71" Margin="0,0,16,0"/>
+            <StackPanel Orientation="Vertical">
+                <TextBlock Text="GameConsoleMode Installer" FontSize="22" FontWeight="Bold" Foreground="#333"/>
+                <TextBlock Text="Downloads the latest GCM setup and starts it." FontSize="13" Foreground="#666"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- CHANGELOG SCROLLVIEW -->
+        <Border Grid.Row="1" BorderBrush="#CCC" BorderThickness="1" CornerRadius="5" Background="White" Padding="8">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="ChangelogTextBlock"
+                           Text="Loading changelog..."
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="#444"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- CONTENT -->
+        <StackPanel Grid.Row="2" VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
+            <ProgressBar x:Name="InstallerProgressBar" Height="20" Minimum="0" Maximum="100" Margin="0,20,0,10"/>
+            <TextBlock x:Name="StatusText" Text="Waiting to start..." FontSize="12" Foreground="#555" TextAlignment="Center"/>
+        </StackPanel>
+
+        <!-- FOOTER -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button x:Name="StartInstallButton"
+                    Content="Start Installation"
+                    Width="160"
+                    Height="35"
+                    Background="#0078D4"
+                    Foreground="White"
+                    FontWeight="SemiBold"
+                    Click="StartInstallButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
