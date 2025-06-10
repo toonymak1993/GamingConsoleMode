@@ -262,7 +262,7 @@
 
                         <Button x:Name="startupvideobutton"  Click="startupvideobutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel Tag="DISABLED">
-                                <Image Source="/Assets/Startup_Video.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <Image Source="/functions/Startup_Video.gif" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
                                 <TextBlock Text="Startup Video" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
                                 <TextBlock Text="Change your startup video when booting into GCM!" Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
                                 <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">

@@ -36,6 +36,7 @@ using Application = Microsoft.UI.Xaml.Application;
 using Image = Microsoft.UI.Xaml.Controls.Image;
 using Microsoft.Windows.AppNotifications.Builder;
 using Microsoft.Windows.AppNotifications;
+using Microsoft.UI.Xaml.Input;
 
 
 
@@ -161,6 +162,15 @@ namespace gcmloader
         public MainWindow()
         {
             this.InitializeComponent();
+            // Zugriff auf das Grid-Root-Element
+            if (this.Content is FrameworkElement rootElement)
+            {
+                rootElement.KeyDown += MainWindow_KeyDown;
+                rootElement.Loaded += (_, __) =>
+                {
+                    rootElement.Focus(FocusState.Programmatic);
+                };
+            }
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Application.Current.UnhandledException += CurrentApp_UnhandledException;
@@ -2151,20 +2161,24 @@ namespace gcmloader
                     #region pre install/start check if needed
                     if (IsHandheld() == true)
                     {
-                       
+
+                        //infopanel
+                        wifibutton.Visibility = Visibility.Visible;
+                        blebutton.Visibility = Visibility.Visible;
+
                         // Handheld Launcher
-                            try
+                        try
                             {
                             bool handheldlauncher = AppSettings.Load<bool>("handheldtouchlauncher");
                             if(handheldlauncher)
                             {
                                 LauncherTileRow.Visibility = Visibility.Visible;
-                                infopanelright.Visibility = Visibility.Visible;
+                               
                             }
                             else
                             {
                                 LauncherTileRow.Visibility = Visibility.Collapsed;
-                                infopanelright.Visibility = Visibility.Collapsed;
+                              
                             }
 
                             }
@@ -2508,15 +2522,6 @@ namespace gcmloader
                 TextAlignment = TextAlignment.Center
             };
 
-            // Hinweistext für Controller-Steuerung
-            var hint = new Microsoft.UI.Xaml.Controls.TextBlock
-            {
-                Text = "Press A to Start, B to Close",
-                FontSize = 14,
-                Foreground = new SolidColorBrush(Colors.Gray),
-                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
-                Margin = new Thickness(0, 10, 0, 0)
-            };
 
             // Inhalt der Karte
             var cardContent = new StackPanel
@@ -2525,7 +2530,7 @@ namespace gcmloader
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 30, 30, 30)),
                 CornerRadius = new CornerRadius(20),
                 Padding = new Thickness(20),
-                Children = { title, image, hint }
+                Children = { title, image}
             };
 
             // Border für visuelles Highlight
@@ -2707,47 +2712,24 @@ namespace gcmloader
 
         private const uint KEYEVENTF_KEYDOWN = 0x0000;
         private const uint KEYEVENTF_KEYUP = 0x0002;
+        private bool isAltTabMode = false;
 
         private void SendAltTab()
         {
-            //usernotification
             SendOverlayNotification("Shortcut: Switch Tab");
 
-            if (!_altTabCycleActive)
+            if (!isAltTabMode)
             {
-                // Start Alt+Tab loop
-                _altTabCycleActive = true;
-                _altTabTokenSource = new CancellationTokenSource();
-                var token = _altTabTokenSource.Token;
+                isAltTabMode = true;
 
-                // Press ALT + TAB once to open the switcher
-                keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-
-                // Start loop to press TAB every 1.5 seconds
-                Task.Run(async () =>
-                {
-                    while (!token.IsCancellationRequested)
-                    {
-                        keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
-                        keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                        await Task.Delay(1500); // ← 1.5 seconds delay
-                    }
-                }, token);
-            }
-            else
-            {
-                // Stop Alt+Tab loop
-                _altTabCycleActive = false;
-                _altTabTokenSource?.Cancel();
-                _altTabTokenSource?.Dispose();
-                _altTabTokenSource = null;
-
-                // Release ALT to confirm window selection
-                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                // Press ALT + TAB once to show the switcher
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // ALT down
+                keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);  // TAB down
+                keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);    // TAB up
+                                                                          // ALT bleibt gedrückt
             }
         }
+
         #endregion alt tab
         #region performance overlay shortcut AHK
         private void TriggerPerformanceOverlay()
@@ -3203,13 +3185,68 @@ namespace gcmloader
                     _selectedButtonIndex = 1;
                     HighlightSelectedCard();
                 }
+
+              
+
+            }
+            // Alt Tab prozess
+            if (isAltTabMode)
+            {
+                if ((currentButtons & GamepadButtonFlags.DPadRight) != 0 && (_lastButtonState & GamepadButtonFlags.DPadRight) == 0)
+                {
+                    keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                    keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                }
+
+                if ((currentButtons & GamepadButtonFlags.DPadLeft) != 0 && (_lastButtonState & GamepadButtonFlags.DPadLeft) == 0)
+                {
+                    keybd_event(0x10, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // SHIFT down
+                    keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                    keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    keybd_event(0x10, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // SHIFT up
+                }
+
+                if ((currentButtons & GamepadButtonFlags.A) != 0 && (_lastButtonState & GamepadButtonFlags.A) == 0)
+                {
+                    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // ALT up
+                    isAltTabMode = false;
+                }
             }
 
-
-         
             _lastButtonState = currentButtons;
 
         }
+
+        private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (!IsWindowInForeground()) return;
+
+            switch (e.Key)
+            {
+                case VirtualKey.Left:
+                    _selectedCardIndex--;
+                    if (_selectedCardIndex < 0)
+                        _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
+                    HighlightSelectedCard();
+                    break;
+
+                case VirtualKey.Right:
+                    _selectedCardIndex++;
+                    if (_selectedCardIndex >= ProgramCardPanel.Children.Count)
+                        _selectedCardIndex = 0;
+                    HighlightSelectedCard();
+                    break;
+
+                case VirtualKey.Enter:
+                    TriggerCardAction(_selectedCardIndex, true);
+                    break;
+
+                case VirtualKey.Escape:
+                    TriggerCardAction(_selectedCardIndex, false);
+                    break;
+            }
+        }
+
 
         private void FocusCard(int index)
         {

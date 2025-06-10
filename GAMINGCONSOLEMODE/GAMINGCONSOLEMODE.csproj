@@ -42,6 +42,7 @@
     <Content Remove="Assets\rogally\allyfrontside.png" />
     <Content Remove="Assets\Screenshot 2025-01-02 104920.png" />
     <Content Remove="Assets\settings\usblogon.png" />
+    <Content Remove="Assets\Startup_Video.png" />
     <Content Remove="Assets\steambp.png" />
     <Content Remove="Assets\steam_logo.png" />
     <Content Remove="Assets\Uninstall Programs.png" />
@@ -67,6 +68,7 @@
     <None Remove="Assets\rogally\allyfrontside.png" />
     <None Remove="Assets\settings\usblogon.png" />
     <None Remove="Assets\steambp.png" />
+    <None Remove="Assets\steam_logo.png" />
     <None Remove="Assets\Uninstall Programs.png" />
     <None Remove="Assets\Xbox Controller.png" />
     <None Remove="Assets\xbox-controller.png" />
@@ -77,7 +79,6 @@
     <None Remove="functions\preloadlist.png" />
     <None Remove="functions\rogally_statusicon.png" />
     <None Remove="functions\speaker.png" />
-    <None Remove="functions\Startup_Video.png" />
     <None Remove="functions\TV.png" />
     <None Remove="functions\windows_statusicon.png" />
     <None Remove="functions\winpart.png" />
@@ -131,6 +132,10 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\settings\usblogon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\Startup_Video.png" />
+    <EmbeddedResource Include="Assets\steam_logo.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\xbox-controller.png">

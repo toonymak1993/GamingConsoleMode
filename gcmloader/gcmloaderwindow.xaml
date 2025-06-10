@@ -33,12 +33,12 @@
                 Background="#88000000"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
-                Visibility="Collapsed"
+                Visibility="Visible"
                 Margin="20"
                 Padding="10">
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <Button Content="📶" Width="40" Height="40" Click="WifiButton_Click"/>
-                <Button Content="ᛒ"  Width="40" Height="40" Click="BluetoothButton_Click"/>
+                <Button Content="📶" x:Name="wifibutton" Width="40" Height="40" Click="WifiButton_Click" Visibility="Collapsed"/>
+                <Button Content="ᛒ" x:Name="blebutton"  Width="40" Height="40" Click="BluetoothButton_Click" Visibility="Collapsed"/>
                 <TextBlock x:Name="ClockText"
                            FontSize="24"
                            FontWeight="SemiBold"
