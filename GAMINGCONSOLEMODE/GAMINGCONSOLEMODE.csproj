@@ -25,11 +25,13 @@
     <Content Remove="Assets\displayfusion.png" />
     <Content Remove="Assets\Download.png" />
     <Content Remove="Assets\GCM_Startup_Video.mp4" />
+    <Content Remove="Assets\gcm_ui_logo.png" />
     <Content Remove="Assets\launcher\custom_logo.png" />
     <Content Remove="Assets\launcher\gcm_icon.png" />
     <Content Remove="Assets\launcher\playnite_logo.png" />
     <Content Remove="Assets\launcher\steam_logo.png" />
     <Content Remove="Assets\logo_gcm.png" />
+    <Content Remove="Assets\logo_gcm_exe.png" />
     <Content Remove="Assets\onboarding\discord.jpg" />
     <Content Remove="Assets\onboarding\flowlauncher.png" />
     <Content Remove="Assets\onboarding\functions_gcm.png" />
@@ -53,11 +55,13 @@
     <None Remove="Assets\displayfusion.png" />
     <None Remove="Assets\Download.png" />
     <None Remove="Assets\GCM_Startup_Video.mp4" />
+    <None Remove="Assets\gcm_ui_logo.png" />
     <None Remove="Assets\launcher\custom_logo.png" />
     <None Remove="Assets\launcher\gcm_icon.png" />
     <None Remove="Assets\launcher\playnite_logo.png" />
     <None Remove="Assets\launcher\steam_logo.png" />
     <None Remove="Assets\logo_gcm.png" />
+    <None Remove="Assets\logo_gcm_exe.png" />
     <None Remove="Assets\onboarding\discord.jpg" />
     <None Remove="Assets\onboarding\flowlauncher.png" />
     <None Remove="Assets\onboarding\functions_gcm.png" />
@@ -85,6 +89,7 @@
     <None Remove="Home.xaml" />
     <None Remove="launcher.xaml" />
     <None Remove="Links.xaml" />
+    <None Remove="logo.ico" />
     <None Remove="nircmd.exe" />
     <None Remove="onboarding.xaml" />
     <None Remove="rogally.xaml" />
@@ -103,12 +108,20 @@
     <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
     <Content Include="Assets\StoreLogo.png" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
-    <Content Include="logo.ico" />
+    <Content Include="logo.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Assets\GCM_Startup_Video.mp4">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\gcm_ui_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\logo_gcm_exe.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\discord.jpg">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -163,9 +176,6 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\launcher\steam_logo.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Assets\logo_gcm.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\Play.png">
@@ -311,6 +321,11 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\rogally\allybackside.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\logo_gcm.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
   </ItemGroup>

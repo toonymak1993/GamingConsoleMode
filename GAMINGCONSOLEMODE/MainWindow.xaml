@@ -28,7 +28,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left Logo -->
-            <Image Source="Assets/logo_gcm.png" Height="60" Margin="25,5"/>
+            <Image Source="Assets/gcm_ui_logo.png" Height="100" Margin="25,5"/>
 
             <!-- Right Panel with Button and ToggleSwitch SIDE-BY-SIDE -->
             <StackPanel Grid.Column="2"

@@ -67,7 +67,7 @@ namespace GAMINGCONSOLEMODE
             // Image
             stack.Children.Add(new Image
             {
-                Source = new BitmapImage(new Uri("ms-appx:///Assets/logo_gcm.png")),
+                Source = new BitmapImage(new Uri("ms-appx:///Assets/gcm_ui_logo.png")),
                 Height = 200,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Stretch = Stretch.Uniform
@@ -92,7 +92,7 @@ namespace GAMINGCONSOLEMODE
 
             stack.Children.Add(new TextBlock
             {
-                Text = "(Handheld only) Disable Automatic On-Screen Keyboard",
+                Text = "(Handheld) Fix On-Screen Keyboard error",
                 FontSize = 28,
                 FontWeight = FontWeights.Bold,
                 Foreground = new SolidColorBrush(Colors.White),
@@ -290,7 +290,7 @@ namespace GAMINGCONSOLEMODE
                 try
                 {
                     // DEIN EINLADUNGS-LINK HIER EINTRAGEN
-                    Process.Start(new ProcessStartInfo("https://discord.gg/DEINCODE") { UseShellExecute = true });
+                    Process.Start(new ProcessStartInfo("https://discord.gg/FbjYDeEJce") { UseShellExecute = true });
                 }
                 catch { }
             };

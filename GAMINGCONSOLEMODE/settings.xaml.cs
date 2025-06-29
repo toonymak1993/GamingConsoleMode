@@ -16,6 +16,8 @@ using System.Text.Json;
 using System.Windows.Forms;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
+using static System.Net.Mime.MediaTypeNames;
+using Windows.System;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -84,13 +86,24 @@ namespace GAMINGCONSOLEMODE
                 Console.WriteLine("Error opening the URL: " + ex.Message);
             }
         }
+        private void ShowSimpleDialog(string title, string content)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = title,
+                Content = content,
+                CloseButtonText = "OK",
+                XamlRoot = App.MainWindow.Content.XamlRoot
+            };
 
+            _ = dialog.ShowAsync();
+        }
         private void windowsloginwithoutpassword_Click(object sender, RoutedEventArgs e)
         {
             try
             {
                 // Define the URL to the USBLogon Setup
-                string url = "https://usblogon.quadsoft.org/de/downloads/USBLogonSetup.exe";
+                string url = "https://download.sysinternals.com/files/AutoLogon.zip";
 
                 // Open the URL in the default browser
                 Process.Start(new ProcessStartInfo
@@ -134,86 +147,16 @@ namespace GAMINGCONSOLEMODE
         private void uactoggle_Click(object sender, RoutedEventArgs e)
         {
             //On
-           
 
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\taskhelper\TaskHelper.exe",
-                    Arguments = "--uac=disable",
-                    Verb = "runas",              // triggers UAC prompt
-                    UseShellExecute = true
-                };
-
-                var process = Process.Start(psi);
-                AppSettings.Save("useuac", false);
-
-                if (process == null)
-                {
-                    // This should rarely happen, but handle it just in case
-                    //MessageBox.Show("Failed to start TaskHelper.");
-                }
-                else
-                {
-                    // Optionally: Wait or log that it started successfully
-                    MessageBox.Show("UAC ON - has been set");
-                }
-            }
-            catch (System.ComponentModel.Win32Exception ex)
-            {
-                // This exception is thrown when the user clicks "No" on the UAC prompt
-                if (ex.NativeErrorCode == 1223) // ERROR_CANCELLED
-                {
-                   // MessageBox.Show("Operation was canceled by the user.");
-                    AppSettings.Save("useuac", true);
-                }
-                else
-                {
-                    //MessageBox.Show($"Unexpected error: {ex.Message}");
-                }
-            }
-
+                AppSettings.Save("uac", true);
+            ShowSimpleDialog("GCM UAC ON", "GCM will re-enable UAC upon exit. The changes will take effect on the next GCM launch");
         }
 
         private void uactoggleoff_Click(object sender, RoutedEventArgs e)
         {
             //off
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\taskhelper\TaskHelper.exe", // change this path accordingly
-                    Arguments = "--uac=enable",
-                    Verb = "runas",               // triggers UAC prompt
-                    UseShellExecute = true        // required for runas
-                };
-
-                var process = Process.Start(psi);
-
-                AppSettings.Save("useuac", true);
-                if (process == null)
-                {
-                    //MessageBox.Show("Failed to start TaskHelper.");
-                }
-                else
-                {
-                    MessageBox.Show("UAC OFF - has been set");
-                }
-            }
-            catch (System.ComponentModel.Win32Exception ex)
-            {
-                // ERROR_CANCELLED = 1223 — User clicked "No"
-                if (ex.NativeErrorCode == 1223)
-                {
-                    //MessageBox.Show("UAC change was canceled by the user.");
-                    AppSettings.Save("useuac", true);
-                }
-                else
-                {
-                    //MessageBox.Show($"Unexpected error: {ex.Message}");
-                }
-            }
+                AppSettings.Save("uac", false);
+            ShowSimpleDialog("GCM UAC OFF", "GCM will disable UAC upon exit. The changes will take effect on the next GCM launch.");
 
         }
     }

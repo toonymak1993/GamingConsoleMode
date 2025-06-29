@@ -48,18 +48,14 @@ namespace GAMINGCONSOLEMODE
 
         public shortcuts()
         {
-            Debug.WriteLine("Constructor: shortcuts() started");
-
             this.InitializeComponent();
             this.Loaded += Shortcuts_Loaded;
-
-            Debug.WriteLine("Constructor: shortcuts() finished");
         }
 
 
         private void Shortcuts_Loaded(object sender, RoutedEventArgs e)
         {
-            Debug.WriteLine("Page loaded → calling LoadExistingShortcuts()");
+            
             LoadExistingShortcuts();
             insertgamepaddata();
 
@@ -82,8 +78,8 @@ namespace GAMINGCONSOLEMODE
             catch
             {
                 // If not found or invalid, default to false
-                shortcutpopup.IsOn = false;
-                AppSettings.Save("shortcutpopup", false);
+                shortcutpopup.IsOn = true;
+                AppSettings.Save("shortcutpopup", true);
             }
         }
         private List<string> GetUsedFunctions()
@@ -683,7 +679,7 @@ namespace GAMINGCONSOLEMODE
                         Key1 = key1,
                         Key2 = key2,
                         Function = func,
-                        Enabled = true 
+                        Enabled = true
                     };
 
 
@@ -691,7 +687,7 @@ namespace GAMINGCONSOLEMODE
                     Directory.CreateDirectory(dir);
 
                     string path = Path.Combine(dir, "winmode_change.json");
-                    string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+                    string json = JsonSerializer.Serialize(data);
                     File.WriteAllText(path, json);
 
                     System.Diagnostics.Debug.WriteLine($"[ON] Shortcut saved: {key1} + {key2} -> {func} at {path}");
@@ -701,39 +697,12 @@ namespace GAMINGCONSOLEMODE
 
                     if (!taskExistsAndEnabled)
                     {
-                        try
-                        {
-                            var psi = new ProcessStartInfo
-                            {
-                                FileName = @"C:\\Program Files (x86)\\GCMcrew\\GCM\\GCM\\taskHelper\TaskHelper.exe",
-                                Arguments = "--enable",
-                                UseShellExecute = true,
-                                Verb = "runas"
-                            };
-
-                            Process.Start(psi);
                             AppSettings.Save("useseamlessswitchtogcm", true);
-                        }
-                        catch (System.ComponentModel.Win32Exception ex)
-                        {
-                            if (ex.NativeErrorCode == 1223)
-                            {
-                                ShowSimpleDialog("Canceled", "Autostart could not be activated because the process was canceled.");
-                                winswitchgcm.IsOn = false;
-                                AppSettings.Save("useseamlessswitchtogcm", false);
-                                return;
-                            }
-                            else
-                            {
-                                ShowSimpleDialog("Error", $"Error when starting the TaskHelper:\n{ex.Message}");
-                                return;
-                            }
-                        }
-                    }
-
-                    // Sperre Felder
-                    ComboBoxswitchgcm1.IsEnabled = false;
-                    ComboBoxswitchgcm2.IsEnabled = false;
+                            ShowSimpleDialog("Enabled", "Seamless Switch will be enabled on the next GCM launch");
+                        // Sperre Felder
+                        ComboBoxswitchgcm1.IsEnabled = false;
+                        ComboBoxswitchgcm2.IsEnabled = false;
+                    }  
                 }
                 else
                 {
@@ -750,41 +719,15 @@ namespace GAMINGCONSOLEMODE
                     // Task deaktivieren
                     bool taskExistsAndEnabled = IsTaskActive("GCM_wingamepad");
 
-                    if (taskExistsAndEnabled)
-                    {
-                        try
-                        {
-                            var psi = new ProcessStartInfo
-                            {
-                                FileName = @"C:\\Program Files (x86)\\GCMcrew\\GCM\\GCM\\taskHelper\TaskHelper.exe",
-                                Arguments = "--disable",
-                                UseShellExecute = true,
-                                Verb = "runas"
-                            };
-
-                            Process.Start(psi);
+                       
                             AppSettings.Save("useseamlessswitchtogcm", false);
-                        }
-                        catch (System.ComponentModel.Win32Exception ex)
-                        {
-                            if (ex.NativeErrorCode == 1223)
-                            {
-                                ShowSimpleDialog("Canceled", "Autostart could not be deactivated because the process was canceled.");
-                                winswitchgcm.IsOn = true;
-                                AppSettings.Save("useseamlessswitchtogcm", true);
-                                return;
-                            }
-                            else
-                            {
-                                ShowSimpleDialog("Error", $"Error when stopping the TaskHelper:\n{ex.Message}");
-                                return;
-                            }
-                        }
-                    }
+                            ShowSimpleDialog("Disabled", "Seamless Switch will be disabled on the next GCM launch");
 
-                    // Felder wieder freigeben
-                    ComboBoxswitchgcm1.IsEnabled = true;
-                    ComboBoxswitchgcm2.IsEnabled = true;
+                        // Felder wieder freigeben
+                        ComboBoxswitchgcm1.IsEnabled = true;
+                        ComboBoxswitchgcm2.IsEnabled = true;
+                    
+
                 }
             }
             catch (Exception ex)

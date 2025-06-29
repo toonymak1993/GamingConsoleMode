@@ -37,7 +37,7 @@ namespace GAMINGCONSOLEMODE
                  new VersionNewsItem
         {
             Title = "Version 2.2.0",
-            Date = "2025-06-10",
+            Date = "2025-06-20",
             ContentItems = new List<NewsContentItem>
 {
     // 🧠 UNDER THE HOOD

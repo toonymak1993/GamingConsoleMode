@@ -9,6 +9,7 @@
     Orientation="Horizontal"
     Visibility="Collapsed"
     HorizontalAlignment="Center"
+    Loaded="LauncherTileRow_Loaded"
     VerticalAlignment="Top"
     Margin="0,40,0,0"
     Spacing="20">
@@ -44,6 +45,14 @@
                            FontWeight="SemiBold"
                            Foreground="White"
                            VerticalAlignment="Center"/>
+         <TextBox x:Name="FocusBlocker"
+         Opacity="0"
+         Width="1"
+         Height="1"
+         IsTabStop="False"
+         IsHitTestVisible="False"
+         Margin="-100" />
+
             </StackPanel>
         </Border>
 

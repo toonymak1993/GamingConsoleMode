@@ -91,24 +91,7 @@ HorizontalAlignment="Center"/>
                     <TextBlock Text="=" Foreground="White" FontSize="24" VerticalAlignment="Center" Margin="10,0"/>
 
                     <ToggleSwitch x:Name="winswitchgcm" Header="" OffContent="Off" OnContent="On" Toggled="winswitchgcm_Toggled"/>
-                    <Button Width="28" Height="28"
-        HorizontalAlignment="Center"
-        VerticalAlignment="Center"
-        Padding="0"
-        Background="Transparent"
-        BorderBrush="Transparent">
-                        <FontIcon Glyph="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="LightGray" FontSize="20"/>
-                        <Button.Flyout>
-                            <Flyout Placement="Top">
-                                <TextBlock Text="Enabling this triggers a UAC prompt to run the background task as local admin. This ensures security and a seamless Windows experience. Please click 'Yes'."
-                       Width="250"
-                       TextWrapping="WrapWholeWords"
-                       Foreground="White"
-                       FontSize="12"
-                       Padding="5"/>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
+                  
 
 
 

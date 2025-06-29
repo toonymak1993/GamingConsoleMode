@@ -1,11 +1,16 @@
-﻿using SharpDX.XInput;
+﻿using CommunityToolkit.WinUI.Notifications;
+using Notification.Wpf;
+using SharpDX.XInput;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Xml;
 
 namespace wingamepad
 {
@@ -62,11 +67,35 @@ namespace wingamepad
                 Environment.Exit(0);
             }
         }
+        private NotificationManager _notificationManager = new();
+        private void ShowControllerToastWithShortcut()
+        {
+            if (_activeShortcuts.Count == 0) return;
+
+            var first = _activeShortcuts.First();
+            string shortcut = $"{first.Key.Item1} + {first.Key.Item2}";
+            string function = first.Value;
+            var iconUri = new Uri(@"C:\Program Files (x86)\GCM\GCM\gcmloader\logo.ico", UriKind.Absolute);
+            _notificationManager.Show(
+                "Gamepad connected",
+                $"Press {shortcut} to activate GCM Mode",
+                NotificationType.Information,
+                expirationTime: TimeSpan.FromSeconds(5),
+               icon: new BitmapImage(iconUri)
+            );
+        }
+
+
 
         private void LoadWinmodeShortcuts()
         {
             string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "shortcutswin");
-            if (!Directory.Exists(folderPath)) return;
+            if (!Directory.Exists(folderPath))
+            {
+                Log("Shortcut folder not found.");
+                ShowAndExit("Fehler: Der Ordner für Shortcuts wurde nicht gefunden.\nBitte prüfen: AppData\\gcmsettings\\shortcutswin");
+                return;
+            }
 
             _activeShortcuts.Clear();
 
@@ -98,65 +127,93 @@ namespace wingamepad
                     Log($"Error reading shortcut file: {filePath} - {ex.Message}");
                 }
             }
+
+            if (_activeShortcuts.Count == 0)
+            {
+                Log("No valid shortcuts loaded.");
+                ShowAndExit("Fehler: Es wurden keine gültigen Shortcuts gefunden.\nBitte überprüfe die JSON-Dateien im Ordner:\nAppData\\gcmsettings\\shortcutswin");
+            }
         }
+
+        private void ShowAndExit(string message)
+        {
+            MessageBox.Show(message, "Shortcut-Fehler", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Application.Current.Shutdown();
+        }
+
+
 
         private void SetupGamepadWatcher()
         {
             DispatcherTimer timer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(50)
+                Interval = TimeSpan.FromMilliseconds(50) // Check every 50ms
             };
 
             timer.Tick += (s, e) =>
             {
-                if (_xinputController == null || !_xinputController.IsConnected)
+                var newController = GetConnectedController();
+
+                bool justConnected = newController != null && _xinputController == null;
+
+                if (newController != null)
                 {
-                    _xinputController = GetConnectedController();
-                    _controllerConnected = _xinputController != null;
+                    _xinputController = newController;
+                    _controllerConnected = true;
+
+                    if (justConnected)
+                    {
+                        ShowControllerToastWithShortcut(); // ← Toast anzeigen
+                    }
+                }
+                else
+                {
+                    _xinputController = null;
+                    _controllerConnected = false;
+                    _lastButtonState = GamepadButtonFlags.None;
+                    return;
                 }
 
-                if (_controllerConnected)
+                var state = _xinputController.GetState();
+                var buttons = state.Gamepad.Buttons;
+
+                foreach (var pair in _activeShortcuts)
                 {
-                    var state = _xinputController.GetState();
-                    var buttons = state.Gamepad.Buttons;
+                    var key1 = pair.Key.Item1;
+                    var key2 = pair.Key.Item2;
+                    var function = pair.Value;
 
-                    foreach (var pair in _activeShortcuts)
+                    bool key1Pressed = IsButtonPressed(buttons, key1);
+                    bool key2Pressed = IsButtonPressed(buttons, key2);
+
+                    if (key1Pressed && !_heldButtonTimestamps.ContainsKey(key1))
+                        _heldButtonTimestamps[key1] = DateTime.UtcNow;
+
+                    if (_heldButtonTimestamps.TryGetValue(key1, out var heldTime))
                     {
-                        var key1 = pair.Key.Item1;
-                        var key2 = pair.Key.Item2;
-                        var function = pair.Value;
-
-                        bool key1Pressed = IsButtonPressed(buttons, key1);
-                        bool key2Pressed = IsButtonPressed(buttons, key2);
-
-                        if (key1Pressed && !_heldButtonTimestamps.ContainsKey(key1))
-                            _heldButtonTimestamps[key1] = DateTime.UtcNow;
-
-                        if (_heldButtonTimestamps.TryGetValue(key1, out var heldTime))
+                        if (DateTime.UtcNow - heldTime < _comboTimeout && key2Pressed)
                         {
-                            if (DateTime.UtcNow - heldTime < _comboTimeout && key2Pressed)
+                            if (!_triggeredCombos.Contains(pair.Key))
                             {
-                                if (!_triggeredCombos.Contains(pair.Key))
-                                {
-                                    _triggeredCombos.Add(pair.Key);
-                                    Log($"Shortcut triggered: {key1} + {key2} -> {function}");
-                                    ExecuteFunction(function);
-                                }
-                            }
-                            else if (!key1Pressed)
-                            {
-                                _heldButtonTimestamps.Remove(key1);
-                                _triggeredCombos.Remove(pair.Key);
+                                _triggeredCombos.Add(pair.Key);
+                                Log($"Shortcut triggered: {key1} + {key2} -> {function}");
+                                ExecuteFunction(function);
                             }
                         }
+                        else if (!key1Pressed)
+                        {
+                            _heldButtonTimestamps.Remove(key1);
+                            _triggeredCombos.Remove(pair.Key);
+                        }
                     }
-
-                    _lastButtonState = buttons;
                 }
+
+                _lastButtonState = buttons;
             };
 
             timer.Start();
         }
+
 
         private Controller GetConnectedController()
         {
@@ -199,7 +256,7 @@ namespace wingamepad
         {
             try
             {
-                string loaderPath = @"C:\\Program Files (x86)\\GCMcrew\\GCM\\GCM\\gcmloader\\gcmloader.exe";
+                string loaderPath = @"C:\\Program Files (x86)\\GCM\\GCM\\gcmloader\\gcmloader.exe";
 
                 Log($"Executing winmodechange: launching {loaderPath}");
 
