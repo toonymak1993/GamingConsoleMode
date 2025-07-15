@@ -192,8 +192,11 @@ namespace gcmloader
         private const int HORZRES = 8; // Horizontal resolution
         private const int VERTRES = 10; // Vertical resolution
         private static StreamWriter logWriter;
-        private static readonly string SettingsFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings");
-        private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "settings.json");
+        private static readonly string SettingsFolder = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+    "gcmsettings"
+);
+private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "settings.toml");
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
@@ -370,7 +373,7 @@ namespace gcmloader
             File.AppendAllText(path, $"[DOMAIN EXCEPTION] {DateTime.Now}: {e.ExceptionObject}\n");
 
             // Öffne crash.log automatisch
-            Process.Start("notepad.exe", path);
+            //Process.Start("notepad.exe", path);
         }
 
         private void CurrentApp_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
@@ -378,8 +381,6 @@ namespace gcmloader
             string path = Path.Combine(AppContext.BaseDirectory, "crash.log");
             File.AppendAllText(path, $"[UI EXCEPTION] {DateTime.Now}: {e.Message}\n");
 
-            // Öffne crash.log automatisch
-            Process.Start("notepad.exe", path);
 
             e.Handled = true; // verhindert App-Absturz (optional)
         }
@@ -692,6 +693,59 @@ namespace gcmloader
 
         #endregion methodes for code
         #region functions
+        #region boilr gamysync
+
+        public string RunBoilrNoUI()
+        {
+            try
+            {
+                // Dynamisch AppData Pfad holen
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrExePath = Path.Combine(appDataPath, "gcmsettings", "windows_BoilR.exe");
+
+                Console.WriteLine("Checking for BoilR exe at:\n" + boilrExePath);
+
+                if (!File.Exists(boilrExePath))
+                {
+                    Console.WriteLine("❌ BoilR.exe not found. Skipping execution.");
+                    return "❌ BoilR.exe not found:\n" + boilrExePath;
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = boilrExePath,
+                    Arguments = "--no-ui",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                using (var process = Process.Start(psi))
+                {
+                    process.WaitForExit();
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+
+                    if (!string.IsNullOrEmpty(error))
+                    {
+                        Console.WriteLine("❌ BoilR error:\n" + error);
+                        return "❌ BoilR error:\n" + error;
+                    }
+
+                    Console.WriteLine("✅ BoilR executed successfully with --no-ui.");
+                    return "✅ BoilR executed successfully with --no-ui.";
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("❌ Error running BoilR:\n" + ex.Message);
+                return "❌ Error running BoilR:\n" + ex.Message;
+            }
+        }
+        #endregion boilr gamesync
         #region rog ally
 
         // not needed in Hybrid version
@@ -1323,7 +1377,7 @@ namespace gcmloader
                 string settingsFolderPath = Path.Combine(appDataPath, "gcmsettings");
 
                 // Create the full path to the "settings.json" file within the folder
-                string settingsFilePath = Path.Combine(settingsFolderPath, "settings.json");
+                string settingsFilePath = Path.Combine(settingsFolderPath, "settings.toml");
 
                 // Check if the "gcmsettings" folder exists
                 if (Directory.Exists(settingsFolderPath))
@@ -2428,6 +2482,9 @@ namespace gcmloader
                     #endregion pre install/start check if needed
                     Console.WriteLine("--startupvideo--");
                     StartupVideo.Play();
+                    Console.WriteLine("--boilr--");
+                    string result = RunBoilrNoUI();
+                    Console.WriteLine(result);
                     Console.WriteLine("--displayfusion--");
                     displayfusion("start");
                     Console.WriteLine("--joyxoff--");

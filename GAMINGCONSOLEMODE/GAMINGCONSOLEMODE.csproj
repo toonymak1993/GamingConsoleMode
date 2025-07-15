@@ -76,6 +76,8 @@
     <None Remove="Assets\Uninstall Programs.png" />
     <None Remove="Assets\Xbox Controller.png" />
     <None Remove="Assets\xbox-controller.png" />
+    <None Remove="functions\boilrlogo.png" />
+    <None Remove="functions\config.toml" />
     <None Remove="functions\deckyloader.png" />
     <None Remove="functions\discord.png" />
     <None Remove="functions\joyxoff_logo.png" />
@@ -145,6 +147,12 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\settings\usblogon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\boilrlogo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="functions\config.toml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="functions\Startup_Video.png" />
@@ -248,6 +256,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Management" Version="9.0.3" />
     <PackageReference Include="TaskScheduler" Version="2.12.1" />
+    <PackageReference Include="Tomlyn" Version="0.19.0" />
   </ItemGroup>
   <ItemGroup>
     <Page Update="overlaycontrolls.xaml">

@@ -1,39 +1,45 @@
-﻿using Microsoft.UI.Xaml;
+﻿using Flurl.Http;
+using Microsoft.UI;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.Win32;
+using NAudio.CoreAudioApi;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using Microsoft.UI;
 using System.Diagnostics;
-using System.IO;
-using NAudio.CoreAudioApi;
-using Flurl.Http;
-using System.Text.Json;
-using System.Net.Http;
-using static GAMINGCONSOLEMODE.launcher;
-using System.Net;
-using System.Text.RegularExpressions;
-using Microsoft.Win32;
-using Newtonsoft.Json.Linq;
-using Windows.UI;
 using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Tomlyn;
+using Tomlyn.Model;
+using Windows.UI;
+using static GAMINGCONSOLEMODE.launcher;
+using Button = Microsoft.UI.Xaml.Controls.Button;
+using TextBox = Microsoft.UI.Xaml.Controls.TextBox;
 
 namespace GAMINGCONSOLEMODE
 {
     public sealed partial class startup : Page
     {
         #region generate Dashboard function
-       
-   
+
+
 
 
         private Storyboard ShowDetailStoryboard;
         private Storyboard HideDetailStoryboard;
 
-        private List<Button> allDashboardButtons = new(); 
+        private List<Button> allDashboardButtons = new();
 
         #endregion generate Dashboard function
         public startup()
@@ -48,8 +54,8 @@ namespace GAMINGCONSOLEMODE
             this.Loaded += (s, e) =>
             {
                 allDashboardButtons = DashboardItems.Items.OfType<Button>().ToList();
-            }; 
-            
+            };
+
         }
 
 
@@ -173,9 +179,9 @@ namespace GAMINGCONSOLEMODE
             updateui();
         }
 
-        
 
-       
+
+
 
 
 
@@ -454,7 +460,7 @@ namespace GAMINGCONSOLEMODE
                     gcmwallpaperbutton.Tag = "ENABLED";
                     gcmwallpaperstate_color.Background = new SolidColorBrush(Colors.Green);
                     gcmwallpaperstate_text.Text = "ENABLED";
-                   
+
 
                     use_wallpaper.IsOn = true;
                     text_install_state_wallpaper.Text = "ACTIVATED";
@@ -462,7 +468,7 @@ namespace GAMINGCONSOLEMODE
                     //text
                     string wallpaperpath = AppSettings.Load<string>("gcmwallpaperpath");
                     wallpaper_path.Text = wallpaperpath;
-                    
+
 
 
                 }
@@ -477,7 +483,7 @@ namespace GAMINGCONSOLEMODE
                     text_install_state_wallpaper.Text = "DISABLED";
                     border_install_state_wallpaper.Background = new SolidColorBrush(Colors.Brown);
                     wallpaper_path.Text = "";
-                    
+
                 }
             }
             catch
@@ -599,11 +605,11 @@ namespace GAMINGCONSOLEMODE
                     string preloadListFilePath = AppSettings.Load<string>("prealoadlistpath");
                     preloadlist_path.Text = preloadListFilePath;
 
-                    
+
                     //Dashboardgrid
                     preloadlistbutton.Tag = "ENABLED";
                     preloadliststate_color.Background = new SolidColorBrush(Colors.Green);
-                preloadliststate_text.Text = "ENABLED";
+                    preloadliststate_text.Text = "ENABLED";
                 }
                 else
                 {
@@ -627,7 +633,118 @@ namespace GAMINGCONSOLEMODE
             }
 
             #endregion preloadlist
-            
+            #region boilr
+            //read api key
+            try
+            {
+                // Dynamisch AppData-Pfad holen
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrConfigPath = Path.Combine(appDataPath, "boilr", "config.toml");
+
+                if (!File.Exists(boilrConfigPath))
+                {
+
+                }
+                else { 
+
+                    // Datei einlesen
+                    string tomlText = File.ReadAllText(boilrConfigPath);
+
+                // Parsen
+                TomlTable toml = Toml.Parse(tomlText).ToModel();
+
+                // [steamgrid_db] Abschnitt lesen
+                var steamgridDb = toml["steamgrid_db"] as TomlTable;
+
+                if (steamgridDb != null)
+                {
+                    string authKey = steamgridDb["auth_key"]?.ToString() ?? "";
+
+                    // In TextBox schreiben
+                    boilr_path.Text = authKey;
+
+                    Console.WriteLine("auth_key loaded: " + authKey);
+                }
+                else
+                {
+                    //MessageBox.Show("steamgrid_db section not found in config.toml");
+                }
+                }
+            }
+            catch (Exception ex)
+            {
+                //MessageBox.Show("Error reading boilr config: " + ex.Message);
+            }
+            //read launcher settings
+            LoadBoilrConfig();
+            //read install state
+            try
+            {
+                // Dynamisch AppData Pfad holen
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrFolder = Path.Combine(appDataPath, "gcmsettings");
+                string boilrExePath = Path.Combine(boilrFolder, "windows_BoilR.exe");
+
+                Console.WriteLine("Checking BoilR path: " + boilrExePath);
+
+                if (File.Exists(boilrExePath))
+                {
+                    use_boilr.IsEnabled = true;
+                    boilr_launcher.IsEnabled = true;
+                    boilr_api_field.IsEnabled = true;
+                    Console.WriteLine("✅ BoilR is available in GCM Settings.");
+                    text_install_state_boilr.Text = "ACTIVATED";
+                    border_install_state_boilr.Background = new SolidColorBrush(Colors.Green);
+                    use_boilr.IsOn = true;
+
+                    //Dashboardgrid
+                    boilrbutton.Tag = "ENABLED";
+                    boilrstate_color.Background = new SolidColorBrush(Colors.Green);
+                    boilrstate_text.Text = "ENABLED";
+
+                }
+                else
+                {
+                    use_boilr.IsEnabled = false;
+                    boilr_launcher.IsEnabled = false;
+                    boilr_api_field.IsEnabled = false;
+                    Console.WriteLine("❌ BoilR is missing in GCM Settings.");
+
+                    text_install_state_boilr.Text = "DISABLED";
+                    border_install_state_boilr.Background = new SolidColorBrush(Colors.Brown);
+                    use_boilr.IsOn = false;
+
+                    AppSettings.Save("useboilr", false);
+
+                    //Dashboardgrid
+                    boilrbutton.Tag = "DISABLED";
+                    boilrstate_color.Background = new SolidColorBrush(Colors.Orange);
+                    boilrstate_text.Text = "DISABLED";
+                }
+            }
+            catch (Exception ex)
+            {
+                use_boilr.IsEnabled = false;
+                boilr_launcher.IsEnabled = false;
+                boilr_api_field.IsEnabled = false;
+                Console.WriteLine("Error checking BoilR path: " + ex.Message);
+                // Optional UI:
+
+                text_install_state_boilr.Text = "DISABLED";
+                border_install_state_boilr.Background = new SolidColorBrush(Colors.Brown);
+                use_boilr.IsOn = false;
+
+                AppSettings.Save("useboilr", false);
+
+                //Dashboardgrid
+                boilrbutton.Tag = "DISABLED";
+                boilrstate_color.Background = new SolidColorBrush(Colors.Orange);
+                boilrstate_text.Text = "DISABLED";
+
+            }
+
+            #endregion boilr
+
         }
         #endregion update ui
         #endregion code functions
@@ -724,7 +841,7 @@ namespace GAMINGCONSOLEMODE
         {
             try
             {
-                ComboBox comboBox = sender as ComboBox;
+                Microsoft.UI.Xaml.Controls.ComboBox comboBox = sender as Microsoft.UI.Xaml.Controls.ComboBox;
 
                 if (comboBox != null && comboBox.SelectedItem != null)
                 {
@@ -748,7 +865,7 @@ namespace GAMINGCONSOLEMODE
         {
             try
             {
-                ComboBox comboBox = sender as ComboBox;
+                Microsoft.UI.Xaml.Controls.ComboBox comboBox = sender as Microsoft.UI.Xaml.Controls.ComboBox;
 
                 if (comboBox != null && comboBox.SelectedItem != null)
                 {
@@ -1527,10 +1644,12 @@ namespace GAMINGCONSOLEMODE
             BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Startup Video" };
         }
 
-        private void winpartbutton_Click(object sender, RoutedEventArgs e)
+        private void boilrbutton_Click(object sender, RoutedEventArgs e)
         {
-            Openpanel("winpart");
+            Openpanel("boilr");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Boilr Game sync" };
         }
+
 
 
         #endregion codebehind Function Dashboard
@@ -1556,6 +1675,377 @@ namespace GAMINGCONSOLEMODE
                     storyboard.Begin();
                 }
             }
+        }
+
+        #region boilr
+        private void use_boilr_Toggled(object sender, RoutedEventArgs e)
+        {
+            if(use_boilr.IsOn)
+            { 
+            
+            }
+            else
+            {
+                try
+                {
+                    // Dynamisch AppData Pfad holen
+                    string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+                    // --------- 1. boilr.exe in gcmsettings löschen ---------
+                    string gcmSettingsFolder = Path.Combine(appDataPath, "gcmsettings");
+                    string boilrExePath = Path.Combine(gcmSettingsFolder, "windows_BoilR.exe");
+
+                    if (File.Exists(boilrExePath))
+                    {
+                        File.Delete(boilrExePath);
+                        Console.WriteLine("✅ BoilR.exe deleted from GCM Settings:\n" + boilrExePath);
+                        // Optional UI:
+                        // txtDownloadStatus.Text = "✅ BoilR.exe deleted from GCM Settings.";
+                    }
+                    else
+                    {
+                        Console.WriteLine("❌ BoilR.exe not found in GCM Settings:\n" + boilrExePath);
+                        // Optional UI:
+                        // txtDownloadStatus.Text = "❌ BoilR.exe not found in GCM Settings.";
+                    }
+
+                    // --------- 2. boilr Ordner löschen ---------
+                    string boilrFolder = Path.Combine(appDataPath, "boilr");
+
+                    if (Directory.Exists(boilrFolder))
+                    {
+                        Directory.Delete(boilrFolder, true);
+                        Console.WriteLine("✅ BoilR folder deleted:\n" + boilrFolder);
+                        // Optional UI:
+                        // txtDownloadStatus.Text += "\n✅ BoilR folder deleted.";
+                    }
+                    else
+                    {
+                        Console.WriteLine("❌ BoilR folder does not exist:\n" + boilrFolder);
+                        // Optional UI:
+                        // txtDownloadStatus.Text += "\n❌ BoilR folder does not exist.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("❌ Error deleting BoilR files:\n" + ex.Message);
+                    // Optional UI:
+                    // txtDownloadStatus.Text = "❌ Error deleting BoilR files:\n" + ex.Message;
+                }
+
+            }
+        }
+
+        private void btn_create_or_open_boilr_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // This will open the specified URL in the default web browser.
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = "https://www.steamgriddb.com/profile/preferences/api",
+                    UseShellExecute = true
+                };
+
+                Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                // Optional: show an error message if something goes wrong
+              
+            }
+        }
+        private void boilr_path_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Get the new auth key from the TextBox
+            var textBox = sender as TextBox;
+            string newAuthKey = textBox.Text;
+
+            try
+            {
+                // Dynamisch das AppData-Verzeichnis holen
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrConfigPath = Path.Combine(appDataPath, "boilr", "config.toml");
+
+                if (!File.Exists(boilrConfigPath))
+                {
+                    MessageBox.Show("Boilr config file not found: " + boilrConfigPath);
+                    return;
+                }
+
+                // Read existing TOML file
+                string tomlText = File.ReadAllText(boilrConfigPath);
+
+                // Parse TOML to model
+                TomlTable toml = Toml.Parse(tomlText).ToModel();
+
+                // Navigate to [steamgrid_db] section
+                var steamgridDb = toml["steamgrid_db"] as TomlTable;
+
+                if (steamgridDb != null)
+                {
+                    // Set new auth_key
+                    steamgridDb["auth_key"] = newAuthKey;
+
+                    // Convert back to TOML text
+                    string newTomlText = Toml.FromModel(toml);
+
+                    // Write back to file
+                    File.WriteAllText(boilrConfigPath, newTomlText);
+
+                    Console.WriteLine("auth_key updated successfully!");
+                }
+                else
+                {
+                    MessageBox.Show("steamgrid_db section not found in config.toml");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error updating boilr config: " + ex.Message);
+            }
+        }
+
+        //boilr launcher settings
+        private void UpdateBoilrConfig(string sectionName, bool enabled)
+        {
+            try
+            {
+                // Dynamisch AppData Pfad holen
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrConfigPath = Path.Combine(appDataPath, "boilr", "config.toml");
+
+                if (!File.Exists(boilrConfigPath))
+                {
+                    MessageBox.Show("Boilr config file not found:\n" + boilrConfigPath);
+                    return;
+                }
+
+                // TOML laden
+                string tomlText = File.ReadAllText(boilrConfigPath);
+                TomlTable toml = Toml.Parse(tomlText).ToModel();
+
+                if (toml.ContainsKey(sectionName))
+                {
+                    var section = toml[sectionName] as TomlTable;
+                    section["enabled"] = enabled;
+
+                    // Speichern
+                    string newTomlText = Toml.FromModel(toml);
+                    File.WriteAllText(boilrConfigPath, newTomlText);
+
+                    Console.WriteLine($"Updated [{sectionName}].enabled to {enabled}");
+                }
+                else
+                {
+                    MessageBox.Show($"Section [{sectionName}] not found in boilr config.");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error updating boilr config:\n" + ex.Message);
+            }
+        }
+        //boilr read settings
+        private void LoadBoilrConfig()
+        {
+            try
+            {
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrConfigPath = Path.Combine(appDataPath, "boilr", "config.toml");
+
+                if (!File.Exists(boilrConfigPath))
+                {
+                    //MessageBox.Show("Boilr config file not found:\n" + boilrConfigPath);
+                    return;
+                }
+
+                string tomlText = File.ReadAllText(boilrConfigPath);
+                TomlTable toml = Toml.Parse(tomlText).ToModel();
+
+                SetSwitchState("amazon", Switch_Amazon, toml);
+                SetSwitchState("epic_games", Switch_Epic, toml);
+                SetSwitchState("gog", Switch_GOG, toml);
+                SetSwitchState("itch", Switch_Itch, toml);
+                SetSwitchState("origin", Switch_Origin, toml);
+                SetSwitchState("uplay", Switch_Uplay, toml);
+                SetSwitchState("playnite", Switch_Playnite, toml);
+                SetSwitchState("gamepass", Switch_GamePass, toml);
+            }
+            catch (Exception ex)
+            {
+               // MessageBox.Show("Error reading boilr config:\n" + ex.Message);
+            }
+        }
+        //boilr set initial settings
+
+        public string CopyBoilrConfigFile()
+        {
+            try
+            {
+                string sourcePath = @"C:\Program Files (x86)\GCM\GCM\functions\config.toml";
+
+                if (!File.Exists(sourcePath))
+                {
+                    return "❌ Source config.toml not found:\n" + sourcePath;
+                }
+
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string boilrFolder = Path.Combine(appDataPath, "boilr");
+                Directory.CreateDirectory(boilrFolder);
+
+                string targetPath = Path.Combine(boilrFolder, "config.toml");
+
+                File.Copy(sourcePath, targetPath, true);
+
+                return $"✅ BoilR config.toml copied successfully:\n{targetPath}";
+            }
+            catch (Exception ex)
+            {
+                return "❌ Error copying BoilR config.toml:\n" + ex.Message;
+            }
+        }
+
+        private void SetSwitchState(string sectionName, ToggleSwitch toggleSwitch, TomlTable toml)
+        {
+            if (toml.ContainsKey(sectionName))
+            {
+                var section = toml[sectionName] as TomlTable;
+                if (section != null && section.ContainsKey("enabled"))
+                {
+                    bool isEnabled = Convert.ToBoolean(section["enabled"]);
+                    toggleSwitch.IsOn = isEnabled;
+                }
+            }
+        }
+
+        //launcher
+        #region launcher
+        private void Switch_Amazon_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("amazon", toggle.IsOn);
+        }
+
+        private void Switch_Epic_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("epic_games", toggle.IsOn);
+        }
+
+        private void Switch_GOG_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("gog", toggle.IsOn);
+        }
+
+        private void Switch_Itch_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("itch", toggle.IsOn);
+        }
+
+        private void Switch_Origin_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("origin", toggle.IsOn);
+        }
+
+        private void Switch_Uplay_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("uplay", toggle.IsOn);
+        }
+
+        private void Switch_Playnite_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("playnite", toggle.IsOn);
+        }
+
+        private void Switch_GamePass_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            UpdateBoilrConfig("gamepass", toggle.IsOn);
+        }
+        #endregion launcher
+
+        //Download
+
+        public string DownloadAndRunBoilr()
+        {
+            try
+            {
+                string apiUrl = "https://api.github.com/repos/PhilipK/BoilR/releases/latest";
+
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("GCM-Boilr-Downloader");
+
+                var jsonTask = httpClient.GetStringAsync(apiUrl);
+                jsonTask.Wait();
+                string json = jsonTask.Result;
+
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                var assets = root.GetProperty("assets");
+
+                string downloadUrl = null;
+                string fileName = null;
+
+                foreach (var asset in assets.EnumerateArray())
+                {
+                    string assetName = asset.GetProperty("name").GetString();
+
+                    if (assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        downloadUrl = asset.GetProperty("browser_download_url").GetString();
+                        fileName = assetName;
+                        break;
+                    }
+                }
+
+                if (downloadUrl == null)
+                {
+                    return "No EXE found in latest release.";
+                }
+
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string targetFolder = Path.Combine(appDataPath, "gcmsettings");
+                Directory.CreateDirectory(targetFolder);
+
+                string targetPath = Path.Combine(targetFolder, fileName);
+
+                if (!File.Exists(targetPath))
+                {
+                    using (var webClient = new WebClient())
+                    {
+                        webClient.Headers.Add("User-Agent", "GCM-Boilr-Downloader");
+                        webClient.DownloadFile(downloadUrl, targetPath);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("BoilR already exists, skipping download.");
+                }
+
+                // Statt CreateBoilrConfigFile:
+                string result = CopyBoilrConfigFile();
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return "Error downloading or copying BoilR config: " + ex.Message;
+            }
+        }
+
+
+        #endregion boilr
+
+        private void btnDownloadBoilr_Click(object sender, RoutedEventArgs e)
+        {
+            string result = DownloadAndRunBoilr();
+            txtDownloadStatus.Text = result;
         }
     }
 
@@ -1607,6 +2097,4 @@ namespace GAMINGCONSOLEMODE
             }
         }
     }
-
-
 }

@@ -1,0 +1,45 @@
+debug = false
+config_version = 1
+blacklisted_games = []
+
+[steamgrid_db]
+enabled = true
+auth_key = ""
+prefer_animated = false
+banned_images = []
+only_download_boilr_images = false
+allow_nsfw = false
+
+[steam]
+create_collections = false
+optimize_for_big_picture = false
+stop_steam = false
+start_steam = false
+
+[amazon]
+enabled = true
+
+[epic_games]
+enabled = true
+safe_launch = []
+
+[gog]
+enabled = true
+
+[itch]
+enabled = true
+
+[origin]
+enabled = true
+
+[uplay]
+enabled = true
+
+[playnite]
+enabled = true
+installed_only = true
+use_portalbe_version = false
+portable_launcher_path = ""
+
+[gamepass]
+enabled = true

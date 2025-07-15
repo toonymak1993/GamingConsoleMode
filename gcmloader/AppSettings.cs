@@ -1,21 +1,18 @@
 ﻿using System;
 using System.IO;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using System.Threading;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace GAMINGCONSOLEMODE
 {
     public class AppSettings
     {
-        // Store configuration in %AppData%\gcmsettings\
         private static readonly string SettingsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
-        private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "settings.json");
+        private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "settings.toml");
 
-        // Lock object for thread safety
         private static readonly object _fileLock = new object();
 
-        // Ensures that the folder and default configuration file exist
         public static void FirstStart()
         {
             lock (_fileLock)
@@ -37,31 +34,29 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        // Saves a specific key-value pair to the configuration file
         public static void Save(string key, object value)
         {
             lock (_fileLock)
             {
                 try
                 {
-                    JObject settings;
+                    TomlTable settings;
 
-                    // Load existing JSON file or create a new JObject if the file is empty or missing
                     if (File.Exists(SettingsFilePath))
                     {
-                        var json = File.ReadAllText(SettingsFilePath);
-                        settings = string.IsNullOrWhiteSpace(json) ? new JObject() : JObject.Parse(json);
+                        var tomlText = File.ReadAllText(SettingsFilePath);
+                        settings = Toml.Parse(tomlText).ToModel();
                     }
                     else
                     {
-                        settings = new JObject();
+                        settings = new TomlTable();
                     }
 
-                    // Update or add the key-value pair
-                    settings[key] = JToken.FromObject(value);
+                    settings[key] = value;
 
-                    // Write the updated JSON back to the file (synchronous; can be replaced with async methods if needed)
-                    File.WriteAllText(SettingsFilePath, settings.ToString(Formatting.Indented));
+                    var newToml = Toml.FromModel(settings);
+                    File.WriteAllText(SettingsFilePath, newToml);
+
                     Console.WriteLine($"Saved: {key} = {value}");
                 }
                 catch (Exception ex)
@@ -71,7 +66,6 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        // Loads a specific key from the configuration file and converts it to the specified type
         public static T Load<T>(string key)
         {
             lock (_fileLock)
@@ -80,12 +74,22 @@ namespace GAMINGCONSOLEMODE
                 {
                     if (File.Exists(SettingsFilePath))
                     {
-                        var json = File.ReadAllText(SettingsFilePath);
-                        var settings = string.IsNullOrWhiteSpace(json) ? new JObject() : JObject.Parse(json);
+                        var tomlText = File.ReadAllText(SettingsFilePath);
+                        var settings = Toml.Parse(tomlText).ToModel();
 
                         if (settings.ContainsKey(key))
                         {
-                            return settings[key].ToObject<T>();
+                            var value = settings[key];
+
+                            if (value is T typedValue)
+                            {
+                                return typedValue;
+                            }
+                            else
+                            {
+                                // Convert if possible
+                                return (T)Convert.ChangeType(value, typeof(T));
+                            }
                         }
                     }
                     throw new Exception($"Key '{key}' not found in the settings.");
@@ -98,20 +102,22 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        // Initializes default configuration on first start
         public static void initialconfig()
         {
             lock (_fileLock)
             {
                 try
                 {
-                    var defaultSettings = new JObject
+                    var defaultSettings = new TomlTable
                     {
                         ["launcher"] = "steam",
-                        ["steamlauncherpath"] = @"C:\Program Files (x86)\Steam\steam.exe"
+                        ["steamlauncherpath"] = @"C:\Program Files (x86)\Steam\steam.exe",
+                        ["onboarding"] = false
                     };
 
-                    File.WriteAllText(SettingsFilePath, defaultSettings.ToString(Formatting.Indented));
+                    var tomlText = Toml.FromModel(defaultSettings);
+                    File.WriteAllText(SettingsFilePath, tomlText);
+
                     Console.WriteLine($"Default settings file created at: {SettingsFilePath}");
                 }
                 catch (Exception ex)

@@ -114,6 +114,7 @@
     <PackageReference Include="System.Management" Version="9.0.4" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.6" />
     <PackageReference Include="TaskScheduler" Version="2.12.1" />
+    <PackageReference Include="Tomlyn" Version="0.19.0" />
     <PackageReference Include="Vanara.PInvoke.Shell32" Version="4.1.4" />
   </ItemGroup>
 
