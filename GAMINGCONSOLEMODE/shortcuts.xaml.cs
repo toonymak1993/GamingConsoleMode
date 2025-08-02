@@ -1,5 +1,4 @@
-﻿// Fix: Avoid setting function index on load unless creating new
-using System;
+﻿using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.IO;
@@ -8,42 +7,35 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
-using System.Text.Json;
 using System.Diagnostics;
 using Microsoft.Win32.TaskScheduler;
-using System.Windows.Forms;
 using Button = Microsoft.UI.Xaml.Controls.Button;
 using ComboBox = Microsoft.UI.Xaml.Controls.ComboBox;
 using Orientation = Microsoft.UI.Xaml.Controls.Orientation;
 using Microsoft.UI.Xaml.Media.Imaging;
-using System.Configuration;
-using Windows.Storage.Provider;
 using Microsoft.UI.Text;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace GAMINGCONSOLEMODE
 {
     public sealed partial class shortcuts : Page
     {
-        private readonly string[] gamepadButtons = new[]
-        {
+        // Konstanten für Gamepad-Tasten und Funktionen
+        private readonly string[] gamepadButtons = {
             "DPadUp", "DPadDown", "DPadLeft", "DPadRight",
             "Start", "Back", "LeftThumb", "RightThumb",
             "LeftShoulder", "RightShoulder", "A", "B", "X", "Y"
         };
 
-        private readonly string[] gamepadButtonswin = new[]
-        {
-            "DPadUp", "DPadDown", "DPadLeft","LeftThumb","RightThumb","DPadRight",
-            "Start", "Back","A", "B", "X", "Y"
+        private readonly string[] gamepadButtonswin = {
+            "DPadUp", "DPadDown", "DPadLeft", "LeftThumb", "RightThumb", "DPadRight",
+            "Start", "Back", "A", "B", "X", "Y"
         };
 
-        private readonly List<string> functions = new()
-        {
-            "taskmanager",
-            "switch tab",
-            "audio switch",
-            "performance overlay",
-            "show overlay"
+        private readonly List<string> functions = new() {
+            "taskmanager", "switch tab", "audio switch",
+            "performance overlay", "show overlay"
         };
 
         public shortcuts()
@@ -52,513 +44,146 @@ namespace GAMINGCONSOLEMODE
             this.Loaded += Shortcuts_Loaded;
         }
 
-
         private void Shortcuts_Loaded(object sender, RoutedEventArgs e)
         {
-            
             LoadExistingShortcuts();
             insertgamepaddata();
-
-            var uri = new Uri("https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Windows365-logo.svg/960px-Windows365-logo.svg.png");
-            var bitmap = new BitmapImage(uri);
-            WebImage.Source = bitmap;
             updateui();
         }
 
-        private void updateui()
-        {
-            
+        // =================================================================
+        // #region TOML Speichern & Laden
+        // =================================================================
 
-            // Load and apply setting for shortcutpopup
+        private void _saveConfiguration()
+        {
+            string settingsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
+            string settingsFilePath = Path.Combine(settingsFolder, "settings.toml");
+            Directory.CreateDirectory(settingsFolder);
+
             try
             {
-                bool value = AppSettings.Load<bool>("shortcutpopup");
-                shortcutpopup.IsOn = value;
-            }
-            catch
-            {
-                // If not found or invalid, default to false
-                shortcutpopup.IsOn = true;
-                AppSettings.Save("shortcutpopup", true);
-            }
-        }
-        private List<string> GetUsedFunctions()
-        {
-            return ShortcutPanel.Children.OfType<Border>()
-                .Select(b => b.Child as StackPanel)
-                .Where(p => p != null)
-                .Where(p => p.Children.OfType<ToggleSwitch>().FirstOrDefault()?.IsOn == true)
-                .Select(p => p.Children.OfType<ComboBox>().ElementAt(2))
-                .Select(cb => (cb.SelectedItem as ComboBoxItem)?.Content?.ToString())
-                .Where(f => !string.IsNullOrEmpty(f))
-                .Distinct()
-                .ToList();
-        }
+                TomlTable settingsModel = File.Exists(settingsFilePath)
+                    ? Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel()
+                    : new TomlTable();
 
-        private void UpdateFunctionComboboxes()
-        {
-            Debug.WriteLine("UpdateFunctionComboboxes started");
-
-            var usedFunctions = GetUsedFunctions();
-            Debug.WriteLine("Used functions: " + string.Join(", ", usedFunctions));
-
-            foreach (var border in ShortcutPanel.Children.OfType<Border>())
-            {
-                var panel = border.Child as StackPanel;
-                if (panel == null)
+                var shortcutList = new TomlTableArray();
+                foreach (var border in ShortcutPanel.Children.OfType<Border>())
                 {
-                    Debug.WriteLine("Panel null – skipping");
-                    continue;
-                }
-
-                var cbFunc = panel.Children.OfType<ComboBox>().ElementAt(2);
-                var toggle = panel.Children.OfType<ToggleSwitch>().FirstOrDefault();
-
-                if (toggle?.IsOn == true)
-                {
-                    Debug.WriteLine("Toggle is ON – skipping combobox update");
-                    continue;
-                }
-
-                var currentValue = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                Debug.WriteLine("Updating ComboBox. Current Value: " + currentValue);
-
-                var newItems = new List<ComboBoxItem>();
-
-                foreach (var func in functions)
-                {
-                    if (!usedFunctions.Contains(func) || func == currentValue)
-                        newItems.Add(new ComboBoxItem { Content = func });
-                }
-
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    Debug.WriteLine("DispatcherQueue: Updating ComboBox.Items");
-
-                    cbFunc.Items.Clear();
-                    foreach (var item in newItems)
-                        cbFunc.Items.Add(item);
-
-                    var selected = cbFunc.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content?.ToString() == currentValue);
-                    if (selected != null)
+                    if (border.Child is StackPanel panel)
                     {
-                        cbFunc.SelectedItem = selected;
-                        Debug.WriteLine("Re-selected current item: " + currentValue);
-                    }
-                });
-            }
+                        var cbKey1 = (ComboBox)panel.Children[0];
+                        var cbKey2 = (ComboBox)panel.Children[2];
+                        var cbFunc = (ComboBox)panel.Children[4];
+                        var toggle = (ToggleSwitch)panel.Children[5];
 
-            Debug.WriteLine("UpdateFunctionComboboxes finished");
-        }
+                        string key1 = (cbKey1.SelectedItem as ComboBoxItem)?.Content?.ToString();
+                        string key2 = (cbKey2.SelectedItem as ComboBoxItem)?.Content?.ToString();
+                        string func = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString();
 
-
-        private void SettingsToggle_Click(object sender, RoutedEventArgs e)
-        {
-            // Toggle visibility based on button state
-            SettingsContent.Visibility = SettingsToggle.IsChecked == true
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
-
-        private void AddCustomShortcut(object sender, RoutedEventArgs e) => AddCustomShortcut();
-
-        private void AddCustomShortcut(string key1 = null, string key2 = null, string function = null, bool enabled = false, bool skipFunctionFilter = false)
-        {
-            var border = new Border
-            {
-                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 30, 30, 30)),
-                BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 51, 51, 51)),
-                BorderThickness = new Thickness(0),
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(10)
-            };
-
-            var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-
-            var cbKey1 = CreateStyledComboBox("KEY1", key1);
-            var cbKey2 = CreateStyledComboBox("KEY2", key2);
-            var cbFunc = CreateStyledComboBox("Function", function);
-            cbFunc.Items.Clear();
-            var usedFunctions = skipFunctionFilter ? new List<string>() : GetUsedFunctions();
-            var addedSet = new HashSet<string>();
-
-            foreach (var func in functions)
-            {
-                if ((!usedFunctions.Contains(func) || func == function) && !addedSet.Contains(func))
-                {
-                    cbFunc.Items.Add(new ComboBoxItem { Content = func });
-                    addedSet.Add(func);
-                }
-            }
-
-            if (!string.IsNullOrEmpty(function))
-                cbFunc.SelectedItem = cbFunc.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString() == function);
-            cbFunc.IsEnabled = !enabled;
-            cbKey1.IsEnabled = !enabled;
-            cbKey2.IsEnabled = !enabled;
-
-
-            var plus = new TextBlock { Text = "+", VerticalAlignment = VerticalAlignment.Center, FontSize = 20, Width = 20, Foreground = new SolidColorBrush(Colors.White) };
-            var equals = new TextBlock { Text = "=", VerticalAlignment = VerticalAlignment.Center, FontSize = 20, Width = 20, Foreground = new SolidColorBrush(Colors.White) };
-            var toggle = new ToggleSwitch
-            {
-                Width = 60,
-                VerticalAlignment = VerticalAlignment.Center,
-                IsOn = enabled,
-                IsEnabled = true // Toggle ist immer aktivierbar
-            };
-            toggle.Toggled += (s, e) => {
-                cbFunc.IsEnabled = !toggle.IsOn;
-                ToggleSwitch_Toggled(s, e);
-            };
-
-            var removeBtn = new Button
-            {
-                Content = "✕", // Unicode X (schöner als normales X)
-                Background = new SolidColorBrush(Colors.Brown),
-                Foreground = new SolidColorBrush(Colors.White),
-                Padding = new Thickness(5),
-                BorderThickness = new Thickness(0),
-                VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 16,
-                FontWeight = FontWeights.Bold
-            };
-            removeBtn.Click += (s, args) => {
-                ShortcutPanel.Children.Remove(border);
-                DeleteShortcutFile(cbFunc);
-            };
-
-            cbKey1.SelectionChanged += (s, e) => {
-                if (toggle.IsOn)
-                {
-                    var k1 = (cbKey1.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                    var k2 = (cbKey2.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                    var f = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                    if (string.IsNullOrEmpty(k1) || k1 == "KEY1" || string.IsNullOrEmpty(k2) || k2 == "KEY2" || string.IsNullOrEmpty(f) || f == "Function")
-                    {
-                        toggle.IsOn = false;
-                        return;
+                        if (!string.IsNullOrEmpty(key1) && !string.IsNullOrEmpty(key2) && !string.IsNullOrEmpty(func))
+                        {
+                            shortcutList.Add(new TomlTable
+                            {
+                                ["key1"] = key1,
+                                ["key2"] = key2,
+                                ["function"] = func,
+                                ["enabled"] = toggle.IsOn
+                            });
+                        }
                     }
                 }
-                SaveShortcutConfig(cbKey1, cbKey2, cbFunc, toggle.IsOn);
-            };
-            cbKey2.SelectionChanged += (s, e) => { if (toggle.IsOn) SaveShortcutConfig(cbKey1, cbKey2, cbFunc, toggle.IsOn); };
-            cbFunc.SelectionChanged += (s, e) =>
-            {
-                if (toggle.IsOn)
+                settingsModel["shortcuts"] = shortcutList;
+
+                string winKey1 = (ComboBoxswitchgcm1.SelectedItem as ComboBoxItem)?.Content?.ToString();
+                string winKey2 = (ComboBoxswitchgcm2.SelectedItem as ComboBoxItem)?.Content?.ToString();
+                if (winswitchgcm.IsOn && !string.IsNullOrEmpty(winKey1) && !string.IsNullOrEmpty(winKey2))
                 {
-                    cbFunc.IsEnabled = false;
-                    SaveShortcutConfig(cbKey1, cbKey2, cbFunc, toggle.IsOn);
+                    settingsModel["winmode_shortcut"] = new TomlTable
+                    {
+                        ["key1"] = winKey1,
+                        ["key2"] = winKey2,
+                        ["enabled"] = true
+                    };
                 }
                 else
                 {
-                  
+                    settingsModel.Remove("winmode_shortcut");
                 }
-            };
 
-
-            panel.Children.Add(cbKey1);
-            panel.Children.Add(plus);
-            panel.Children.Add(cbKey2);
-            panel.Children.Add(equals);
-            panel.Children.Add(cbFunc);
-            panel.Children.Add(toggle);
-            panel.Children.Add(removeBtn);
-
-            border.Child = panel;
-            ShortcutPanel.Children.Add(border);
-        }
-
-        private ComboBox CreateStyledComboBox(string placeholder, string selected = null)
-        {
-            var combo = new ComboBox
+                File.WriteAllText(settingsFilePath, Toml.FromModel(settingsModel));
+            }
+            catch (Exception ex)
             {
-                Width = 200,
-                PlaceholderText = placeholder,
-                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 40, 40, 40)),
-                Foreground = new SolidColorBrush(Colors.White),
-                BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 70, 70, 70))
-            };
-            foreach (var btn in gamepadButtons)
-                combo.Items.Add(new ComboBoxItem { Content = btn });
-            if (!string.IsNullOrEmpty(selected))
-                combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString() == selected);
-            return combo;
+                Debug.WriteLine($"Error saving to TOML: {ex.Message}");
+            }
         }
 
         private void LoadExistingShortcuts()
         {
-            Debug.WriteLine("LoadExistingShortcuts started");
+            string settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "settings.toml");
+            if (!File.Exists(settingsFilePath)) return;
 
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcuts");
-            if (!Directory.Exists(dir))
+            try
             {
-                Debug.WriteLine("Shortcut directory not found: " + dir);
-                return;
-            }
-
-            var seenCombos = new HashSet<string>();
-            var files = Directory.GetFiles(dir, "*.json");
-            Debug.WriteLine($"Found {files.Length} shortcut files");
-
-            foreach (var file in files)
-            {
-                Debug.WriteLine("Processing file: " + Path.GetFileName(file));
-                try
+                var model = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
+                if (model.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
                 {
-                    var json = File.ReadAllText(file);
-                    var data = JsonSerializer.Deserialize<ShortcutData>(json);
-
-                    if (data != null)
+                    foreach (TomlTable table in shortcutsArray)
                     {
-                        string comboKey = $"{data.Key1}-{data.Key2}";
-                        string comboKeyRev = $"{data.Key2}-{data.Key1}";
-
-                        if (!seenCombos.Contains(comboKey) && !seenCombos.Contains(comboKeyRev))
-                        {
-                            seenCombos.Add(comboKey);
-                            Debug.WriteLine($"Adding shortcut: {data.Key1} + {data.Key2} = {data.Function}");
-                            AddCustomShortcut(data.Key1, data.Key2, data.Function, data.Enabled, skipFunctionFilter: true);
-                        }
-                        else
-                        {
-                            Debug.WriteLine($"Duplicate combo, deleting file: {file}");
-                            File.Delete(file);
-                        }
+                        AddCustomShortcut(table["key1"]?.ToString(), table["key2"]?.ToString(), table["function"]?.ToString(), Convert.ToBoolean(table["enabled"]), true);
                     }
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("Error loading shortcut: " + ex.Message);
-                }
             }
-
-            Debug.WriteLine("Calling UpdateFunctionComboboxes from LoadExistingShortcuts");
-            DispatcherQueue.TryEnqueue(() =>
+            catch (Exception ex)
             {
-                Debug.WriteLine("Dispatcher: Running UpdateFunctionComboboxes");
-                UpdateFunctionComboboxes();
-            });
+                Debug.WriteLine($"Error loading shortcuts from TOML: {ex.Message}");
+            }
+            DispatcherQueue.TryEnqueue(UpdateFunctionComboboxes);
         }
 
-
-
-
-        private void ToggleSwitch_Toggled(object sender, RoutedEventArgs e)
-        {
-            var toggle = sender as ToggleSwitch;
-            var panel = toggle?.Parent as StackPanel;
-            if (panel == null) return;
-            var cbKey1 = panel.Children.OfType<ComboBox>().ElementAt(0);
-            var cbKey2 = panel.Children.OfType<ComboBox>().ElementAt(1);
-            var cbFunc = panel.Children.OfType<ComboBox>().ElementAt(2);
-
-            // 🛑 Wenn der Toggle gerade deaktiviert wird → nichts tun
-            if (!toggle.IsOn)
-            {
-                cbKey1.IsEnabled = true;
-                cbKey2.IsEnabled = true;
-                cbFunc.IsEnabled = true;
-                SaveShortcutConfig(cbKey1, cbKey2, cbFunc, toggle.IsOn);
-                return;
-            }
-
-            
-
-            string key1 = (cbKey1.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "KEY1";
-            string key2 = (cbKey2.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "KEY2";
-            string func = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Function";
-
-            if (key1 == "KEY1" || key2 == "KEY2" || func == "Function")
-            {
-                toggle.IsOn = false;
-
-                return;
-            }
-
-            // Duplikate: Kombi
-            bool duplicateCombo = ShortcutPanel.Children.OfType<Border>()
-                .Select(b => b.Child as StackPanel)
-                .Where(p => p != null && p != panel)
-                .Any(p =>
-                {
-                    var otherToggle = p.Children.OfType<ToggleSwitch>().FirstOrDefault();
-                    var otherCb1 = p.Children.OfType<ComboBox>().ElementAt(0);
-                    var otherCb2 = p.Children.OfType<ComboBox>().ElementAt(1);
-
-                    string otherKey1 = (otherCb1.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                    string otherKey2 = (otherCb2.SelectedItem as ComboBoxItem)?.Content?.ToString();
-
-                    bool sameCombo = (key1 == otherKey1 && key2 == otherKey2) || (key1 == otherKey2 && key2 == otherKey1);
-
-                    return otherToggle?.IsOn == true && sameCombo;
-                });
-
-            if (duplicateCombo)
-            {
-                // ❗ Wichtig: NICHT SaveShortcutConfig aufrufen!
-                toggle.IsOn = false;
-                ShowSimpleDialog("Duplicate Shortcut", $"The combination {key1} + {key2} is already in use.");
-                return;
-            }
-
-            // Duplikate: Funktion
-            bool duplicateFunction = ShortcutPanel.Children.OfType<Border>()
-                .Select(b => b.Child as StackPanel)
-                .Where(p => p != null && p != panel)
-                .Any(p =>
-                {
-                    var otherToggle = p.Children.OfType<ToggleSwitch>().FirstOrDefault();
-                    var otherFunc = p.Children.OfType<ComboBox>().ElementAt(2);
-                    string otherFuncValue = (otherFunc.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                    return otherToggle?.IsOn == true && otherFuncValue == func;
-                });
-
-            if (duplicateFunction)
-            {
-                toggle.IsOn = false;
-                ShowSimpleDialog("Function Already Used", $"The function \"{func}\" is already assigned to another shortcut.");
-                return;
-            }
-
-            // ✅ Nur wenn alles erlaubt ist → speichern
-            SaveShortcutConfig(cbKey1, cbKey2, cbFunc, toggle.IsOn);
-            UpdateFunctionComboboxes();
-
-            // Sperren der ComboBoxen bei manuellem Toggle
-            cbKey1.IsEnabled = !toggle.IsOn;
-            cbKey2.IsEnabled = !toggle.IsOn;
-            cbFunc.IsEnabled = !toggle.IsOn;
-
-        }
-
-
-
-
-        private void SaveShortcutConfig(ComboBox cb1, ComboBox cb2, ComboBox cbFunc, bool isEnabled)
-        {
-            string key1 = (cb1.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "None";
-            string key2 = (cb2.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "None";
-            string func = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Function";
-
-            if (key1 == "KEY1" || key2 == "KEY2" || func == "Function")
-                return; // Shortcut not save when not all inside
-
-            var data = new ShortcutData
-            {
-                Key1 = key1,
-                Key2 = key2,
-                Function = func,
-                Enabled = isEnabled
-            };
-
-            string json = JsonSerializer.Serialize(data);
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcuts");
-            Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, func + ".json");
-            File.WriteAllText(path, json);
-        }
-
-
-        private void DeleteShortcutFile(ComboBox cbFunc)
-        {
-            string func = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Function";
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcuts");
-            string path = Path.Combine(dir, func + ".json");
-
-            bool otherStillActive = ShortcutPanel.Children.OfType<Border>()
-                .Select(b => b.Child as StackPanel)
-                .Where(p => p != null)
-                .Any(p =>
-                {
-                    var combo = p.Children.OfType<ComboBox>().ElementAt(2);
-                    var toggle = p.Children.OfType<ToggleSwitch>().FirstOrDefault();
-                    var item = combo.SelectedItem as ComboBoxItem;
-                    return combo != cbFunc && item != null && item.Content?.ToString() == func && toggle?.IsOn == true;
-                });
-
-            if (!otherStillActive && File.Exists(path))
-                File.Delete(path);
-        }
-
-        private class ShortcutData
-        {
-            public string Key1 { get; set; }
-            public string Key2 { get; set; }
-            public string Function { get; set; }
-            public bool Enabled { get; set; }
-        }
-
-        #region winshortcuts
-
-        //helper
-        public static bool IsTaskActive(string taskName)
-        {
-            using (TaskService ts = new TaskService())
-            {
-                var task = ts.FindTask(taskName, true);
-                return task != null && task.Enabled;
-            }
-        }
-
-        // Populates the ComboBoxes with available gamepad buttons and initializes toggle state
         private void insertgamepaddata()
         {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcutswin");
-            string path = Path.Combine(dir, "winmode_change.json");
+            string settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "settings.toml");
+            string loadedKey1 = null, loadedKey2 = null;
+            bool enabled = false;
 
-            string loadedKey1 = "";
-            string loadedKey2 = "";
-            ComboBoxItem selectedItem1 = null;
-            ComboBoxItem selectedItem2 = null;
-
-            // Try to read saved shortcut data if file exists
-            if (File.Exists(path))
+            if (File.Exists(settingsFilePath))
             {
                 try
                 {
-                    string json = File.ReadAllText(path);
-                    var data = JsonSerializer.Deserialize<ShortcutData>(json);
-                    if (data != null)
+                    var model = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
+                    if (model.TryGetValue("winmode_shortcut", out var shortcutObj) && shortcutObj is TomlTable table)
                     {
-                        loadedKey1 = data.Key1?.Trim();
-                        loadedKey2 = data.Key2?.Trim();
+                        loadedKey1 = table["key1"]?.ToString();
+                        loadedKey2 = table["key2"]?.ToString();
+                        enabled = Convert.ToBoolean(table["enabled"]);
                     }
                 }
-                catch
-                {
-                    System.Diagnostics.Debug.WriteLine("Failed to load winmode_change.json");
-                }
+                catch (Exception ex) { Debug.WriteLine($"Error loading winmode_shortcut: {ex.Message}"); }
             }
 
-            // Populate gamepad button ComboBoxes
+            ComboBoxswitchgcm1.Items.Clear();
+            ComboBoxswitchgcm2.Items.Clear();
             foreach (var btn in gamepadButtonswin)
             {
-                var item1 = new ComboBoxItem { Content = btn };
-                ComboBoxswitchgcm1.Items.Add(item1);
-                if (btn == loadedKey1) selectedItem1 = item1;
-
-                var item2 = new ComboBoxItem { Content = btn };
-                ComboBoxswitchgcm2.Items.Add(item2);
-                if (btn == loadedKey2) selectedItem2 = item2;
+                ComboBoxswitchgcm1.Items.Add(new ComboBoxItem { Content = btn });
+                ComboBoxswitchgcm2.Items.Add(new ComboBoxItem { Content = btn });
             }
 
-            // Set selected items AFTER items are added
-            ComboBoxswitchgcm1.SelectedItem = selectedItem1;
-            ComboBoxswitchgcm2.SelectedItem = selectedItem2;
+            if (loadedKey1 != null) ComboBoxswitchgcm1.SelectedItem = ComboBoxswitchgcm1.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString() == loadedKey1);
+            if (loadedKey2 != null) ComboBoxswitchgcm2.SelectedItem = ComboBoxswitchgcm2.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString() == loadedKey2);
 
-            // Disable toggle switch until valid selections are made
-            winswitchgcm.IsEnabled = false;
-
-            // Attach event handlers to enable switch when valid selection is made
+            // =========================================================================
+            // HIER IST DIE KORREKTUR: Diese beiden Zeilen weisen die Event-Handler zu.
+            // =========================================================================
             ComboBoxswitchgcm1.SelectionChanged += GamepadComboBox_SelectionChanged;
             ComboBoxswitchgcm2.SelectionChanged += GamepadComboBox_SelectionChanged;
 
-            // Manually trigger once after loading
+            // Ruft die Methode einmal manuell auf, um den initialen Zustand zu setzen.
             GamepadComboBox_SelectionChanged(null, null);
 
-            // Set toggle ON only if valid selection and file exists
-            if (selectedItem1 != null && selectedItem2 != null && File.Exists(path))
+            if (enabled && ComboBoxswitchgcm1.SelectedItem != null && ComboBoxswitchgcm2.SelectedItem != null)
             {
                 winswitchgcm.IsOn = true;
                 ComboBoxswitchgcm1.IsEnabled = false;
@@ -569,198 +194,215 @@ namespace GAMINGCONSOLEMODE
                 winswitchgcm.IsOn = false;
             }
         }
-        private void ShowSimpleDialog(string title, string content)
+
+        // =================================================================
+        // #region UI-Logik und Event-Handler
+        // =================================================================
+
+        private void AddCustomShortcut(object sender, RoutedEventArgs e) => AddCustomShortcut();
+
+        private void AddCustomShortcut(string key1 = null, string key2 = null, string function = null, bool enabled = false, bool skipFilter = false)
         {
-            var dialog = new ContentDialog
+            var border = new Border { Background = new SolidColorBrush(Color.FromArgb(255, 30, 30, 30)), CornerRadius = new CornerRadius(10), Padding = new Thickness(10), Margin = new Thickness(0, 0, 0, 5) };
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+
+            var availableFunctions = skipFilter ? functions : functions.Except(GetUsedFunctions());
+            var cbKey1 = CreateStyledComboBox(gamepadButtons, key1);
+            var cbKey2 = CreateStyledComboBox(gamepadButtons, key2);
+            var cbFunc = CreateStyledComboBox(availableFunctions, function);
+
+            cbKey1.IsEnabled = !enabled;
+            cbKey2.IsEnabled = !enabled;
+            cbFunc.IsEnabled = !enabled;
+
+            var toggle = new ToggleSwitch { Width = 60, VerticalAlignment = VerticalAlignment.Center, IsOn = enabled };
+            var removeBtn = new Button { Content = "✕", Background = new SolidColorBrush(Colors.Brown), Foreground = new SolidColorBrush(Colors.White), BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+
+            cbKey1.SelectionChanged += (s, e) => _saveConfiguration();
+            cbKey2.SelectionChanged += (s, e) => _saveConfiguration();
+            cbFunc.SelectionChanged += (s, e) => _saveConfiguration();
+            toggle.Toggled += ToggleSwitch_Toggled;
+            removeBtn.Click += (s, args) =>
             {
-                Title = title,
-                Content = content,
-                CloseButtonText = "OK",
-                XamlRoot = App.MainWindow.Content.XamlRoot
+                ShortcutPanel.Children.Remove(border);
+                UpdateFunctionComboboxes();
+                _saveConfiguration();
             };
 
-            _ = dialog.ShowAsync();
+            panel.Children.Add(cbKey1);
+            panel.Children.Add(new TextBlock { Text = "+", VerticalAlignment = VerticalAlignment.Center, FontSize = 20 });
+            panel.Children.Add(cbKey2);
+            panel.Children.Add(new TextBlock { Text = "=", VerticalAlignment = VerticalAlignment.Center, FontSize = 20 });
+            panel.Children.Add(cbFunc);
+            panel.Children.Add(toggle);
+            panel.Children.Add(removeBtn);
+            border.Child = panel;
+            ShortcutPanel.Children.Add(border);
         }
-        // Enables the toggle switch only if both ComboBoxes have a valid selection
-        private void GamepadComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+
+        private void UpdateFunctionComboboxes()
         {
-            string key1 = (ComboBoxswitchgcm1.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim() ?? "";
-            string key2 = (ComboBoxswitchgcm2.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim() ?? "";
-
-            winswitchgcm.IsEnabled = !string.IsNullOrWhiteSpace(key1) && !string.IsNullOrWhiteSpace(key2);
-        }
-
-        // Handles toggle switch ON/OFF behavior for saving/removing the gamepad shortcut
-
-        private bool IsCombinationAlreadyInShortcuts(string key1, string key2)
-        {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcuts");
-
-            if (!Directory.Exists(dir))
-                return false;
-
-            foreach (var file in Directory.GetFiles(dir, "*.json"))
+            var usedFunctions = GetUsedFunctions();
+            foreach (var border in ShortcutPanel.Children.OfType<Border>())
             {
-                try
+                if (border.Child is StackPanel panel && panel.Children.OfType<ToggleSwitch>().FirstOrDefault()?.IsOn == false)
                 {
-                    string json = File.ReadAllText(file);
-                    var data = JsonSerializer.Deserialize<ShortcutData>(json);
+                    var cbFunc = panel.Children.OfType<ComboBox>().ElementAt(2);
+                    var currentValue = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString();
+                    var newItems = functions.Where(f => !usedFunctions.Contains(f) || f == currentValue).ToList();
 
-                    if (data == null)
-                        continue;
-
-                    System.Diagnostics.Debug.WriteLine($"📝 Checking file {file}: {data.Key1} + {data.Key2} / Enabled: {data.Enabled}");
-
-                    if (data.Enabled)
+                    DispatcherQueue.TryEnqueue(() =>
                     {
-                        string fileKey1 = data.Key1?.Trim();
-                        string fileKey2 = data.Key2?.Trim();
-
-                        bool sameCombo =
-                            (key1 == fileKey1 && key2 == fileKey2) ||
-                            (key1 == fileKey2 && key2 == fileKey1);
-
-                        if (sameCombo)
+                        cbFunc.Items.Clear();
+                        newItems.ForEach(item => cbFunc.Items.Add(new ComboBoxItem { Content = item }));
+                        if (currentValue != null)
                         {
-                            System.Diagnostics.Debug.WriteLine("❌ DUPLICATE COMBINATION DETECTED!");
-                            return true;
+                            cbFunc.SelectedItem = cbFunc.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString() == currentValue);
                         }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"⚠️ Error parsing file {file}: {ex.Message}");
+                    });
                 }
             }
+        }
 
-            return false;
+        private void ToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as ToggleSwitch;
+            if (!(toggle?.Parent is StackPanel panel)) return;
+
+            var cbKey1 = (ComboBox)panel.Children[0];
+            var cbKey2 = (ComboBox)panel.Children[2];
+            var cbFunc = (ComboBox)panel.Children[4];
+
+            if (!toggle.IsOn)
+            {
+                cbKey1.IsEnabled = true; cbKey2.IsEnabled = true; cbFunc.IsEnabled = true;
+                UpdateFunctionComboboxes();
+                _saveConfiguration();
+                return;
+            }
+
+            string key1 = (cbKey1.SelectedItem as ComboBoxItem)?.Content?.ToString();
+            string key2 = (cbKey2.SelectedItem as ComboBoxItem)?.Content?.ToString();
+            string func = (cbFunc.SelectedItem as ComboBoxItem)?.Content?.ToString();
+
+            if (string.IsNullOrEmpty(key1) || string.IsNullOrEmpty(key2) || string.IsNullOrEmpty(func))
+            {
+                toggle.IsOn = false; return;
+            }
+            if (IsCombinationInUse(key1, key2, panel) || IsFunctionInUse(func, panel))
+            {
+                toggle.IsOn = false; return;
+            }
+
+            cbKey1.IsEnabled = false; cbKey2.IsEnabled = false; cbFunc.IsEnabled = false;
+            UpdateFunctionComboboxes();
+            _saveConfiguration();
+        }
+
+        // =================================================================
+        // #region Hilfsmethoden
+        // =================================================================
+
+        private ComboBox CreateStyledComboBox(IEnumerable<string> items, string selected = null)
+        {
+            var combo = new ComboBox { Width = 180, PlaceholderText = "..." };
+            var finalItems = items.ToList();
+            if (selected != null && !finalItems.Contains(selected)) finalItems.Add(selected);
+
+            finalItems.ForEach(item => combo.Items.Add(new ComboBoxItem { Content = item }));
+            if (selected != null) combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString() == selected);
+
+            return combo;
+        }
+
+        private void ShowSimpleDialog(string title, string content)
+        {
+            var dialog = new ContentDialog { Title = title, Content = content, CloseButtonText = "OK", XamlRoot = this.XamlRoot };
+            _ = dialog.ShowAsync();
+        }
+
+        private List<string> GetUsedFunctions() => ShortcutPanel.Children.OfType<Border>()
+            .Select(b => b.Child as StackPanel)
+            .Where(p => p?.Children.OfType<ToggleSwitch>().FirstOrDefault()?.IsOn == true)
+            .Select(p => (p.Children.OfType<ComboBox>().ElementAt(2).SelectedItem as ComboBoxItem)?.Content?.ToString())
+            .Where(f => !string.IsNullOrEmpty(f)).Distinct().ToList();
+
+        private bool IsCombinationInUse(string key1, string key2, StackPanel currentPanel)
+        {
+            bool duplicate = ShortcutPanel.Children.OfType<Border>()
+                .Select(b => b.Child as StackPanel)
+                .Where(p => p != null && p != currentPanel && p.Children.OfType<ToggleSwitch>().FirstOrDefault()?.IsOn == true)
+                .Any(p => {
+                    string otherKey1 = (p.Children.OfType<ComboBox>().ElementAt(0).SelectedItem as ComboBoxItem)?.Content?.ToString();
+                    string otherKey2 = (p.Children.OfType<ComboBox>().ElementAt(1).SelectedItem as ComboBoxItem)?.Content?.ToString();
+                    return (key1 == otherKey1 && key2 == otherKey2) || (key1 == otherKey2 && key2 == otherKey1);
+                });
+            if (duplicate) ShowSimpleDialog("Duplicate Shortcut", $"The combination {key1} + {key2} is already in use.");
+            return duplicate;
+        }
+
+        private bool IsFunctionInUse(string func, StackPanel currentPanel)
+        {
+            bool duplicate = ShortcutPanel.Children.OfType<Border>()
+                .Select(b => b.Child as StackPanel)
+                .Any(p => p != null && p != currentPanel && p.Children.OfType<ToggleSwitch>().FirstOrDefault()?.IsOn == true && (p.Children.OfType<ComboBox>().ElementAt(2).SelectedItem as ComboBoxItem)?.Content?.ToString() == func);
+            if (duplicate) ShowSimpleDialog("Function Already Used", $"The function \"{func}\" is already assigned.");
+            return duplicate;
         }
 
 
+
+        #region Other UI Handlers
+        private void updateui()
+        {
+            try { shortcutpopup.IsOn = AppSettings.Load<bool>("shortcutpopup"); }
+            catch { AppSettings.Save("shortcutpopup", true); shortcutpopup.IsOn = true; }
+        }
+
+        private void SettingsToggle_Click(object sender, RoutedEventArgs e) => SettingsContent.Visibility = SettingsToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+
+        private void GamepadComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            winswitchgcm.IsEnabled = ComboBoxswitchgcm1.SelectedItem != null && ComboBoxswitchgcm2.SelectedItem != null;
+            if (winswitchgcm.IsOn)
+            {
+                _saveConfiguration();
+            }
+        }
 
         private void winswitchgcm_Toggled(object sender, RoutedEventArgs e)
         {
-            try
+            var toggle = sender as ToggleSwitch;
+            if (!toggle.IsOn)
             {
-                string key1 = (ComboBoxswitchgcm1.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim() ?? "";
-                string key2 = (ComboBoxswitchgcm2.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim() ?? "";
-                string func = "winmodechange";
-
-                if (string.IsNullOrWhiteSpace(key1) || string.IsNullOrWhiteSpace(key2))
-                {
-                    winswitchgcm.IsOn = false;
-                    ShowSimpleDialog("Invalid", "Please select two valid keys.");
-                    return;
-                }
-
-                if (key1 == key2)
-                {
-                    winswitchgcm.IsOn = false;
-                    ShowSimpleDialog("Invalid Shortcut", "Key1 and Key2 cannot be the same.");
-                    return;
-                }
-
-                // ⛔ Prüfen ob die Kombi bereits als Shortcut gespeichert ist
-                if (IsCombinationAlreadyInShortcuts(key1, key2))
-                {
-                    winswitchgcm.IsOn = false;
-                    ShowSimpleDialog("Duplicate Shortcut", $"The combination {key1} + {key2} is already used in a custom shortcut.");
-                    return;
-                }
-
-
-                if (sender is ToggleSwitch toggle && toggle.IsOn)
-                {
-
-
-                    // ✅ Shortcut speichern
-                    var data = new ShortcutData
-                    {
-                        Key1 = key1,
-                        Key2 = key2,
-                        Function = func,
-                        Enabled = true
-                    };
-
-
-                    string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcutswin");
-                    Directory.CreateDirectory(dir);
-
-                    string path = Path.Combine(dir, "winmode_change.json");
-                    string json = JsonSerializer.Serialize(data);
-                    File.WriteAllText(path, json);
-
-                    System.Diagnostics.Debug.WriteLine($"[ON] Shortcut saved: {key1} + {key2} -> {func} at {path}");
-
-                    // Task aktivieren
-                    bool taskExistsAndEnabled = IsTaskActive("GCM_wingamepad");
-
-                    if (!taskExistsAndEnabled)
-                    {
-                            AppSettings.Save("useseamlessswitchtogcm", true);
-                            ShowSimpleDialog("Enabled", "Seamless Switch will be enabled on the next GCM launch");
-                        // Sperre Felder
-                        ComboBoxswitchgcm1.IsEnabled = false;
-                        ComboBoxswitchgcm2.IsEnabled = false;
-                    }  
-                }
-                else
-                {
-                    // OFF: Shortcut löschen
-                    string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GCMSettings", "shortcutswin");
-                    string path = Path.Combine(dir, "winmode_change.json");
-
-                    if (File.Exists(path))
-                    {
-                        File.Delete(path);
-                        System.Diagnostics.Debug.WriteLine($"[OFF] Shortcut file deleted: {path}");
-                    }
-
-                    // Task deaktivieren
-                    bool taskExistsAndEnabled = IsTaskActive("GCM_wingamepad");
-
-                       
-                            AppSettings.Save("useseamlessswitchtogcm", false);
-                            ShowSimpleDialog("Disabled", "Seamless Switch will be disabled on the next GCM launch");
-
-                        // Felder wieder freigeben
-                        ComboBoxswitchgcm1.IsEnabled = true;
-                        ComboBoxswitchgcm2.IsEnabled = true;
-                    
-
-                }
+                ComboBoxswitchgcm1.IsEnabled = true;
+                ComboBoxswitchgcm2.IsEnabled = true;
+                AppSettings.Save("useseamlessswitchtogcm", false);
+                _saveConfiguration();
+                return;
             }
-            catch (Exception ex)
+
+            string key1 = (ComboBoxswitchgcm1.SelectedItem as ComboBoxItem)?.Content?.ToString();
+            string key2 = (ComboBoxswitchgcm2.SelectedItem as ComboBoxItem)?.Content?.ToString();
+
+            if (string.IsNullOrWhiteSpace(key1) || string.IsNullOrWhiteSpace(key2) || key1 == key2 || IsCombinationInUse(key1, key2, null))
             {
-                System.Diagnostics.Debug.WriteLine($"ERROR in winswitchgcm_Toggled: {ex.Message}");
+                if (key1 == key2) ShowSimpleDialog("Invalid Shortcut", "Key1 and Key2 cannot be the same.");
+                toggle.IsOn = false;
+                return;
             }
+
+            ComboBoxswitchgcm1.IsEnabled = false;
+            ComboBoxswitchgcm2.IsEnabled = false;
+            AppSettings.Save("useseamlessswitchtogcm", true);
+            ShowSimpleDialog("Enabled", "Seamless Switch will be enabled on the next GCM launch.");
+            _saveConfiguration();
         }
-
-
-
-        #endregion winshortcuts
-
-        #region settings center
 
         private void shortcutpopup_Toggled(object sender, RoutedEventArgs e)
         {
-            // Cast sender to ToggleSwitch to get the current state
-            if (sender is ToggleSwitch toggle)
-            {
-                if (toggle.IsOn)
-                {
-                    // Save true if the switch is on
-                    AppSettings.Save("shortcutpopup", true);
-                }
-                else
-                {
-                    // Save false if the switch is off
-                    AppSettings.Save("shortcutpopup", false);
-                }
-            }
-        
-
+            if (sender is ToggleSwitch toggle) AppSettings.Save("shortcutpopup", toggle.IsOn);
+        }
+        #endregion
     }
-    #endregion settings center
-}
 }

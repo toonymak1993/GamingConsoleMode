@@ -6,100 +6,118 @@
 
     <Grid>
         <StackPanel x:Name="LauncherTileRow"
-    Orientation="Horizontal"
-    Visibility="Collapsed"
-    HorizontalAlignment="Center"
-    Loaded="LauncherTileRow_Loaded"
-    VerticalAlignment="Top"
-    Margin="0,40,0,0"
-    Spacing="20">
-            <Border Width="120" Height="140" BorderBrush="Gray" BorderThickness="2" CornerRadius="15" Background="#66FFFFFF" x:Name="LauncherTile0"/>
-            <Border Width="120" Height="140" BorderBrush="Gray" BorderThickness="2" CornerRadius="15" Background="#66FFFFFF" x:Name="LauncherTile1"/>
-            <Border Width="120" Height="140" BorderBrush="Gray" BorderThickness="2" CornerRadius="15" Background="#66FFFFFF" x:Name="LauncherTile2"/>
-            <Border Width="120" Height="140" BorderBrush="Gray" BorderThickness="2" CornerRadius="15" Background="#66FFFFFF" x:Name="LauncherTile3"/>
-            <Border Width="120" Height="140" BorderBrush="Gray" BorderThickness="2" CornerRadius="15" Background="#66FFFFFF" x:Name="LauncherTile4"/>
+                    Orientation="Horizontal"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Center"
+                    Loaded="LauncherTileRow_Loaded"
+                    VerticalAlignment="Top"
+                    Margin="0,40,0,0"
+                    Spacing="20">
+            <Border Width="120" Height="140" x:Name="LauncherTile0"/>
+            <Border Width="120" Height="140" x:Name="LauncherTile1"/>
+            <Border Width="120" Height="140" x:Name="LauncherTile2"/>
+            <Border Width="120" Height="140" x:Name="LauncherTile3"/>
+            <Border Width="120" Height="140" x:Name="LauncherTile4"/>
         </StackPanel>
 
-        <!-- Hintergrundbild -->
         <Image x:Name="BackgroundImage"
                Stretch="UniformToFill"
-               IsHitTestVisible="False"
-               HorizontalAlignment="Stretch"
-               VerticalAlignment="Stretch"
-               Opacity="0.2"/>
+               IsHitTestVisible="False"/>
 
-        <!-- Info-Leiste oben rechts -->
-        <Border CornerRadius="10"
-                x:Name="infopanelright"
+        <Border x:Name="infopanelright"
                 Background="#88000000"
+                CornerRadius="10"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
-                Visibility="Visible"
-                Margin="20"
-                Padding="10">
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <Button Content="📶" x:Name="wifibutton" Width="40" Height="40" Click="WifiButton_Click" Visibility="Collapsed"/>
-                <Button Content="ᛒ" x:Name="blebutton"  Width="40" Height="40" Click="BluetoothButton_Click" Visibility="Collapsed"/>
-                <TextBlock x:Name="ClockText"
-                           FontSize="24"
-                           FontWeight="SemiBold"
-                           Foreground="White"
-                           VerticalAlignment="Center"/>
-         <TextBox x:Name="FocusBlocker"
-         Opacity="0"
-         Width="1"
-         Height="1"
-         IsTabStop="False"
-         IsHitTestVisible="False"
-         Margin="-100" />
-
-            </StackPanel>
+                Margin="20" Padding="10">
+            <Grid ColumnSpacing="15" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
+                    <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1">
+                        <ToolTipService.ToolTip>
+                            <TextBlock Text="Zurück zum Desktop"/>
+                        </ToolTipService.ToolTip>
+                        <FontIcon Glyph="&#xE909;" FontSize="18"/>
+                    </Button>
+                    <Button x:Name="ShutdownButton" Width="50" Height="40" Click="ShutdownButton_Click">
+                        <ToolTipService.ToolTip>
+                            <TextBlock Text="Herunterfahren"/>
+                        </ToolTipService.ToolTip>
+                        <FontIcon Glyph="&#xE713;" FontSize="18"/>
+                    </Button>
+                </StackPanel>
+                <TextBlock x:Name="ClockText" Grid.Column="1" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
+            </Grid>
         </Border>
 
-        <!-- Hauptbereich: horizontale Kartenliste -->
-        <ScrollViewer x:Name="ProgramScrollViewer"
-              HorizontalScrollBarVisibility="Visible"
-              VerticalScrollBarVisibility="Disabled"
-              HorizontalAlignment="Center"
-              VerticalAlignment="Bottom"
-              Padding="60">
-            <StackPanel x:Name="ProgramCardPanel"
-                Orientation="Horizontal"
-                HorizontalAlignment="Center"
-                Spacing="40"/>
-        </ScrollViewer>
+        <Grid VerticalAlignment="Bottom" 
+              Height="420"
+              HorizontalAlignment="Stretch">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <!-- Unten: Controller-Tastenleiste mit Farbverlauf -->
+            <Border x:Name="LauncherCard"
+                    Grid.Column="0"
+                    Width="350" Height="250"
+                    Background="#33FFFFFF"
+                    CornerRadius="20"
+                    BorderBrush="Gray"
+                    BorderThickness="1"
+                    Tapped="LauncherCard_Tapped"
+                    VerticalAlignment="Center"
+                    Margin="60,0,0,0">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
+                    <FontIcon Glyph="&#xE80F;" FontSize="48" Foreground="White"/>
+                    <TextBlock Text="Launcher" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
+                </StackPanel>
+            </Border>
+
+            <Rectangle Grid.Column="1"
+                       Width="2"
+                       Fill="#55FFFFFF"
+                       Height="200"
+                       RadiusX="1" RadiusY="1"
+                       VerticalAlignment="Center"
+                       Margin="40,0,40,0"/>
+
+            <ScrollViewer x:Name="ProgramScrollViewer"
+                          Grid.Column="2"
+                          VerticalScrollBarVisibility="Disabled"
+                          VerticalAlignment="Center"
+                          Padding="0,0,60,0">
+                <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
+            </ScrollViewer>
+        </Grid>
+
         <Border Height="60"
-        VerticalAlignment="Bottom"
-        HorizontalAlignment="Stretch">
+                VerticalAlignment="Bottom"
+                HorizontalAlignment="Stretch">
             <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                    <GradientStop Color="#FF2D2D30" Offset="0.0"/>
-                    <GradientStop Color="#FF3E3E42" Offset="1.0"/>
+                <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                    <GradientStop Color="#CC000000" Offset="0.0"/>
+                    <GradientStop Color="Transparent" Offset="1.0"/>
                 </LinearGradientBrush>
             </Border.Background>
-
-            <StackPanel Orientation="Horizontal"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Spacing="40">
-                <!-- A Button Info -->
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
-                    <TextBlock Text="A" FontSize="22" Foreground="White" VerticalAlignment="Center"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="40">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Text="A" FontSize="22" FontWeight="Bold" Foreground="#FFA5D952"/>
                     <TextBlock Text="Start" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                 </StackPanel>
-
-                <!-- B Button Info -->
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
-                    <TextBlock Text="B" FontSize="22" Foreground="White" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Text="B" FontSize="22" FontWeight="Bold" Foreground="#FFDB4E4E"/>
                     <TextBlock Text="Close" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                 </StackPanel>
-
-               
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Text="RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
+                    <TextBlock Text="Switch Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                </StackPanel>
             </StackPanel>
         </Border>
-
-
     </Grid>
 </Window>

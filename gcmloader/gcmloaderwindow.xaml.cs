@@ -4,7 +4,9 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Win32;
-using Newtonsoft.Json.Linq;
+using Microsoft.UI.Composition;
+using Microsoft.UI.Xaml.Hosting; // Für ElementCompositionPreview
+using System.Numerics; 
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -27,6 +29,8 @@ using System.Data;
 using System.Collections.Generic;
 using System.Text.Json;
 using Windows.Media.Core;
+using Tomlyn;
+using Tomlyn.Model;
 using Windows.Media.Playback;
 using Microsoft.UI.Windowing;
 using Windows.System;
@@ -48,6 +52,7 @@ using Vanara.PInvoke;
 using static Vanara.PInvoke.Shell32;
 using System.Xml;
 using Microsoft.Win32.TaskScheduler;
+using Task = System.Threading.Tasks.Task;
 
 
 
@@ -58,13 +63,46 @@ namespace gcmloader
     {
         #region needed
 
+
+        private class ProcessData
+        {
+            public string ProductName { get; set; }
+            public string ExePath { get; set; }
+            public IntPtr Hwnd { get; set; }
+            public Process Proc { get; set; }
+        }
+        // NEU: Eine kleine Klasse, um die Shortcut-Daten zu halten
+        private class ShortcutData
+        {
+            public string Key1 { get; set; }
+            public string Key2 { get; set; }
+            public string Function { get; set; }
+            public bool Enabled { get; set; }
+        }
+
+        // Die Dictionaries zum Speichern und Ausführen der Shortcuts
+        private Dictionary<(string, string), string> _activeShortcuts = new();
+        private Dictionary<string, System.Action> _shortcutActions = new();
+
+        // Diese Variable speichert den Xbox-Prozess, damit wir ihn später überwachen können.
+        private static Process monitoredXboxProcess = null;
         private int _selectedCardIndex = 0;
         private int _selectedButtonIndex = 0;
         private DispatcherTimer _taskRefreshTimer;
         private HashSet<GamepadButtonFlags> _pressedButtons = new();
+        private static string startart = null;
 
+        //gamepad
+        // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
+        // Die drei Fokus-Bereiche unserer App
+private enum FocusArea { Launcher, Cards, TopButtons }
+private FocusArea _currentFocusArea = FocusArea.Cards;
 
+        // Index und Liste für die oberen Buttons
+        private int _selectedTopButtonIndex = 0;
+private List<Button> _topButtons;
+     
 
 
         private const int GWL_STYLE = -16;
@@ -214,11 +252,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     rootElement.Focus(FocusState.Programmatic);
                 };
             }
+            // Füllt die Liste mit den UI-Elementen aus dem XAML
+            _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
+
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Application.Current.UnhandledException += CurrentApp_UnhandledException;
             this.Activated += MainWindow_Activated;
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
+
+            string startart = AppSettings.Load<string>("launcher");
+
             LoadShortcutsFromSettings();
             SetupGamepad();
             Start();
@@ -522,7 +566,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Set the wallpaper as the background
             SetBackgroundImage(screenWidth, screenHeight);
         }
-
 
         private bool IsWindowInForeground()
         {
@@ -943,7 +986,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Console.WriteLine($"Unhandled error in preload list processing: {ex.Message}");
             }
         }
-        public void preaudio(bool start,bool end)
+        public static void preaudio(bool start,bool end)
         {
             try
             {
@@ -971,74 +1014,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Console.WriteLine("no preaudio set or problem");
             }
         }
-        public void WaitForLauncherToClose()
-        {
 
-            string Launcher = AppSettings.Load<string>("launcher");
-            Process[] processes;
-            
-            if (Launcher == "custom")
-            {
-                Launcher = Path.GetFileName(AppSettings.Load<string>("customlauncherpath"));
-                Launcher = Launcher.Substring(0, Launcher.Length - 4);
-
-                string ProcessName = Launcher;
-                do
-                {
-                    Thread.Sleep(3000);
-                    processes = Process.GetProcessesByName(ProcessName);
-                } while (processes.Length > 0);
-
-                // back to windows 
-                displayfusion("end");
-                BackToWindows();
-                CleanupLogging();
-                //close
-
-
-            }
-            else if (Launcher == "playnite")
-            {
-                string ProcessName = "Playnite.FullscreenApp";
-                do
-                {
-                    Thread.Sleep(3000);
-                    processes = Process.GetProcessesByName(ProcessName);
-                } while (processes.Length > 0);
-
-                // back to windows 
-                displayfusion("end");
-                BackToWindows();
-                CleanupLogging();
-                //close
-            }
-            else if (Launcher == "steam")
-            {
-
-                string ProcessName = Launcher;
-                do
-                {
-                    Thread.Sleep(3000);
-                    processes = Process.GetProcessesByName(ProcessName);
-                } while (processes.Length > 0);
-
-                // back to windows 
-                Console.WriteLine("--Launcher Close--");
-                displayfusion("end");
-                BackToWindows();
-                CleanupLogging();
-                //close
-            }
-            else
-            {
-                // back to windows 
-                displayfusion("end");
-                BackToWindows();
-                CleanupLogging();
-                //close
-            }
-
-        }
         private static bool IsAlreadyRunning()
         {
             string currentProcessName = Process.GetCurrentProcess().ProcessName;
@@ -1192,7 +1168,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
-        public void displayfusion(string art)
+        public static void displayfusion(string art)
         {
 
             try
@@ -1479,90 +1455,395 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         static void BackToWindows()
         {
+
+            Console.WriteLine("Exit-Button geklickt. Stelle den Desktop wieder her und beende die App...");
+
+            // Schritt 1: Taskleiste und Icons für die aktuelle Sitzung wieder sichtbar machen
+            TaskbarVisibility.ShowTaskbar();
+
+            IntPtr progman = FindWindow("Progman", null);
+            if (progman != IntPtr.Zero)
+            {
+                ShowWindow(progman, 5); // 5 = SW_SHOW
+            }
+
+            IntPtr workerw = FindWindow("WorkerW", null);
+            if (workerw != IntPtr.Zero)
+            {
+                ShowWindow(workerw, 5); // 5 = SW_SHOW
+            }
+
             try
             {
-                //check  startup apps winpart
-                try
-                {
-                    bool usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
-                    if (usewinpartstartapps == true)
-                    {
-                        //First restore all Autostartapps Not POPUPS
-                        StartupControl.RestoreStartupApps();
-                    }
-                    else
-                    {
-
-                    }
-                }
-                catch
-                {
-
-                }
-
-
+                // Schritt 1: Registry-Eintrag auf "explorer.exe" zurücksetzen
                 const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
                 const string valueName = "Shell";
-                const string newValue = @"explorer.exe";
-
-                // Open registry key for writing
                 using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
                 {
                     if (key != null)
                     {
-                        Console.WriteLine("Registry key opened successfully.");
-
-                        // Modify value in registry key
-                        key.SetValue(valueName, newValue, RegistryValueKind.String);
-                        Console.WriteLine($"Value '{valueName}' has been changed to '{newValue}'.");
-                        //End Decky Loader process if running
-                        Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
-
-                        if (deckyLoaderProcesses.Length > 0)
-                        {
-                            foreach (var process in deckyLoaderProcesses)
-                            {
-                                process.Kill();
-                                process.WaitForExit();
-                                Console.WriteLine("Decky Loader process killed successfully.");
-                            }
-                        }
-
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Unable to open registry key '{keyName}'.");
+                        key.SetValue(valueName, "explorer.exe", RegistryValueKind.String);
+                        Console.WriteLine("Windows Shell wurde auf explorer.exe zurückgesetzt.");
                     }
                 }
 
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Console.WriteLine("Error: Access Denied. Run the application as an administrator.");
+                // Schritt 2: Alle Autostart-Apps wiederherstellen (dein bestehender Code)
+                try
+                {
+                    if (AppSettings.Load<bool>("usewinpartstartapps"))
+                    {
+                        StartupControl.RestoreStartupApps();
+                    }
+                }
+                catch { /* Fehler ignorieren, falls Einstellung nicht existiert */ }
+
+                // Schritt 3 (NEU & WICHTIG): Explorer-Prozess starten
+                // Prüfen, ob der Explorer schon läuft, bevor wir ihn starten.
+                if (!Process.GetProcessesByName("explorer").Any())
+                {
+                    Console.WriteLine("Explorer.exe läuft nicht, starte ihn neu...");
+                    Process.Start("explorer.exe");
+                }
+                else
+                {
+                    Console.WriteLine("Explorer.exe läuft bereits.");
+                }
+
+                // Optional: Andere Prozesse wie Decky Loader beenden
+                Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
+                foreach (var process in deckyLoaderProcesses)
+                {
+                    process.Kill();
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Fehler bei der Wiederherstellung von Windows: {ex.Message}");
             }
 
-            
+            // Schritt 3: Restliche Aufräum-Aktionen
+            displayfusion("end");
+            CleanupLogging();
+            #region wingamepad
+            // check if wingamepas is aktiv and set tasksheduller
+            // test it needed
+            try
+            {
+                AppSettings.Load<bool>("useseamlessswitchtogcm");
+            }
+            catch
+            {
+                // if not set, set it to false
+                AppSettings.Save("useseamlessswitchtogcm", false);
+
+            }
+            // test if wingamepad is aktiv in task sheduller
+            bool taskExistsAndEnabled = IsTaskActive("GCM_wingamepad");
+
+            //task is OFF
+            if (!taskExistsAndEnabled) //if job is not aktivated and useseamlessswitchtogcm is true
+            {
+                if (AppSettings.Load<bool>("useseamlessswitchtogcm") == true)
+                {
+                    //aktivate task job
+                    using (TaskService ts = new TaskService())
+                    {
+                        try
+                        {
+                            string taskName = "GCM_wingamepad";
+
+                            // Clean up previous task
+                            ts.RootFolder.DeleteTask(taskName, false);
+
+
+                            TaskDefinition td = ts.NewTask();
+                            td.RegistrationInfo.Description = "Start GCM wingamepad mode";
+                            td.Principal.UserId = WindowsIdentity.GetCurrent().Name;
+                            td.Principal.LogonType = TaskLogonType.InteractiveToken;
+                            td.Principal.RunLevel = TaskRunLevel.Highest;
+
+                            td.Triggers.Add(new LogonTrigger
+                            {
+                                Delay = TimeSpan.FromSeconds(3),
+                                Enabled = true
+                            });
+
+                            string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
+                            td.Actions.Add(new ExecAction(exePath, null, null));
+
+                            td.Settings.StopIfGoingOnBatteries = false;
+                            td.Settings.DisallowStartIfOnBatteries = false;
+                            td.Settings.RunOnlyIfIdle = false;
+                            td.Settings.RunOnlyIfNetworkAvailable = false;
+                            td.Settings.AllowHardTerminate = false;
+                            td.Settings.StartWhenAvailable = true;
+                            td.Settings.AllowDemandStart = true;
+
+                            ts.RootFolder.RegisterTaskDefinition(taskName, td,
+                                TaskCreation.CreateOrUpdate, null, null,
+                                TaskLogonType.InteractiveToken);
+
+
+
+                            Microsoft.Win32.TaskScheduler.Task task = ts.FindTask(taskName);
+                            if (task != null)
+                            {
+                                task.Run();
+                                //Logger.Write("Task started.");
+                            }
+                            else
+                            {
+                                //Logger.Write("ERROR: Task was not found after registration.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            //Logger.Write("Error while creating task: " + ex.ToString());
+                            throw;
+                        }
+                    }
+                }
+            }
+            //task is ON
+            if (taskExistsAndEnabled)
+            {
+                if (AppSettings.Load<bool>("useseamlessswitchtogcm") == false) //if job is aktivated and useseamlessswitchtogcm is false
+                {
+                    //deaktivate task job
+                    using (TaskService ts = new TaskService())
+                    {
+                        try
+                        {
+                            ts.RootFolder.DeleteTask("GCM_wingamepad", false);
+                        }
+                        catch
+                        {
+                            Console.WriteLine("Error deleting GCM_wingamepad task, it may not exist.");
+                        }
+                    }
+                }
+                else
+                {
+                    //job aktiviert / gcmswitch is true
+                    try
+                    {
+                        string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
+
+                        if (!File.Exists(exePath))
+                        {
+                            throw new FileNotFoundException("wingamepad.exe not found.", exePath);
+                        }
+
+                        var startInfo = new ProcessStartInfo
+                        {
+                            FileName = exePath,
+                            UseShellExecute = true,
+                            Verb = "runas"
+                        };
+
+                        Process.Start(startInfo);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[ERROR] Failed to launch wingamepad.exe: {ex.Message}");
+                    }
+                }
+            }
+            #endregion wingamepad
+            //rename steam standard video
+            try
+            {
+                StartupVideo.RenameSteamStartupVideo_End();
+            }
+            catch { }
+            //set Audio Back
+            preaudio(false, true);
+            //handheld
+            #region Handheld
+            #region Ally
+            if (IsHandheld() == true)
+            {
+
+            }
+            #endregion Ally
+            #endregion Handheld
+            //uac
+            #region uac
+            try
+            {
+
+                bool useuac = AppSettings.Load<bool>("uac");
+                if (useuac == true)
+                {
+                    Console.WriteLine("UAC is enabled, setting to on");
+                    //useuac is aktive 
+                    uac("on");
+                }
+                else if (useuac == false)
+                {
+                    Console.WriteLine("UAC is disabled, setting to off");
+                    //User set it to off dont do nothing
+                    uac("off");
+                }
+            }
+            catch
+            {
+                Console.WriteLine("UAC is enabled, setting to on");
+                //error in read
+                AppSettings.Save("uac", true);
+                uac("on");
+            }
+            #endregion uac
+
+            // Kill all explorer processes
+            foreach (var process in Process.GetProcessesByName("explorer"))
+            {
+                try
+                {
+                    process.Kill();
+                    process.WaitForExit();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Error killing explorer: " + ex.Message);
+                }
+            }
+            // Schritt 4 (ANGEPASST): Beende den gesamten Prozess der Anwendung
+            Environment.Exit(0);
+
         }
+
+        //xbox
+        // 1. Benötigte P/Invoke-Deklaration (am besten am Anfang der Klasse platzieren)
+
+
+        // 2. Benötigte Konstante (auch am Anfang der Klasse platzieren)
+        private const int SW_SHOWMAXIMIZED = 3;
+
+        // 3. Die eigentliche Methode
+        private static void MaximizeXboxWindow(IntPtr hwnd)
+        {
+            // Prüft, ob ein gültiges Fenster-Handle übergeben wurde
+            if (hwnd != IntPtr.Zero)
+            {
+                // Maximiert das Fenster, das zum Handle gehört
+                ShowWindow(hwnd, SW_SHOWMAXIMIZED);
+            }
+        }
+
+
+        private void SwitchToConfiguredLauncher()
+        {
+            string launcher = AppSettings.Load<string>("launcher");
+            Console.WriteLine($"Wechsle zu Launcher '{launcher}'...");
+
+            switch (launcher)
+            {
+                case "steam":
+                    // Für Steam ist der Protokoll-Befehl am zuverlässigsten.
+                    // Er startet Steam, falls es nicht läuft, oder holt es in den Vordergrund.
+                    Process.Start(new ProcessStartInfo("steam://open/bigpicture") { UseShellExecute = true });
+                    break;
+
+                case "playnite":
+                    string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
+                    string playniteProcessName = "Playnite.FullscreenApp";
+
+                    Process playniteProcess = Process.GetProcessesByName(playniteProcessName).FirstOrDefault();
+                    if (playniteProcess != null && playniteProcess.MainWindowHandle != IntPtr.Zero)
+                    {
+                        // Playnite läuft schon, in den Vordergrund holen.
+                        TaskManagerBringWindowToForeground(playniteProcess.MainWindowHandle);
+                    }
+                    else
+                    {
+                        // Playnite starten.
+                        Process.Start(new ProcessStartInfo(playnitePath, "--startfullscreen") { UseShellExecute = true });
+                    }
+                    break;
+
+                case "custom":
+                    string customPath = AppSettings.Load<string>("customlauncherpath");
+                    string customProcessName = Path.GetFileNameWithoutExtension(customPath);
+
+                    Process customProcess = Process.GetProcessesByName(customProcessName).FirstOrDefault();
+                    if (customProcess != null && customProcess.MainWindowHandle != IntPtr.Zero)
+                    {
+                        // Custom Launcher läuft schon, in den Vordergrund holen.
+                        TaskManagerBringWindowToForeground(customProcess.MainWindowHandle);
+                    }
+                    else
+                    {
+                        // Custom Launcher starten.
+                        Process.Start(new ProcessStartInfo(customPath) { UseShellExecute = true });
+                    }
+                    break;
+
+                case "xbox":
+                    // Das Protokoll "xbox:" startet die App oder holt sie in den Vordergrund.
+                    Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
+                    break;
+            }
+        }
+
+
         static void StartLauncher()
         {
             string launcher = AppSettings.Load<string>("launcher");
             switch (launcher)
             {
                 case "steam":
+                    Console.WriteLine("starte steam launcher");
                     StartSteam();
                     break;
 
                 case "playnite":
-
+                    Console.WriteLine("starte playnite launcher");
                     StartPlaynite();
                     break;
 
                 case "custom":
+                    Console.WriteLine("starte custom launcher");
                     StartOtherLauncher();
+                    break;
+
+                case "xbox":
+                    try
+                    {
+                        Console.WriteLine("Starte Xbox-App über Protokoll...");
+                        Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
+
+                        Console.WriteLine("Warte 5 Sekunden, bis die App im Vordergrund ist...");
+                        //System.Threading.Thread.Sleep(5000);
+
+                        IntPtr hwnd = GetForegroundWindow();
+                        if (hwnd == IntPtr.Zero) break;
+
+                        const int nChars = 256;
+                        System.Text.StringBuilder titleBuilder = new System.Text.StringBuilder(nChars);
+                        GetWindowText(hwnd, titleBuilder, nChars);
+
+                        if (titleBuilder.ToString().Contains("Xbox", StringComparison.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine($"Richtiges Fenster gefunden: '{titleBuilder}'.");
+                            MaximizeXboxWindow(hwnd);
+                            Console.WriteLine("Xbox-Fenster wurde maximiert.");
+
+                            // Finde den Logik-Prozess...
+                            Process logicProcess = Process.GetProcessesByName("XboxPcApp").FirstOrDefault();
+
+                            // ...und speichere ihn in unserer statischen Variable für später.
+                            if (logicProcess != null)
+                            {
+                                monitoredXboxProcess = logicProcess;
+                                Console.WriteLine($"Xbox-Prozess {logicProcess.Id} zur Überwachung gespeichert.");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Fehler beim Starten der Xbox-App: " + ex.Message);
+                    }
                     break;
 
                 default:
@@ -1575,6 +1856,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
         }
+
+        private void LauncherCard_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+
+            SwitchToConfiguredLauncher();
+        }
+        private void WaitForExplorerAndStartLauncher()
+        {
+            Console.WriteLine("Warte darauf, dass der Windows-Explorer vollständig geladen ist...");
+
+            IntPtr taskbarHandle = IntPtr.Zero;
+
+            // Diese Schleife läuft so lange, bis der Explorer-Prozess existiert UND die Taskleiste gefunden wurde.
+            while (true)
+            {
+                // Finde das Handle der Taskleiste
+                taskbarHandle = FindWindow("Shell_TrayWnd", null);
+
+                // Prüfe, ob der Prozess läuft UND das Handle gefunden wurde
+                if (Process.GetProcessesByName("explorer").Any() && taskbarHandle != IntPtr.Zero)
+                {
+                    // Beide Bedingungen sind erfüllt, Schleife beenden.
+                    break;
+                }
+
+                // Kurz warten, um den Prozessor nicht auszulasten.
+                Thread.Sleep(500);
+            }
+
+            Console.WriteLine("Windows-Explorer ist bereit. Starte den Launcher...");
+
+            // Jetzt, wo der Explorer bereit ist, den Launcher starten.
+            StartLauncher();
+        }
+
         static void uac(string art)
         {
             if (art == "on")
@@ -1674,7 +1990,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             //verif launcher//
             string launcher = AppSettings.Load<string>("launcher");
-            if (launcher == "steam" || launcher == "playnite" || launcher == "custom")
+            if (launcher == "steam" || launcher == "playnite" || launcher == "custom" || launcher == "xbox")
             {
                 Console.WriteLine("The selected launcher is valid");
 
@@ -1739,6 +2055,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         CleanupLogging();
                         Environment.Exit(0);
                     }
+                }
+
+                if(launcher == "xbox")
+                {
+                    Console.WriteLine("The launcher path is xbox, get dynamic path later");
                 }
 
                 if (launcher == "custom")
@@ -1859,8 +2180,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 KillProcess("WidgetBoard");
                 KillProcess("WidgetService");
                 DesktopIconController.HideDesktopIcons();
-                 // Make taskbar invisible
-                TaskbarVisibility.HideTaskbar();
+                        // Make taskbar invisible
+                        //TaskbarSettings.SetAutoHide(true);
+                        TaskbarVisibility.HideTaskbar();
 
          
 
@@ -2197,7 +2519,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             };
             hideTimer.Start();
         }
-
         #endregion winparts
 
         #endregion functions
@@ -2425,6 +2746,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Console.WriteLine("Explorer restored");
             }
         }
+
+       
         #endregion launcher
         #region start
         private async System.Threading.Tasks.Task Start()
@@ -2442,21 +2765,27 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AdminVerify();
                 if (IsAdministrator())
                 {
-                    
                     SettingsVerify();
                     MinimizeAllWindows();
                     Console.WriteLine("--overlay--");
                     await StartOverlayAsync();
                     Console.WriteLine("--Start showwinpart--");
-                    Showwinpart();
+                    if (startart == "xbox")
+                    {
+                        winpart();
+                        Thread.Sleep(5000);
+                    }
+                    else
+                    {
+                        Showwinpart();
+                    }
                     Console.WriteLine("--preinstall check--");
                     #region pre install/start check if needed
                     if (IsHandheld() == true)
                     {
 
                         //infopanel
-                        wifibutton.Visibility = Visibility.Visible;
-                        blebutton.Visibility = Visibility.Visible;
+                      
 
                         // Handheld Launcher
                         try
@@ -2489,209 +2818,162 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     displayfusion("start");
                     Console.WriteLine("--joyxoff--");
                     IsJoyxoffInstalledAndStart(); //only check if is installed, than start
-                    Console.WriteLine("--startlauncher--");
-                    StartLauncher();
+                    if (startart == "xbox")
+                    {
+                        Console.WriteLine("--start xbox launcher in startart xbox--");
+                        WaitForExplorerAndStartLauncher();
+                    }
+                    else
+                    {
+                        Console.WriteLine("--start normal launcher--");
+                        StartLauncher();
+                    }
                     Console.WriteLine("--kill--");
                     #region kill distubing process
                     //KillTargetProcess("");
                     #endregion kill distubing process
                     Console.WriteLine("--cssloader--");
                     cssloader(); //only check if is installed, than start
-                    
-                    ///////////////
                     Console.WriteLine("--modetoshell--");
                     ConsoleModeToShell();
                     Console.WriteLine("--preaudio--");
                     preaudio(true,false);
                     Console.WriteLine("--prestartlist--");
                     prestartlist();
-                    Console.WriteLine("--waitclose--");
-                    await System.Threading.Tasks.Task.Run(() =>
-                    {
-                        WaitForLauncherToClose();
-
-                    });
-                    Console.WriteLine("--startupvideoend--");
-                    try
-                    {
-                        StartupVideo.RenameSteamStartupVideo_End();
-                    }
-                    catch { }
-
-                    Console.WriteLine("--end--");
-                    preaudio(false, true);
-
-                    #region Handheld
-                    #region Ally
-                    if(IsHandheld() == true)
-                    {
-                       
-                    }
-                    #endregion Ally
-                    #endregion Handheld
-                    #region uac
-                    try
-                    {
-                        
-                        bool useuac = AppSettings.Load<bool>("uac");
-                        if (useuac == true)
-                        {
-                            Console.WriteLine("UAC is enabled, setting to on");
-                            //useuac is aktive 
-                            uac("on");
-                        }
-                        else if (useuac == false)
-                        {
-                            Console.WriteLine("UAC is disabled, setting to off");
-                            //User set it to off dont do nothing
-                            uac("off");
-                        }
-                    }
-                    catch
-                    {
-                        Console.WriteLine("UAC is enabled, setting to on");
-                        //error in read
-                        AppSettings.Save("uac", true);
-                        uac("on");
-                    }
-                    #endregion uac
-                    StopOverlay();
-                    // Show taskbar again
-                    TaskManagerReEnableServices();
-                    DesktopIconController.ShowDesktopIcons();
-                    TaskbarVisibility.ShowTaskbar();
-                    #region wingamepad
-                    // check if wingamepas is aktiv and set tasksheduller
-                   // test it needed
-                    try
-                    {
-                        AppSettings.Load<bool>("useseamlessswitchtogcm");
-                    }
-                    catch
-                    {
-                        // if not set, set it to false
-                        AppSettings.Save("useseamlessswitchtogcm", false);
-                      
-                    }
-                    // test if wingamepad is aktiv in task sheduller
-                    bool taskExistsAndEnabled = IsTaskActive("GCM_wingamepad");
-
-                    //task is OFF
-                    if (!taskExistsAndEnabled) //if job is not aktivated and useseamlessswitchtogcm is true
-                    {
-                    if (AppSettings.Load<bool>("useseamlessswitchtogcm") == true)
-                    {
-                        //aktivate task job
-                        using (TaskService ts = new TaskService())
-                        {
-                            try
-                            {
-                                string taskName = "GCM_wingamepad";
-
-                                // Clean up previous task
-                                ts.RootFolder.DeleteTask(taskName, false);
-                                
-
-                                TaskDefinition td = ts.NewTask();
-                                td.RegistrationInfo.Description = "Start GCM wingamepad mode";
-                                td.Principal.UserId = WindowsIdentity.GetCurrent().Name;
-                                td.Principal.LogonType = TaskLogonType.InteractiveToken;
-                                td.Principal.RunLevel = TaskRunLevel.Highest;
-
-                                td.Triggers.Add(new LogonTrigger
-                                {
-                                    Delay = TimeSpan.FromSeconds(3),
-                                    Enabled = true
-                                });
-
-                                string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
-                                td.Actions.Add(new ExecAction(exePath, null, null));
-
-                                td.Settings.StopIfGoingOnBatteries = false;
-                                td.Settings.DisallowStartIfOnBatteries = false;
-                                td.Settings.RunOnlyIfIdle = false;
-                                td.Settings.RunOnlyIfNetworkAvailable = false;
-                                td.Settings.AllowHardTerminate = false;
-                                td.Settings.StartWhenAvailable = true;
-                                td.Settings.AllowDemandStart = true;
-
-                                ts.RootFolder.RegisterTaskDefinition(taskName, td,
-                                    TaskCreation.CreateOrUpdate, null, null,
-                                    TaskLogonType.InteractiveToken);
-
-                               
-
-                                Microsoft.Win32.TaskScheduler.Task task = ts.FindTask(taskName);
-                                if (task != null)
-                                {
-                                    task.Run();
-                                    //Logger.Write("Task started.");
-                                }
-                                else
-                                {
-                                    //Logger.Write("ERROR: Task was not found after registration.");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                //Logger.Write("Error while creating task: " + ex.ToString());
-                                throw;
-                            }
-                        }
-                    }
-                    }
-                    //task is ON
-                    if (taskExistsAndEnabled)
-                    {
-                        if (AppSettings.Load<bool>("useseamlessswitchtogcm") == false) //if job is aktivated and useseamlessswitchtogcm is false
-                        {
-                            //deaktivate task job
-                            using (TaskService ts = new TaskService())
-                            {
-                                try
-                                {
-                                    ts.RootFolder.DeleteTask("GCM_wingamepad", false);
-                                }
-                                catch
-                                {
-                                    Console.WriteLine("Error deleting GCM_wingamepad task, it may not exist.");
-                                }
-                            }
-                        }
-                        else
-                        {
-                            //job aktiviert / gcmswitch is true
-                            try
-                            {
-                                string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
-
-                                if (!File.Exists(exePath))
-                                {
-                                    throw new FileNotFoundException("wingamepad.exe not found.", exePath);
-                                }
-
-                                var startInfo = new ProcessStartInfo
-                                {
-                                    FileName = exePath,
-                                    UseShellExecute = true,
-                                    Verb = "runas"
-                                };
-
-                                Process.Start(startInfo);
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"[ERROR] Failed to launch wingamepad.exe: {ex.Message}");
-                            }
-                        }
-                    }
-                    #endregion wingamepad
-                    this.Close();
                 }
             }
         }
         #endregion start
         #region TaskManager
+
+
+        private void StartAutoTaskRefresh()
+        {
+            if (_taskRefreshTimer != null)
+                return;
+
+            _taskRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(2)
+            };
+
+            // NEUER asynchroner Tick-Handler
+            _taskRefreshTimer.Tick += async (s, e) =>
+            {
+                if (!IsWindowInForeground()) return;
+
+                // 1. Schwere Arbeit im Hintergrund-Thread ausführen mit Task.Run
+                var processDataList = await Task.Run(() =>
+                {
+                    var data = new List<ProcessData>();
+                    var seenNames = new HashSet<string>();
+
+                    EnumWindows((hWnd, lParam) =>
+                    {
+                        if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0) return true;
+
+                        try
+                        {
+                            const int GWL_EXSTYLE = -20;
+                            const int WS_EX_TOOLWINDOW = 0x00000080;
+                            const int WS_EX_NOACTIVATE = 0x08000000;
+                            int style = (int)GetWindowLong(hWnd, (WindowLongFlags)GWL_EXSTYLE);
+                            if ((style & WS_EX_TOOLWINDOW) != 0 || (style & WS_EX_NOACTIVATE) != 0) return true;
+                        }
+                        catch { return true; }
+
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        Process p;
+                        try { p = Process.GetProcessById((int)pid); } catch { return true; }
+
+                        if (_excludedProcessNames.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase)) return true;
+                        if (pid == (uint)Process.GetCurrentProcess().Id) return true;
+
+                        string productName;
+                        try { productName = p.MainModule?.FileVersionInfo?.ProductName; } catch { productName = p.ProcessName; }
+                        if (string.IsNullOrWhiteSpace(productName)) productName = p.ProcessName;
+
+                        if (_excludedTitles.Any(t => productName?.Contains(t, StringComparison.OrdinalIgnoreCase) == true)) return true;
+                        if (_nameOverrides.TryGetValue(productName, out var overrideName)) productName = overrideName;
+                        if (productName?.Contains("GAMECONSOLEMODE", StringComparison.OrdinalIgnoreCase) == true) return true;
+                        if (!seenNames.Add(productName)) return true;
+
+                        data.Add(new ProcessData
+                        {
+                            ProductName = productName,
+                            ExePath = p.MainModule?.FileName,
+                            Hwnd = hWnd,
+                            Proc = p
+                        });
+
+                        return true;
+                    }, IntPtr.Zero);
+
+                    return data;
+                });
+
+                // 2. Zurück auf dem UI-Thread: Die schnelle UI-Aktualisierungsmethode aufrufen
+                UpdateUiFromData(processDataList);
+            };
+
+            _taskRefreshTimer.Start();
+        }
+
+        private void UpdateUiFromData(List<ProcessData> processDataList)
+        {
+            if (processDataList == null) return;
+
+            double scrollOffset = ProgramScrollViewer.HorizontalOffset;
+            int lastIndex = _selectedCardIndex;
+
+            var currentProductNames = _cardCache.Select(c => c.ProductName).ToHashSet();
+            var newDataProductNames = processDataList.Select(pd => pd.ProductName).ToHashSet();
+
+            // 1. Veraltete Karten entfernen, die nicht mehr in der neuen Liste sind
+            var cardsToRemove = _cardCache.Where(c => !newDataProductNames.Contains(c.ProductName)).ToList();
+            foreach (var entry in cardsToRemove)
+            {
+                ProgramCardPanel.Children.Remove(entry.Card);
+                _cardCache.Remove(entry);
+            }
+
+            // 2. Neue Karten hinzufügen, die noch nicht im Cache sind
+            foreach (var data in processDataList)
+            {
+                if (!currentProductNames.Contains(data.ProductName))
+                {
+                    var border = CreateProgramCard(data.ProductName, data.ExePath, data.Proc, data.Hwnd);
+                    var entry = new ProgramCardEntry
+                    {
+                        ProductName = data.ProductName,
+                        ExePath = data.ExePath,
+                        Hwnd = data.Hwnd,
+                        Proc = data.Proc,
+                        Card = border
+                    };
+                    _cardCache.Add(entry);
+                    ProgramCardPanel.Children.Add(border);
+                }
+            }
+
+            // 3. Auswahl und Scroll-Position wiederherstellen
+            if (ProgramCardPanel.Children.Count == 0)
+                _selectedCardIndex = 0;
+            else if (lastIndex >= ProgramCardPanel.Children.Count)
+                _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
+            else
+                _selectedCardIndex = lastIndex;
+
+            if (_currentFocusArea == FocusArea.Cards)
+            {
+                // Highlight anwenden, ohne zu scrollen, da wir die Position manuell wiederherstellen
+                HighlightSelectedCard(skipScroll: true, forceAnimation: false);
+            }
+
+            ProgramScrollViewer.ChangeView(scrollOffset, null, null, true);
+        }
+
+
 
         private class ProgramCardEntry
         {
@@ -2745,7 +3027,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Creates a timer for 10 seconds
             var hideTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(10)
+                Interval = TimeSpan.FromSeconds(1)
             };
             hideTimer.Tick += (s, e) =>
             {
@@ -2790,28 +3072,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 HighlightSelectedCard(); // beim Öffnen markieren
             });
 
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _selectedCardIndex = 0;
+                UpdateVisualFocus(); // Stellt sicher, dass die erste Karte hervorgehoben wird
+            });
+
         }
 
-        private void StartAutoTaskRefresh()
-        {
-            if (_taskRefreshTimer != null)
-                return;
-
-            _taskRefreshTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(2)
-            };
-
-            _taskRefreshTimer.Tick += (s, e) =>
-            {
-                if (IsWindowInForeground())
-                {
-                    LoadTaskManagerList();
-                }
-            };
-
-            _taskRefreshTimer.Start();
-        }
+       
 
 
         // ====================================================================
@@ -2876,7 +3145,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine($"[UWP] Activation failed: {ex.Message}");
             }
         }
-        private const int SW_SHOWMAXIMIZED = 3;
+       
 
         private void RestoreUwpAppFromHost(IntPtr appHostHwnd)
         {
@@ -2924,7 +3193,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
 
-
+        private static readonly string[] _excludedProcessNames = new[]
+{
+    "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
+    "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game"
+};
         private void LoadTaskManagerList()
         {
             double scrollOffset = ProgramScrollViewer.HorizontalOffset;
@@ -2936,66 +3209,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0)
                     return true;
 
-                // ✅ Safely check for overlay/toolwindow flags to skip overlays
                 try
                 {
                     const int GWL_EXSTYLE = -20;
                     const int WS_EX_TOOLWINDOW = 0x00000080;
                     const int WS_EX_NOACTIVATE = 0x08000000;
-                    const int WS_EX_LAYERED = 0x00080000;
-
-                    int style = (int)User32.GetWindowLong(hWnd, User32.WindowLongFlags.GWL_EXSTYLE);
-
-                    if ((style & WS_EX_TOOLWINDOW) != 0 || (style & WS_EX_NOACTIVATE) != 0 || (style & WS_EX_LAYERED) != 0)
-                        return true; // skip known overlay/tool/ghost windows
+                    int style = (int)GetWindowLong(hWnd, (WindowLongFlags)GWL_EXSTYLE);
+                    if ((style & WS_EX_TOOLWINDOW) != 0 || (style & WS_EX_NOACTIVATE) != 0)
+                        return true;
                 }
-                catch
-                {
-                    // If anything fails (e.g. invalid handle), just skip this window
-                    return true;
-                }
+                catch { return true; }
 
                 GetWindowThreadProcessId(hWnd, out uint pid);
-
                 Process p;
                 try { p = Process.GetProcessById((int)pid); } catch { return true; }
+
+                // NEU: Prüfe, ob der Prozessname auf unserer schwarzen Liste steht
+                if (_excludedProcessNames.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase))
+                {
+                    return true; // Überspringe diesen Prozess
+                }
 
                 if (pid == (uint)Process.GetCurrentProcess().Id)
                     return true;
 
-                // 💡 Special case: UWP window via ApplicationFrameHost
+                // Logik für UWP-Apps beibehalten
                 if (p.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
                 {
-                    IntPtr realWindow = IntPtr.Zero;
-                    uint realPid = 0;
-
-                    EnumChildWindows(hWnd, (childHwnd, _) =>
-                    {
-                        GetWindowThreadProcessId(childHwnd, out realPid);
-                        if (realPid != 0 && realPid != pid)
-                        {
-                            realWindow = childHwnd;
-                            return false;
-                        }
-                        return true;
-                    }, IntPtr.Zero);
-
-                    if (realWindow != IntPtr.Zero)
-                    {
-                        try
-                        {
-                            p = Process.GetProcessById((int)realPid);
-                            hWnd = realWindow;
-                        }
-                        catch
-                        {
-                            return true;
-                        }
-                    }
+                    // ... (Hier kann deine Logik bleiben, um den echten Kind-Prozess zu finden, falls nötig)
                 }
 
                 string productName;
-                try { productName = p.MainModule?.FileVersionInfo?.ProductName; } catch { productName = null; }
+                try { productName = p.MainModule?.FileVersionInfo?.ProductName; } catch { productName = p.ProcessName; }
                 if (string.IsNullOrWhiteSpace(productName)) productName = p.ProcessName;
 
                 if (_excludedTitles.Any(t => productName?.Contains(t, StringComparison.OrdinalIgnoreCase) == true))
@@ -3013,7 +3258,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (existing == null)
                 {
                     var border = CreateProgramCard(productName, p.MainModule?.FileName ?? "", p, hWnd);
-
                     var entry = new ProgramCardEntry
                     {
                         ProductName = productName,
@@ -3022,15 +3266,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         Proc = p,
                         Card = border
                     };
-
                     _cardCache.Add(entry);
                     ProgramCardPanel.Children.Add(border);
                 }
-
                 return true;
             }, IntPtr.Zero);
 
-            // 🗑 Remove outdated entries
+            // Veraltete Einträge entfernen
             for (int i = _cardCache.Count - 1; i >= 0; i--)
             {
                 if (!seenNames.Contains(_cardCache[i].ProductName))
@@ -3040,7 +3282,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
 
-            // 🔁 Restore scroll and selection
+            // Auswahl und Scroll-Position wiederherstellen
             if (ProgramCardPanel.Children.Count == 0)
                 _selectedCardIndex = 0;
             else if (lastIndex >= ProgramCardPanel.Children.Count)
@@ -3048,7 +3290,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             else
                 _selectedCardIndex = lastIndex;
 
-            HighlightSelectedCard(skipScroll: true, forceAnimation: false);
+            // KORREKTUR: Führe die Hervorhebung nur aus, wenn der Karten-Bereich aktiv ist
+            if (_currentFocusArea == FocusArea.Cards)
+            {
+                HighlightSelectedCard(skipScroll: true, forceAnimation: false);
+            }
+
             ProgramScrollViewer.ChangeView(scrollOffset, null, null, true);
         }
 
@@ -3307,96 +3554,72 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private int _lastAnimatedCardIndex = -1;
 
+      
+
+        /// <summary>
+        /// Animiert die Rahmenfarbe eines Borders sanft mit einem Storyboard.
+        /// </summary>
+        private void AnimateBorderColor(Border border, bool isSelected)
+        {
+            Color targetColor;
+            if (isSelected)
+            {
+                // Wir machen die Hervorhebung etwas heller und sichtbarer
+                targetColor = Microsoft.UI.Colors.WhiteSmoke;
+            }
+            else
+            {
+                targetColor = Microsoft.UI.Colors.Transparent;
+            }
+
+            if (border.BorderBrush is not SolidColorBrush brush)
+            {
+                brush = new SolidColorBrush();
+                border.BorderBrush = brush;
+            }
+
+            var colorAnimation = new ColorAnimation
+            {
+                To = targetColor,
+                // HIER IST DIE LÖSUNG: Eine kurze Dauer hinzufügen
+                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+            };
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(colorAnimation);
+
+            Storyboard.SetTarget(colorAnimation, brush);
+            Storyboard.SetTargetProperty(colorAnimation, "Color");
+
+            storyboard.Begin();
+        }
+
+        /// <summary>
+        /// Aktualisiert die Hervorhebung und ruft die Animationen für Größe und Rahmenfarbe auf.
+        /// </summary>
         private void HighlightSelectedCard(bool skipScroll = false, bool forceAnimation = true)
         {
             for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
             {
                 if (ProgramCardPanel.Children[i] is Border border)
                 {
-                    bool isSelected = i == _selectedCardIndex;
+                    bool isSelected = (i == _selectedCardIndex);
 
-                    // Set Border Color basierend auf Basisfarbe aus CardTag
-                    if (border.Tag is CardTag tag)
-                    {
-                        var baseColor = tag.BaseColor;
-
-                        var borderColor = isSelected
-                            ? Color.FromArgb(255,
-                                (byte)Math.Max(0, baseColor.R * 0.5),
-                                (byte)Math.Max(0, baseColor.G * 0.5),
-                                (byte)Math.Max(0, baseColor.B * 0.5))
-                            : Color.FromArgb(0, 0, 0, 0); // Transparent, wenn nicht selektiert
-
-                        border.BorderBrush = new SolidColorBrush(borderColor);
-                    }
-
-
-                    // Animate only if allowed
-                    if (border.RenderTransform is ScaleTransform scale)
-                    {
-                        if (isSelected)
-                        {
-                            if (forceAnimation && _lastAnimatedCardIndex != _selectedCardIndex)
-                            {
-                                AnimateScale(border, true);
-                                _lastAnimatedCardIndex = _selectedCardIndex;
-                            }
-                            else
-                            {
-                                scale.ScaleX = 1.08;
-                                scale.ScaleY = 1.08;
-                            }
-                        }
-                        else
-                        {
-                            scale.ScaleX = 1.0;
-                            scale.ScaleY = 1.0;
-                        }
-                    }
+                    // Rufe jetzt BEIDE Animationen auf. Sie laufen synchron.
+                    AnimateBorderColor(border, isSelected);
+                    AnimateScale(border, isSelected);
                 }
             }
 
-            if (!skipScroll && ProgramCardPanel.Children.Count > _selectedCardIndex)
+            // Scrollt zur Karte, aber nur, wenn der Karten-Bereich aktiv ist.
+            if (_currentFocusArea == FocusArea.Cards && !skipScroll && ProgramCardPanel.Children.Count > _selectedCardIndex)
             {
                 ScrollToCardAnimated(ProgramCardPanel.Children[_selectedCardIndex]);
             }
         }
 
 
-
-        private void AnimateScale(Border card, bool isSelected)
-        {
-            if (card.RenderTransform is not ScaleTransform scaleTransform)
-                return;
-
-            double targetScale = isSelected ? 1.08 : 1.0;
-
-            var scaleXAnim = new DoubleAnimation
-            {
-                To = targetScale,
-                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
-                EnableDependentAnimation = true
-            };
-
-            var scaleYAnim = new DoubleAnimation
-            {
-                To = targetScale,
-                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
-                EnableDependentAnimation = true
-            };
-
-            var storyboard = new Storyboard();
-            storyboard.Children.Add(scaleXAnim);
-            storyboard.Children.Add(scaleYAnim);
-
-            Storyboard.SetTarget(scaleXAnim, scaleTransform);
-            Storyboard.SetTargetProperty(scaleXAnim, "ScaleX");
-
-            Storyboard.SetTarget(scaleYAnim, scaleTransform);
-            Storyboard.SetTargetProperty(scaleYAnim, "ScaleY");
-
-            storyboard.Begin();
-        }
 
 
 
@@ -3547,7 +3770,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             catch { }
         }
 
-        
+
 
 
         #endregion // TaskManager
@@ -3681,25 +3904,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             //usernotification
             SendOverlayNotification("Shortcut: Back to Windows");
 
-            string useuac = AppSettings.Load<string>("launcher");
-            if(useuac == "steam")
-            {
-                KillProcess("steam.exe");
-            }
-            else if (useuac == "playnite")
-            {
-                KillProcess("Playnite.FullscreenApp.exe");
-                KillProcess("playnite"); 
-            }
-            else if (useuac == "otherlauncher")
-            {
-              string otherlauncher = AppSettings.Load<string>("customlauncherpath");
-                KillProcess("otherlauncher");
-            }
-            else if (useuac == "none")
-            {
-
-            }
+            BackToWindows();
         }
         #endregion backtowin
         #endregion shortcuts
@@ -3749,14 +3954,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             gamepadInputTimer.Start();
         }
-
+        
 
         //Taskmanager
         private GamepadButtonFlags _lastButtonState = GamepadButtonFlags.None;
         private bool _ignoreNextInputFrame = false;
        
 
-        private Dictionary<(string, string), string> _activeShortcuts = new();
+        
 
 
 
@@ -3787,13 +3992,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 try { button = (GamepadButtonFlags)Enum.Parse(typeof(GamepadButtonFlags), key, true); }
                 catch { return false; }
             }
-
+            
             return (state & button) != 0;
         }
 
        
         private HashSet<(string, string)> _triggeredCombos = new();
-        private Dictionary<string, System.Action> _shortcutActions = new();
         private Dictionary<string, DateTime> _heldButtonTimestamps = new();
         private readonly TimeSpan _comboTimeout = TimeSpan.FromMilliseconds(1000);
 
@@ -3817,132 +4021,71 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private void LoadShortcutsFromSettings()
         {
+            _activeShortcuts.Clear();
+            _shortcutActions.Clear();
+
+            string settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "settings.toml");
+
+            if (!File.Exists(settingsFilePath))
+            {
+                LogGamepadInit("settings.toml not found. No shortcuts loaded.");
+                return;
+            }
+
             try
             {
-                string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "shortcuts");
-                if (!Directory.Exists(folderPath)) return;
+                var settingsModel = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
 
-                _activeShortcuts.Clear();
-                bool winmodeLoaded = false;
-
-                foreach (var filePath in Directory.GetFiles(folderPath, "*.json"))
+                // 1. Lade die benutzerdefinierten Shortcuts
+                if (settingsModel.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
                 {
-                    LogGamepadInit($"🔍 Checking: {filePath}");
-
-                    try
+                    foreach (TomlTable shortcutTable in shortcutsArray)
                     {
-                        string content = File.ReadAllText(filePath);
-                        var entry = JsonSerializer.Deserialize<Dictionary<string, object>>(content);
-                        if (entry == null)
+                        var data = new ShortcutData
                         {
-                            LogGamepadInit("⚠️ Skipped (null entry)");
-                            continue;
-                        }
+                            Key1 = shortcutTable["key1"]?.ToString(),
+                            Key2 = shortcutTable["key2"]?.ToString(),
+                            Function = shortcutTable["function"]?.ToString(),
+                            Enabled = Convert.ToBoolean(shortcutTable["enabled"])
+                        };
 
-                        // WINMODE-Datei einlesen, wenn noch nicht geschehen
-                        if (!winmodeLoaded)
+                        // WICHTIG: Lade nur aktivierte Shortcuts
+                        if (data.Enabled && !string.IsNullOrEmpty(data.Key1) && !string.IsNullOrEmpty(data.Key2))
                         {
-                            string winFile = Path.Combine(
-                                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                                "gcmsettings", "shortcutswin", "winmode_change.json");
-
-                            LogGamepadInit($"🧭 Checking WinMode File: {winFile}");
-
-                            if (File.Exists(winFile))
-                            {
-                                LogGamepadInit("📁 WinMode file exists!");
-
-                                try
-                                {
-                                    string winContent = File.ReadAllText(winFile);
-                                    var winEntry = JsonSerializer.Deserialize<Dictionary<string, object>>(winContent);
-
-                                    if (winEntry != null &&
-                                     winEntry.TryGetValue("Key1", out var wk1) &&
-                                     winEntry.TryGetValue("Key2", out var wk2) &&
-                                     winEntry.TryGetValue("Function", out var wfn))
-
-                                    {
-                                        string key1 = wk1?.ToString()?.Trim();
-                                        string key2 = wk2?.ToString()?.Trim();
-                                        string function = wfn?.ToString()?.Trim();
-
-                                        LogGamepadInit($"➡️ WinMode Parsed: {key1} + {key2} → {function}");
-
-                                        if (!string.IsNullOrEmpty(key1) && !string.IsNullOrEmpty(key2) && !string.IsNullOrEmpty(function))
-                                        {
-                                            _activeShortcuts[(key1, key2)] = function;
-                                            LogGamepadInit($"✅ WinMode Shortcut Loaded: {key1} + {key2} → {function}");
-                                        }
-                                        else
-                                        {
-                                            LogGamepadInit("❌ WinMode data incomplete.");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        LogGamepadInit("❌ WinMode data structure invalid or not enabled.");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    LogGamepadInit($"❌ Error reading winmode_change.json: {ex.Message}");
-                                }
-
-                                winmodeLoaded = true;
-                            }
-                            else
-                            {
-                                LogGamepadInit("⛔ WinMode file NOT found.");
-                            }
+                            _activeShortcuts[(data.Key1, data.Key2)] = data.Function;
+                            LogGamepadInit($"[OK] Loaded Custom Shortcut: {data.Key1} + {data.Key2} -> {data.Function}");
                         }
-
-                        // Normale Datei auswerten
-                        if (entry.TryGetValue("Key1", out var k1) &&
-                            entry.TryGetValue("Key2", out var k2) &&
-                            entry.TryGetValue("Function", out var fn))
-                        {
-                            string key1 = k1?.ToString()?.Trim();
-                            string key2 = k2?.ToString()?.Trim();
-                            string function = fn?.ToString()?.Trim();
-
-                            if (!string.IsNullOrEmpty(key1) &&
-                                !string.IsNullOrEmpty(key2) &&
-                                !string.IsNullOrEmpty(function))
-                            {
-                                _activeShortcuts[(key1, key2)] = function;
-                                LogGamepadInit($"📥 Loaded Shortcut: {key1} + {key2} → {function}");
-                            }
-                            else
-                            {
-                                LogGamepadInit("⚠️ Skipped file due to empty values.");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LogGamepadInit($"❌ Error reading shortcut: {filePath} → {ex.Message}");
                     }
                 }
 
-                // 🧠 Funktionale Aktionen zuweisen
-                _shortcutActions.Clear();
+                // 2. Lade den "Seamless Switch" (winmode_shortcut)
+                if (settingsModel.TryGetValue("winmode_shortcut", out var winShortcutObj) && winShortcutObj is TomlTable winShortcutTable)
+                {
+                    var data = new ShortcutData
+                    {
+                        Key1 = winShortcutTable["key1"]?.ToString(),
+                        Key2 = winShortcutTable["key2"]?.ToString(),
+                        Enabled = Convert.ToBoolean(winShortcutTable["enabled"])
+                    };
+
+                    if (data.Enabled && !string.IsNullOrEmpty(data.Key1) && !string.IsNullOrEmpty(data.Key2))
+                    {
+                        _activeShortcuts[(data.Key1, data.Key2)] = "winmodechange"; // Funktion ist hier fest codiert
+                        LogGamepadInit($"[OK] Loaded Seamless Switch: {data.Key1} + {data.Key2} -> winmodechange");
+                    }
+                }
+
+                // 3. Weise den geladenen Funktionen die entsprechenden Aktionen zu
                 _shortcutActions["taskmanager"] = BringTaskManagerToFrontAndFocus;
                 _shortcutActions["switch tab"] = SendWinTab;
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
                 _shortcutActions["performance overlay"] = TriggerPerformanceOverlay;
-                _shortcutActions["winmodechange"] = Triggerbacktowin;
                 _shortcutActions["show overlay"] = showoverlay;
-
-                // 🔎 Übersicht anzeigen
-                foreach (var s in _activeShortcuts)
-                {
-                    LogGamepadInit($"✅ ACTIVE SHORTCUT: {s.Key.Item1} + {s.Key.Item2} → {s.Value}");
-                }
+                _shortcutActions["winmodechange"] = Triggerbacktowin; // Aktion für Seamless Switch
             }
             catch (Exception ex)
             {
-                LogGamepadInit($"[ShortcutLoader] General Error: {ex.Message}");
+                LogGamepadInit($"[ERROR] Failed to load shortcuts from TOML: {ex.Message}");
             }
         }
 
@@ -3966,31 +4109,26 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        // ########## ANFANG DES KOMPLETTEN CODE-BLOCKS ##########
 
-        private void GamepadButtonCheck()
+        #region Gamepad Navigation
+
+        // --- Zustandsvariablen, um den vorherigen Fokus zu speichern (für Performance) ---
+        private FocusArea _previousFocusArea = FocusArea.Cards;
+        private int _previousCardIndex = -1;
+        private int _previousTopButtonIndex = -1;
+
+
+        /// <summary>
+        /// Verarbeitet alle globalen Gamepad-Shortcuts.
+        /// </summary>
+        private void HandleShortcuts(GamepadButtonFlags currentButtons)
         {
-            if (!_controllerConnected || !_xinputController.IsConnected)
-                return;
-
-            var state = _xinputController.GetState();
-            var gamepad = state.Gamepad;
-            var currentButtons = gamepad.Buttons;
-
-            // Skip input for one frame after ALT+TAB to avoid double detection
-            if (_ignoreNextInputFrame)
-            {
-                _ignoreNextInputFrame = false;
-                _lastButtonState = currentButtons;
-                return;
-            }
-
-            // Handle custom shortcuts
             foreach (var pair in _activeShortcuts)
             {
                 var key1 = pair.Key.Item1;
                 var key2 = pair.Key.Item2;
                 var function = pair.Value;
-
                 bool key1Pressed = IsButtonPressed(currentButtons, key1);
                 bool key2Pressed = IsButtonPressed(currentButtons, key2);
 
@@ -4022,58 +4160,223 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     _triggeredCombos.Remove(pair.Key);
                 }
             }
+        }
 
-            // TaskManager Navigation (only if NOT in AltTab)
-            if (IsWindowInForeground() && !isAltTabMode)
+        /// <summary>
+        /// Die zentrale Methode, die alle Gamepad-Eingaben für Shortcuts und UI-Navigation verarbeitet.
+        /// </summary>
+        /// 
+
+        /// <summary>
+        /// Startet den Computer neu.
+        /// </summary>
+        private void RestartButton_Click(object sender, RoutedEventArgs e)
+        {
+            Console.WriteLine("Neustart-Button geklickt...");
+            // Der Parameter /r steht für "restart"
+            Process.Start("shutdown", "/r /t 0");
+        }
+        private void GamepadButtonCheck()
+        {
+            if (!_controllerConnected || !_xinputController.IsConnected) return;
+
+            var state = _xinputController.GetState();
+            var currentButtons = state.Gamepad.Buttons;
+
+            // Immer zuerst die globalen Shortcuts prüfen
+            HandleShortcuts(currentButtons);
+
+            // Nur mit UI-Navigation weitermachen, wenn das Fenster aktiv ist
+            if (!IsWindowInForeground())
+            {
+                _lastButtonState = currentButtons;
+                return;
+            }
+
+            // Fokus mit der rechten Schulter-Taste (RB) durch die Bereiche schalten
+            if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
+            {
+                switch (_currentFocusArea)
+                {
+                    case FocusArea.Launcher:
+                        _currentFocusArea = FocusArea.Cards;
+                        break;
+                    case FocusArea.Cards:
+                        _currentFocusArea = FocusArea.TopButtons;
+                        break;
+                    case FocusArea.TopButtons:
+                        _currentFocusArea = FocusArea.Launcher;
+                        break;
+                }
+                _selectedCardIndex = 0;
+                _selectedTopButtonIndex = 0;
+                UpdateVisualFocus();
+                PlayNavigationSound();
+            }
+
+            // Navigation innerhalb des gerade aktiven Bereichs
+            if (_currentFocusArea == FocusArea.TopButtons)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
-                    _selectedCardIndex++;
-                    if (_selectedCardIndex >= ProgramCardPanel.Children.Count)
-                        _selectedCardIndex = 0;
+                    _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
+                    UpdateVisualFocus();
                     PlayNavigationSound();
-                    HighlightSelectedCard();
                 }
-
-                if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
+                else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
-                    _selectedCardIndex--;
-                    if (_selectedCardIndex < 0)
-                        _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
+                    _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
+                    UpdateVisualFocus();
                     PlayNavigationSound();
-                    HighlightSelectedCard();
                 }
+            }
+            else if (_currentFocusArea == FocusArea.Cards)
+            {
+                // ### KORREKTUR HIER: Stellt sicher, dass Links/Rechts korrekt funktionieren ###
 
-                if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
+                // BEI DRUCK NACH RECHTS: Index wird erhöht (+)
+                if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
-                    TriggerCardAction(_selectedCardIndex, true);
-                    PlayActivationSound();
+                    if (ProgramCardPanel.Children.Any())
+                        _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
+
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
                 }
-
-                if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
+                // BEI DRUCK NACH LINKS: Index wird verringert (-)
+                else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
-                    TriggerCardAction(_selectedCardIndex, false);
-                    PlaydeactivationSound();
-                }
+                    if (ProgramCardPanel.Children.Any())
+                        _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
 
-                if (IsNewButtonPress(GamepadButtonFlags.DPadUp, currentButtons))
-                {
-                    _selectedButtonIndex = 0;
-                    HighlightSelectedCard();
-                }
-
-                if (IsNewButtonPress(GamepadButtonFlags.DPadDown, currentButtons))
-                {
-                    _selectedButtonIndex = 1;
-                    HighlightSelectedCard();
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
                 }
             }
 
-            // Update button state for next check
+            // A-Button zum Bestätigen
+            if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
+            {
+                if (_currentFocusArea == FocusArea.Launcher) LauncherCard_Tapped(null, null);
+                else if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, true);
+                else if (_currentFocusArea == FocusArea.TopButtons) ClickSelectedTopButton();
+                PlayActivationSound();
+            }
+
+            // B-Button zum Schließen
+            if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
+            {
+                if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, false);
+                PlaydeactivationSound();
+            }
+
             _lastButtonState = currentButtons;
         }
 
+        /// <summary>
+        /// Aktualisiert die UI performant, indem nur das alte und neue Element geändert wird.
+        /// </summary>
+        private void UpdateVisualFocus(bool isInitial = false)
+        {
+            // --- VORHERIGES ELEMENT DEAKTIVIEREN ---
+            if (!isInitial)
+            {
+                // Vorherige Launcher-Karte zurücksetzen
+                if (_previousFocusArea == FocusArea.Launcher)
+                {
+                    AnimateScale(this.LauncherCard, false);
+                    AnimateBorderColor(this.LauncherCard, false);
+                }
+                // Vorherigen Top-Button zurücksetzen
+                else if (_previousFocusArea == FocusArea.TopButtons && _previousTopButtonIndex > -1 && _previousTopButtonIndex < _topButtons.Count)
+                {
+                    var prevButton = _topButtons[_previousTopButtonIndex];
+                    prevButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                    prevButton.BorderThickness = new Thickness(0);
+                }
+                // Vorherige App-Karte zurücksetzen
+                else if (_previousFocusArea == FocusArea.Cards && _previousCardIndex > -1 && _previousCardIndex < ProgramCardPanel.Children.Count)
+                {
+                    if (ProgramCardPanel.Children[_previousCardIndex] is Border card)
+                    {
+                        AnimateScale(card, false);
+                        AnimateBorderColor(card, false);
+                    }
+                }
+            }
 
+            // --- NEUES ELEMENT AKTIVIEREN ---
+            if (_currentFocusArea == FocusArea.Launcher)
+            {
+                AnimateScale(this.LauncherCard, true);
+                AnimateBorderColor(this.LauncherCard, true);
+            }
+            else if (_currentFocusArea == FocusArea.TopButtons && _topButtons.Count > _selectedTopButtonIndex)
+            {
+                var selectedButton = _topButtons[_selectedTopButtonIndex];
+                selectedButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
+                selectedButton.BorderThickness = new Thickness(2);
+            }
+            else if (_currentFocusArea == FocusArea.Cards && ProgramCardPanel.Children.Count > _selectedCardIndex)
+            {
+                if (ProgramCardPanel.Children[_selectedCardIndex] is Border card)
+                {
+                    AnimateScale(card, true);
+                    AnimateBorderColor(card, true);
+                    ScrollToCardAnimated(card);
+                }
+            }
+
+            // Zustand für den nächsten Durchlauf speichern
+            _previousCardIndex = _selectedCardIndex;
+            _previousTopButtonIndex = _selectedTopButtonIndex;
+            _previousFocusArea = _currentFocusArea;
+        }
+
+        #endregion
+
+        // ########## ENDE DES KOMPLETTEN CODE-BLOCKS ##########
+
+
+        /// <summary>
+        /// Animiert die Skalierung eines UI-Elements performant.
+        /// </summary>
+        private void AnimateScale(UIElement element, bool isSelected)
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var compositor = visual.Compositor;
+            var targetScale = isSelected ? new Vector3(1.04f, 1.04f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
+
+            var scaleAnimation = compositor.CreateVector3KeyFrameAnimation();
+            scaleAnimation.Duration = TimeSpan.FromMilliseconds(250);
+            scaleAnimation.InsertKeyFrame(1.0f, targetScale, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
+
+            // ENTFERNT: Die langsame CenterPoint-Berechnung für maximale Performance.
+            // Die Animation startet jetzt von der oberen linken Ecke.
+
+            visual.StartAnimation("Scale", scaleAnimation);
+        }
+
+        /// <summary>
+        /// Verarbeitet alle globalen Gamepad-Shortcuts.
+        /// </summary>
+     
+      
+
+        /// <summary>
+        /// Führt die Klick-Aktion für den aktuell ausgewählten oberen Button aus.
+        /// </summary>
+        private void ClickSelectedTopButton()
+        {
+            if (_topButtons.Count > _selectedTopButtonIndex)
+            {
+                var buttonToClick = _topButtons[_selectedTopButtonIndex];
+
+                // Führe die passende Klick-Methode aus
+                if (buttonToClick == ExitGcmButton) ExitGcmButton_Click_1(null, null);
+                else if (buttonToClick == ShutdownButton) ShutdownButton_Click(null, null);
+            }
+        }
         private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
         {
             if (!IsWindowInForeground()) return;
@@ -4373,7 +4676,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     // Vérifie si le fichier existe
                     if (File.Exists(oldFilePath))
                     {
-                        // Renomme le fichier
+                        // Renomme le fichiersekunde ses
                         File.Move(oldFilePath, newFilePath);
                         Console.WriteLine($"Le fichier a été renommé avec succès : {newFilePath}");
                     }
@@ -4578,7 +4881,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void LauncherTileRow_Loaded(object sender, RoutedEventArgs e)
         {
-            FocusBlocker.Focus(FocusState.Programmatic);
+           
+        }
+
+        /// <summary>
+        /// Beendet den GCM-Modus und kehrt zum normalen Windows-Desktop zurück.
+        /// </summary>
+      
+
+        /// <summary>
+        /// Versetzt den Computer in den Ruhezustand (Energie sparen).
+        /// </summary>
+        private void SleepButton_Click(object sender, RoutedEventArgs e)
+        {
+            Process.Start("shutdown", "/s /t 0");
+        }
+
+        /// <summary>
+        /// Fährt den Computer herunter.
+        /// </summary>
+        private void ShutdownButton_Click(object sender, RoutedEventArgs e)
+        {
+            Console.WriteLine("Shutdown-Button geklickt. Computer wird heruntergefahren...");
+
+            // Startet den Shutdown-Prozess von Windows (sofort, ohne Timer)
+            Process.Start("shutdown", "/s /t 0");
+        }
+
+        private void ExitGcmButton_Click_1(object sender, RoutedEventArgs e)
+        {
+            // Schritt 2: "explorer.exe" wieder als Standard-Shell in der Registry eintragen
+            BackToWindows();
+          
         }
     }
 
@@ -4741,6 +5075,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 SetWindowPos(taskbarHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_HIDEWINDOW);
             }
         }
+
+       
 
         public static void ShowTaskbar()
         {
