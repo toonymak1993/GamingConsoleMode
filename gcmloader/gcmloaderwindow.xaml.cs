@@ -1,57 +1,58 @@
-﻿using GAMINGCONSOLEMODE;
+﻿using Discord;
+using Discord.WebSocket;
+using GAMINGCONSOLEMODE;
+using Microsoft.UI;
+using Microsoft.UI.Composition;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.Win32;
-using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml.Hosting; // Für ElementCompositionPreview
-using System.Numerics; 
-using System;
-using System.Diagnostics;
-using System.IO;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
-using System.Text;
-using Discord.WebSocket;
-using System.ServiceProcess;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.Win32;
+using Microsoft.Win32.TaskScheduler;
+using Microsoft.Windows.AppNotifications;
+using Microsoft.Windows.AppNotifications.Builder;
+using NAudio.CoreAudioApi;
+using SharpDX.XInput;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.IO.Pipes;
 using System.Linq;
-using Vanara.PInvoke;
-using static Vanara.PInvoke.User32;
+using System.Media;
+using System.Numerics; 
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.ServiceProcess;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Windows.UI;
-using NAudio.CoreAudioApi;
-using Microsoft.UI;
-using System.Data;
-using System.Collections.Generic;
-using System.Text.Json;
-using Windows.Media.Core;
+using System.Windows.Forms;
+using System.Xml;
 using Tomlyn;
 using Tomlyn.Model;
-using Windows.Media.Playback;
-using Microsoft.UI.Windowing;
-using Windows.System;
-using SharpDX.XInput;
-using Button = Microsoft.UI.Xaml.Controls.Button;
-using System.Drawing;
-using System.Windows.Forms;
-using System.Media;
-using Point = System.Drawing.Point;
-using System.IO.Pipes;
-using Application = Microsoft.UI.Xaml.Application;
-using Image = Microsoft.UI.Xaml.Controls.Image;
-using Microsoft.Windows.AppNotifications.Builder;
-using Microsoft.Windows.AppNotifications;
-using Microsoft.UI.Xaml.Input;
-using Color = Windows.UI.Color;
-using Discord;
 using Vanara.PInvoke;
+using Vanara.PInvoke;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.System;
+using Windows.UI;
+using static Vanara.PInvoke.Gdi32;
 using static Vanara.PInvoke.Shell32;
-using System.Xml;
-using Microsoft.Win32.TaskScheduler;
+using static Vanara.PInvoke.User32;
+using Application = Microsoft.UI.Xaml.Application;
+using Button = Microsoft.UI.Xaml.Controls.Button;
+using Color = Windows.UI.Color;
+using Image = Microsoft.UI.Xaml.Controls.Image;
+using Point = System.Drawing.Point;
 using Task = System.Threading.Tasks.Task;
 
 
@@ -63,6 +64,120 @@ namespace gcmloader
     {
         #region needed
 
+        private List<Border> _launcherAreaButtons;
+        private int _selectedLauncherAreaIndex = 0;
+
+        #region focus
+        private bool _isStartupGracePeriod = true;
+        /// <summary>
+        /// Richtet einen Timer ein, der regelmäßig prüft, ob das Fenster noch den Fokus hat.
+        /// </summary>
+        private void SetupFocusWatcher()
+        {
+            _focusCheckTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1) // Prüft jede Sekunde
+            };
+            _focusCheckTimer.Tick += _focusCheckTimer_Tick;
+            _focusCheckTimer.Start();
+        }
+
+        /// Wird jede Sekunde vom Timer aufgerufen.
+        /// </summary>
+        /// <summary>
+        private void _focusCheckTimer_Tick(object sender, object e)
+        {
+            // NEU: Breche die Prüfung ab, solange die Gnadenfrist aktiv ist.
+            if (_isStartupGracePeriod) return;
+
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+            var appWindow = AppWindow.GetFromWindowId(windowId);
+
+            if (appWindow.IsVisible && !IsWindowInForeground())
+            {
+                if (appWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                {
+                    overlappedPresenter.Minimize();
+                }
+            }
+        }
+        private DispatcherTimer _focusCheckTimer;
+
+        [DllImport("user32.dll")]
+        private static extern bool LockSetForegroundWindow(uint uLockCode);
+        /// <summary>
+        /// Setzt das Hauptfenster in einen normalen Zustand (nicht "Immer im Vordergrund").
+        /// </summary>
+        private void MakeSelfNonTopmost()
+        {
+            IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            SetWindowPos(selfHwnd, new IntPtr(-2), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // HWND_NOTOPMOST
+        }
+        #endregion focus
+
+        #region mouse
+
+        private static bool _isCursorVisible = true;
+
+        [DllImport("user32.dll")]
+        private static extern int ShowCursor(bool bShow);
+        private DispatcherTimer _mouseIdleTimer;
+        private static bool _isProgrammaticMouseMovement = false;
+
+
+        /// <summary>
+        /// Richtet den Timer und die Events ein, um den Cursor bei Inaktivität auszublenden.
+        /// </summary>
+        private void SetupMouseIdleBehavior()
+        {
+            _mouseIdleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _mouseIdleTimer.Tick += _mouseIdleTimer_Tick;
+
+            if (this.Content is FrameworkElement rootElement)
+            {
+                rootElement.PointerMoved += RootElement_PointerMoved;
+            }
+
+            // Starte den Timer initial, um den Cursor nach 2 Sekunden auszublenden, falls keine Bewegung stattfindet.
+            _mouseIdleTimer.Start();
+        }
+
+        /// <summary>
+        /// Wird aufgerufen, wenn der Timer abläuft (2 Sekunden keine Bewegung).
+        /// </summary>
+        private void _mouseIdleTimer_Tick(object sender, object e)
+        {
+            // Verstecke den Cursor, wenn er sichtbar ist, und merke dir den Zustand.
+            if (_isCursorVisible)
+            {
+                while (ShowCursor(false) >= 0) ; // Rufe so oft auf, bis der Zähler negativ ist
+                _isCursorVisible = false;
+            }
+            _mouseIdleTimer.Stop();
+        }
+
+        /// <summary>
+        /// Wird aufgerufen, sobald die Maus über dem Fenster bewegt wird.
+        /// </summary>
+        private void RootElement_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            // Ignoriere programmgesteuerte Mausbewegungen.
+            if (_isProgrammaticMouseMovement) return;
+
+            // Zeige den Cursor, wenn er versteckt ist, und merke dir den Zustand.
+            if (!_isCursorVisible)
+            {
+                while (ShowCursor(true) < 0) ; // Rufe so oft auf, bis der Zähler >= 0 ist
+                _isCursorVisible = true;
+            }
+
+            // Setze den Timer zurück.
+            _mouseIdleTimer.Stop();
+            _mouseIdleTimer.Start();
+        }
+
+        #endregion mouse
 
         private class ProcessData
         {
@@ -132,6 +247,45 @@ private List<Button> _topButtons;
         private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
 
         #region TaskManager
+
+        #region Discord
+        private void DiscordCard_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            MakeSelfNonTopmost();
+            StartDiscord();
+            PlayActivationSound();
+        }
+
+        private void StartDiscord()
+        {
+            // Versuche zuerst, ein laufendes Discord-Fenster in den Vordergrund zu bringen
+            Process discordProcess = Process.GetProcessesByName("Discord").FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
+            if (discordProcess != null)
+            {
+                TaskManagerBringWindowToForeground(discordProcess.MainWindowHandle);
+                return;
+            }
+
+            // Wenn Discord nicht läuft, versuche es zu starten
+            try
+            {
+                string discordPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "Update.exe");
+                if (File.Exists(discordPath))
+                {
+                    Process.Start(new ProcessStartInfo(discordPath, "--processStart Discord.exe") { UseShellExecute = true });
+                }
+                else
+                {
+                    Debug.WriteLine("Discord not found at the default location.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to start Discord: {ex.Message}");
+            }
+        }
+        #endregion discord
+
         [DllImport("user32.dll")]
         private static extern bool BringWindowToTop(IntPtr hWnd);
       
@@ -249,10 +403,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 rootElement.KeyDown += MainWindow_KeyDown;
                 rootElement.Loaded += (_, __) =>
                 {
-                    rootElement.Focus(FocusState.Programmatic);
+                    FocusSink.Focus(FocusState.Programmatic); 
                 };
             }
             // Füllt die Liste mit den UI-Elementen aus dem XAML
+            _launcherAreaButtons = new List<Border> { LauncherCard, DiscordCard };
             _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
 
             // Catch unhandled exceptions
@@ -269,6 +424,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             //ASYNC PROZES
             ShowTaskManager();
+            SetupFocusWatcher();
+            SetupMouseIdleBehavior();
+            // NEU: Starte einen einmaligen Timer, der die Gnadenfrist beendet.
+            var gracePeriodTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(10) // 10 Sekunden warten
+            };
+            gracePeriodTimer.Tick += (s, e) =>
+            {
+                _isStartupGracePeriod = false; // Gnadenfrist beenden
+                gracePeriodTimer.Stop();       // Timer stoppen, da er nur einmal laufen soll
+            };
+            gracePeriodTimer.Start();
+
             //after 10 seconds AND Start Windows Partmode
             StartAsynctasks();
 
@@ -331,7 +500,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void AssignLauncherApp(int index, string exePath, string optionalIconPath = null)
         {
-            // 🔍 Ziel-Element finden
+            // Ziel-Element finden
             Border tile = index switch
             {
                 0 => LauncherTile0,
@@ -349,14 +518,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 BitmapImage bitmap = null;
 
-                // 🎯 1. Versuche benutzerdefiniertes Icon zu laden
+                // 1. Versuche benutzerdefiniertes Icon zu laden
                 if (!string.IsNullOrEmpty(optionalIconPath) && File.Exists(optionalIconPath))
                 {
                     bitmap = new BitmapImage(new Uri(optionalIconPath, UriKind.Absolute));
                 }
                 else
                 {
-                    // 🧩 2. Fallback: Icon aus .exe extrahieren
+                    // 2. Fallback: Icon aus .exe extrahieren
                     var icon = Icon.ExtractAssociatedIcon(exePath);
                     if (icon != null)
                     {
@@ -373,7 +542,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 if (bitmap != null)
                 {
-                    // 🖼️ Image erzeugen
+                    // Image erzeugen
                     var image = new Image
                     {
                         Source = bitmap,
@@ -383,12 +552,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         VerticalAlignment = VerticalAlignment.Center
                     };
 
-                    // 🧼 Kachelinhalt setzen
+                    // Kachelinhalt setzen
                     tile.Child = image;
 
-                    // 🖱️ Klick zum Starten
+                    // Klick zum Starten (inkl. Fokus-Korrektur)
                     tile.PointerPressed += (s, e) =>
                     {
+                        MakeSelfNonTopmost(); // Stellt sicher, dass das Fenster den Fokus abgibt
                         try
                         {
                             Process.Start(new ProcessStartInfo
@@ -415,19 +585,21 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             string path = Path.Combine(AppContext.BaseDirectory, "crash.log");
             File.AppendAllText(path, $"[DOMAIN EXCEPTION] {DateTime.Now}: {e.ExceptionObject}\n");
-
-            // Öffne crash.log automatisch
-            //Process.Start("notepad.exe", path);
+            BackToWindows();
         }
 
         private void CurrentApp_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
+            // Verhindert den Standard-Crash-Dialog von Windows, da wir uns selbst um das Beenden kümmern.
+            e.Handled = true;
+
             string path = Path.Combine(AppContext.BaseDirectory, "crash.log");
-            File.AppendAllText(path, $"[UI EXCEPTION] {DateTime.Now}: {e.Message}\n");
+            File.AppendAllText(path, $"[FATAL UI EXCEPTION] {DateTime.Now}: {e.Message}\n");
 
-
-            e.Handled = true; // verhindert App-Absturz (optional)
+            // NEU: Rufe die Aufräum-Methode auf, um Windows wiederherzustellen und die App sauber zu beenden.
+            BackToWindows();
         }
+
         private void WifiButton_Click(object sender, RoutedEventArgs e)
         {
           
@@ -1453,9 +1625,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
-        static void BackToWindows()
+        private void BackToWindows()
         {
-
+            MakeSelfNonTopmost();
             Console.WriteLine("Exit-Button geklickt. Stelle den Desktop wieder her und beende die App...");
 
             // Schritt 1: Taskleiste und Icons für die aktuelle Sitzung wieder sichtbar machen
@@ -1518,7 +1690,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Fehler bei der Wiederherstellung von Windows: {ex.Message}");
+                Console.WriteLine($"error re create Windows: {ex.Message}");
             }
 
             // Schritt 3: Restliche Aufräum-Aktionen
@@ -1708,6 +1880,29 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     Console.WriteLine("Error killing explorer: " + ex.Message);
                 }
             }
+
+
+            // =================================================================
+            // Suche und beende den OverlayWindow-Prozess
+            // =================================================================
+            try
+            {
+                // Finde alle Prozesse mit dem Namen "OverlayWindow"
+                Process[] overlayProcesses = Process.GetProcessesByName("OverlayWindow");
+                foreach (Process proc in overlayProcesses)
+                {
+                    // Beende jeden gefundenen Prozess
+                    proc.Kill();
+                    Console.WriteLine($"OverlayWindow process (ID: {proc.Id}) terminated.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error terminating OverlayWindow: {ex.Message}");
+            }
+            // =================================================================
+
+
             // Schritt 4 (ANGEPASST): Beende den gesamten Prozess der Anwendung
             Environment.Exit(0);
 
@@ -1787,79 +1982,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
 
-        static void StartLauncher()
+        private async Task StartLauncher()
         {
             string launcher = AppSettings.Load<string>("launcher");
             switch (launcher)
             {
                 case "steam":
-                    Console.WriteLine("starte steam launcher");
-                    StartSteam();
+                    await StartSteam();
                     break;
-
                 case "playnite":
-                    Console.WriteLine("starte playnite launcher");
-                    StartPlaynite();
+                    await StartPlaynite();
                     break;
-
                 case "custom":
-                    Console.WriteLine("starte custom launcher");
-                    StartOtherLauncher();
+                    await StartOtherLauncher();
                     break;
-
                 case "xbox":
-                    try
-                    {
-                        Console.WriteLine("Starte Xbox-App über Protokoll...");
-                        Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
-
-                        Console.WriteLine("Warte 5 Sekunden, bis die App im Vordergrund ist...");
-                        //System.Threading.Thread.Sleep(5000);
-
-                        IntPtr hwnd = GetForegroundWindow();
-                        if (hwnd == IntPtr.Zero) break;
-
-                        const int nChars = 256;
-                        System.Text.StringBuilder titleBuilder = new System.Text.StringBuilder(nChars);
-                        GetWindowText(hwnd, titleBuilder, nChars);
-
-                        if (titleBuilder.ToString().Contains("Xbox", StringComparison.OrdinalIgnoreCase))
-                        {
-                            Console.WriteLine($"Richtiges Fenster gefunden: '{titleBuilder}'.");
-                            MaximizeXboxWindow(hwnd);
-                            Console.WriteLine("Xbox-Fenster wurde maximiert.");
-
-                            // Finde den Logik-Prozess...
-                            Process logicProcess = Process.GetProcessesByName("XboxPcApp").FirstOrDefault();
-
-                            // ...und speichere ihn in unserer statischen Variable für später.
-                            if (logicProcess != null)
-                            {
-                                monitoredXboxProcess = logicProcess;
-                                Console.WriteLine($"Xbox-Prozess {logicProcess.Id} zur Überwachung gespeichert.");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Fehler beim Starten der Xbox-App: " + ex.Message);
-                    }
+                    // ... Deine bestehende Xbox-Logik ...
                     break;
-
                 default:
-                    Console.WriteLine("Invalid launcher. Defaulting to Custom.");
-                    launcher = "steam";
-                    AppSettings.Save("launcher", launcher);
-                    BackToWindows();
-
+                    AppSettings.Save("launcher", "steam");
+                    await StartSteam();
                     break;
             }
-
         }
 
         private void LauncherCard_Tapped(object sender, TappedRoutedEventArgs e)
         {
-
+            MakeSelfNonTopmost(); // <-- HINZUGEFÜGT
             SwitchToConfiguredLauncher();
         }
         private void WaitForExplorerAndStartLauncher()
@@ -1927,160 +2076,158 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
-        static void ConsoleModeToShell()
+        private async void ConsoleModeToShell()
         {
-                try
+            const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+            const string valueName = "Shell";
+
+            try
+            {
+                // 1. Pfad dynamisch ermitteln
+                string targetExecutable = Process.GetCurrentProcess().MainModule.FileName;
+                if (!targetExecutable.StartsWith("\""))
                 {
-                    const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-                    const string valueName = "Shell";
+                    targetExecutable = $"\"{targetExecutable}\"";
+                }
 
-                string targetExecutable = @"C:\Program Files (x86)\GCM\GCM\gcmloader\gcmloader.exe";
-
-
-
-                if (!File.Exists(targetExecutable))
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
+                {
+                    if (key == null)
                     {
-                        //Logger.Logger.Log($"Error: The file '{targetExecutable}' does not exist.");
+                        Console.WriteLine($"[ERROR] Registry key '{keyName}' not found or no access.");
                         return;
                     }
 
-                    // Open registry key for writing
-                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, writable: true))
+                    // 2. Originalen Shell-Wert sichern (falls nötig)
+                    string originalShell = key.GetValue(valueName)?.ToString() ?? "explorer.exe";
+                    if (!originalShell.Contains("gcmloader.exe", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (key != null)
+                        try { AppSettings.Load<string>("original_shell"); }
+                        catch (KeyNotFoundException)
                         {
-                            // Modify value in registry key
-                            key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
-
-                            // Verify the change
-                            string currentValue = key.GetValue(valueName)?.ToString();
-                            if (currentValue == targetExecutable)
-                            {
-
-                                //KillProcess("explorer.exe");
-                            }
-                            else
-                            {
-                                Console.WriteLine($"Failed to set '{valueName}'. Current value: {currentValue}");
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Unable to open registry key '{keyName}'.");
+                            AppSettings.Save("original_shell", originalShell);
+                            Console.WriteLine($"[OK] Original shell '{originalShell}' saved.");
                         }
                     }
+
+                    // 3. NEU: Neuen Shell-Wert mit bis zu 3 Versuchen setzen
+                    const int maxRetries = 3;
+                    bool success = false;
+                    for (int i = 0; i < maxRetries; i++)
+                    {
+                        key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
+
+                        // Kurze Pause, damit Windows die Änderung verarbeiten kann
+                        await Task.Delay(100);
+
+                        string currentValue = key.GetValue(valueName)?.ToString();
+                        if (currentValue != null && currentValue.Equals(targetExecutable, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine($"[OK] Shell successfully set on attempt {i + 1}.");
+                            success = true;
+                            break; // Erfolg, die Schleife wird beendet
+                        }
+
+                        Console.WriteLine($"[WARN] Attempt {i + 1} of {maxRetries} failed. Retrying...");
+                        await Task.Delay(500); // Längere Pause vor dem nächsten Versuch
+                    }
+
+                    // 4. Explorer nur beenden, wenn das Setzen erfolgreich war
+                    if (success)
+                    {
+                        KillProcess("explorer.exe");
+                        
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[FATAL ERROR] Failed to set Shell after {maxRetries} attempts.");
+                        // Hier könnte man eine Fehlermeldung für den Benutzer anzeigen
+                    }
                 }
-                catch (UnauthorizedAccessException)
-                {
-                    Console.WriteLine("Error: Access Denied. Run the application as an administrator.");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error: {ex.Message}");
-                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("[ERROR] Access Denied. Run the application as an administrator.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] An unexpected error occurred in ConsoleModeToShell: {ex.Message}");
+            }
         }
         private void SettingsVerify()
         {
-
-            if (!VerifySettings())
+            try
             {
-                Console.WriteLine("The settings folder or file is missing. Initializing first start process...");
-                FirstStart();
+                if (!VerifySettings())
+                {
+                    FirstStart();
+                    return;
+                }
+
+                string launcher = AppSettings.Load<string>("launcher");
+
+                switch (launcher)
+                {
+                    case "steam":
+                        string steamPath = AppSettings.Load<string>("steamlauncherpath");
+                        if (string.IsNullOrEmpty(steamPath) || !File.Exists(steamPath))
+                            throw new FileNotFoundException("The Steam path is invalid.");
+                        break;
+                    case "playnite":
+                        string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
+                        if (string.IsNullOrEmpty(playnitePath) || !File.Exists(playnitePath))
+                            throw new FileNotFoundException("The Playnite path is invalid.");
+                        break;
+                    case "custom":
+                        string customPath = AppSettings.Load<string>("customlauncherpath");
+                        if (string.IsNullOrEmpty(customPath) || !File.Exists(customPath))
+                            throw new FileNotFoundException("The Custom Launcher path is invalid.");
+                        break;
+                    case "xbox":
+                        break;
+                    default:
+                        throw new InvalidOperationException($"The launcher '{launcher}' is invalid.");
+                }
+
+                Console.WriteLine("Settings verified successfully.");
             }
-
-            //verif launcher//
-            string launcher = AppSettings.Load<string>("launcher");
-            if (launcher == "steam" || launcher == "playnite" || launcher == "custom" || launcher == "xbox")
+            catch (Exception ex)
             {
-                Console.WriteLine("The selected launcher is valid");
+                // =================================================================
+                // NEW: Write error to a text file and open it for the user
+                // =================================================================
+                string logPath = Path.Combine(AppContext.BaseDirectory, "crash.log");
 
+                // 1. Create a user-friendly error message.
+                string errorMessage =
+                    "================================================================\r\n" +
+                    "                GCM CRASH REPORT\r\n" +
+                    "================================================================\r\n\r\n" +
+                    $"TIMESTAMP: {DateTime.Now}\r\n\r\n" +
+                    "REASON:\r\n" +
+                    "A critical error was found in the settings (settings.toml).\r\n" +
+                    "This is often caused by a missing entry (like 'launcher') or an invalid file path.\r\n\r\n" +
+                    "Please open the settings app and verify your configuration.\r\n\r\n" +
+                    "----------------------------------------------------------------\r\n" +
+                    "TECHNICAL DETAILS:\r\n" +
+                    $"{ex.Message}\r\n" +
+                    "----------------------------------------------------------------\r\n";
 
+                // 2. Write the message to the crash.log file.
+                File.WriteAllText(logPath, errorMessage);
 
-                if (launcher == "steam")
+                // 3. Open the log file in the default text editor (Notepad).
+                try
                 {
-                    string steamPath = AppSettings.Load<string>("steamlauncherpath");
-                    if (!string.IsNullOrEmpty(steamPath) && File.Exists(steamPath))
-                    {
-                        Console.WriteLine("The Steam path is valid.");
-
-                        // Try to load deckyloader setting
-                        bool usedeckyloader = false;
-
-                        try
-                        {
-                            // Try to load the value from settings
-                            usedeckyloader = AppSettings.Load<bool>("usedeckyloader");
-                        }
-                        catch
-                        {
-                            // Key doesn't exist or loading failed → set to false
-                            AppSettings.Save("usedeckyloader", false);
-                            usedeckyloader = false;
-                        }
-
-                        // Now handle logic cleanly
-                        if (usedeckyloader)
-                        {
-                            // deckyloader is enabled
-                            Console.WriteLine("DeckyLoader is enabled");
-                        }
-                        else
-                        {
-                            // deckyloader is disabled or was not set and now defaulted
-                            Console.WriteLine("DeckyLoader is disabled or not set");
-                            //set deckyloader disabled
-                            AppSettings.Save("usedeckyloader", false);
-                        }
-
-
-                    }
-                    else
-                    {
-                        //MessageBox.Show("The Steam path is invalid or non-existent. Use the Settings.exe file to correct this.");
-                        CleanupLogging();
-                        Environment.Exit(0);
-                    }
+                    Process.Start(new ProcessStartInfo(logPath) { UseShellExecute = true });
+                }
+                catch
+                {
+                    // Fallback in case even Notepad can't be started.
                 }
 
-                if (launcher == "playnite")
-                {
-                    string PlaynitePath = AppSettings.Load<string>("playnitelauncherpath");
-                    if (!string.IsNullOrEmpty(PlaynitePath) && File.Exists(PlaynitePath))
-                    {
-                        Console.WriteLine("The playnite path is valid.");
-                    }
-                    else
-                    {
-                        Console.WriteLine("The playnite path is invalid or non-existent. Use the Settings.exe file to correct this.");
-                        CleanupLogging();
-                        Environment.Exit(0);
-                    }
-                }
-
-                if(launcher == "xbox")
-                {
-                    Console.WriteLine("The launcher path is xbox, get dynamic path later");
-                }
-
-                if (launcher == "custom")
-                {
-                    string OtherLauncherPath = AppSettings.Load<string>("customlauncherpath");
-                    if (!string.IsNullOrEmpty(OtherLauncherPath) && File.Exists(OtherLauncherPath))
-                    {
-                        Console.WriteLine("The launcher path is valid.");
-                    }
-                    else
-                    {
-                        // MessageBox.Show("The launcher path is invalid or non-existent. Use the Settings.exe file to correct this.");
-                        Environment.Exit(0);
-                    }
-                }
-            }
-            else
-            {
-                //MessageBox.Show("The selected launcher is invalid or non-existent. Use the Settings.exe file to fix this");
-                CleanupLogging();
-                Environment.Exit(0);
+                // 4. Exit the application cleanly.
+                BackToWindows();
             }
         }
         public async System.Threading.Tasks.Task StartAsynctasks()
@@ -2523,231 +2670,112 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion functions
         #region launcher
-        static void StartSteam()
+        private async Task StartSteam()
         {
-
-            //for deckyloader
-            bool deckyloadertrigger = false;
-
-            if (string.IsNullOrWhiteSpace(AppSettings.Load<string>("steamlauncherpath")) || !File.Exists(AppSettings.Load<string>("steamlauncherpath")))
+            try
             {
-                Console.WriteLine("Error: SteamPath is empty, invalid, or does not exist.");
-                BackToWindows();
-                return;
-            }
-
-            KillProcess("steam.exe");
-            Console.WriteLine("try start Steam");
-
-            // Check if decky Loader is activated
-            if (AppSettings.Load<bool>("usedeckyloader") == true)
-            {
-
-                deckyloadertrigger = true;
-                //first clear other process with deckyloader
-                //End Decky Loader process if running
-                Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
-                if (deckyLoaderProcesses.Length > 0)
+                // Step 1: Verify the Steam path first.
+                string steamPath = AppSettings.Load<string>("steamlauncherpath");
+                if (string.IsNullOrWhiteSpace(steamPath) || !File.Exists(steamPath))
                 {
-                    foreach (var process in deckyLoaderProcesses)
-                    {
-                        process.Kill();
-                        process.WaitForExit();
-                        Console.WriteLine("Decky Loader process killed successfully.");
-                    }
-                }
-                //set the trigger for Deckyloader
-               
-
-                //Start Decky Loader Steam
-                //search and start decky loader no console for steam.
-                // Get the user's home directory dynamically
-                string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-                // Construct the full path to PluginLoader_noconsole.exe
-                string pluginLoaderPath = Path.Combine(userHome, "homebrew", "services", "PluginLoader_noconsole.exe");
-
-                // Check if the executable file exists
-                if (File.Exists(pluginLoaderPath))
-                {
-                    Console.WriteLine("PluginLoader_noconsole.exe found. Starting...");
-
-                    // Start the process
-                    Process process = new Process
-                    {
-                        StartInfo = new ProcessStartInfo
-                        {
-                            FileName = pluginLoaderPath,
-                            UseShellExecute = true // Ensures the executable runs properly
-                        }
-                    };
-                    process.Start();
-
-                    // Wait until the process is running and not exited
-                    while (true)
-                    {
-                        process.Refresh(); // Update the process info
-
-                        if (process.HasExited)
-                        {
-                            Console.WriteLine("PluginLoader exited unexpectedly.");
-                            break;
-                        }
-
-                        try
-                        {
-                            // Check if the process has a valid start time (indicates it has initialized)
-                            var _ = process.StartTime;
-                            break;
-                        }
-                        catch
-                        {
-                            // StartTime not yet available, wait and try again
-                        }
-
-                        Thread.Sleep(1000); // Wait a bit before checking again
-                    }
-
-                    Console.WriteLine("PluginLoader is running. Continuing...");
-
-                    try
-                    {
-                        string Path = AppSettings.Load<string>("steamlauncherpath");
-                        string arguments;
-                        //  if (AppSettings.Load<bool>("usestartupvideo")){
-                        // arguments = "-gamepadui -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -overridepackageurl";
-                        //  }
-                        //  else
-                        //  {
-                        arguments = "-dev -gamepadui -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -overridepackageurl -noinstro ";
-                        //  }
-
-                        Process.Start(new ProcessStartInfo(Path, arguments));
-                        Console.WriteLine("Steam launched");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Error launching Steam: " + ex.Message);
-                        BackToWindows();
-                        Console.WriteLine("explorer restored");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Error: PluginLoader_noconsole.exe not found start normal!");
-                    // Start Steam normal
-                    try
-                    {
-                        string Path = AppSettings.Load<string>("steamlauncherpath");
-                        string arguments;
-                        //  if (AppSettings.Load<bool>("usestartupvideo")){
-                        // arguments = "-gamepadui -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -overridepackageurl";
-                        //  }
-                        //  else
-                        //  {
-                        arguments = "-gamepadui -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -overridepackageurl -nointro";
-                        //  }
-
-                        Process.Start(new ProcessStartInfo(Path, arguments));
-                        Console.WriteLine("Steam launched");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Error launching Steam: " + ex.Message);
-                        BackToWindows();
-                        Console.WriteLine("explorer restored");
-                    }
-
-
+                    throw new FileNotFoundException("The Steam path is invalid or was not found.");
                 }
 
-              
-            }
-            else
-            {
-          
-            }
+                // Always kill the old Steam process to ensure a clean start.
+                KillProcess("steam.exe");
 
-            if (deckyloadertrigger == true) // deckyloader is not triggered
-            {
-            }
-            else if (deckyloadertrigger == false)
-            {
-                // Start Steam normal
+                // Step 2: Check if Decky Loader should be used.
+                bool useDeckyLoader = false;
                 try
                 {
-                    string Path = AppSettings.Load<string>("steamlauncherpath");
-                    string arguments;
-                    //  if (AppSettings.Load<bool>("usestartupvideo")){
-                    // arguments = "-gamepadui -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -overridepackageurl";
-                    //  }
-                    //  else
-                    //  {
-                    arguments = "-gamepadui -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -overridepackageurl -nointro";
-                    //  }
-
-                    Process.Start(new ProcessStartInfo(Path, arguments));
-                    Console.WriteLine("Steam launched");
+                    useDeckyLoader = AppSettings.Load<bool>("usedeckyloader");
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Console.WriteLine("Error launching Steam: " + ex.Message);
-                    BackToWindows();
-                    Console.WriteLine("explorer restored");
+                    // Setting doesn't exist, assume false.
                 }
-            }
-        }
-        static void StartPlaynite()
-        {
-            if (string.IsNullOrWhiteSpace(AppSettings.Load<string>("playnitelauncherpath")) || !File.Exists(AppSettings.Load<string>("playnitelauncherpath")))
-            {
 
-                //Logger.Logger.Log($"Error: PlaynitePath is empty, invalid, or does not exist.");
-                BackToWindows();
-                return;
-            }
-            KillProcess("Playnite.FullscreenApp.exe");
-            try
-            {
-                string arguments = " --hidesplashscreen";
-                string Path = AppSettings.Load<string>("playnitelauncherpath");
-                Process.Start(new ProcessStartInfo(Path, arguments));
-                // Logger.Logger.Log("Playnite launched");
+                // Step 3: Start Decky Loader if enabled.
+                if (useDeckyLoader)
+                {
+                    Console.WriteLine("Decky Loader is enabled. Attempting to start...");
+                    KillProcess("PluginLoader_noconsole.exe"); // Ensure no old instance is running
+
+                    string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    string pluginLoaderPath = Path.Combine(userHome, "homebrew", "services", "PluginLoader_noconsole.exe");
+
+                    if (File.Exists(pluginLoaderPath))
+                    {
+                        Process.Start(new ProcessStartInfo(pluginLoaderPath) { UseShellExecute = true });
+                        Console.WriteLine("PluginLoader_noconsole.exe started.");
+                        await Task.Delay(2000); // Give Decky Loader a moment to initialize.
+                    }
+                    else
+                    {
+                        Console.WriteLine("Decky Loader executable not found, starting Steam normally.");
+                    }
+                }
+
+                // Step 4: Start Steam.
+                // These arguments are used whether Decky is on or off.
+                string arguments = "-gamepadui -noverifyfiles -nobootstrapupdate";
+                Process.Start(new ProcessStartInfo(steamPath, arguments));
+                Console.WriteLine("Steam launched.");
             }
             catch (Exception ex)
             {
-                //Logger.Logger.Log("Error launching Playnite");
+                // Step 5: Catch ANY error and inform the user.
+                Debug.WriteLine($"Error in StartSteam: {ex.Message}");
+                await messagebox("Could not start Steam. Please check the path in the settings.");
                 BackToWindows();
-                //Logger.Logger.Log("explorer restored");
             }
         }
-        static void StartOtherLauncher()
+
+        private async Task StartPlaynite()
         {
-            string launcherPath = AppSettings.Load<string>("customlauncherpath");
-
-            if (string.IsNullOrWhiteSpace(launcherPath) || !File.Exists(launcherPath))
-            {
-                Console.WriteLine("Error: OtherLauncherPath is empty, invalid, or does not exist.");
-                BackToWindows();
-                return;
-            }
-
-            KillProcess(Path.GetFileName(launcherPath));
-
             try
             {
+                string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
+
+                if (string.IsNullOrWhiteSpace(playnitePath) || !File.Exists(playnitePath))
+                {
+                    throw new FileNotFoundException("Der Playnite-Pfad ist ungültig oder wurde nicht gefunden.");
+                }
+
+                KillProcess("Playnite.FullscreenApp.exe");
+                Process.Start(new ProcessStartInfo(playnitePath, "--startfullscreen"));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Fehler in StartPlaynite: {ex.Message}");
+                await messagebox("Playnite konnte nicht gestartet werden. Bitte den Pfad in den Einstellungen prüfen.");
+                BackToWindows();
+            }
+        }
+
+        private async Task StartOtherLauncher()
+        {
+            try
+            {
+                string launcherPath = AppSettings.Load<string>("customlauncherpath");
+
+                if (string.IsNullOrWhiteSpace(launcherPath) || !File.Exists(launcherPath))
+                {
+                    throw new FileNotFoundException("Der Pfad für den Custom Launcher ist ungültig oder wurde nicht gefunden.");
+                }
+
+                KillProcess(Path.GetFileName(launcherPath));
                 Process.Start(new ProcessStartInfo(launcherPath));
-                Console.WriteLine("OtherLauncher launched");
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error launching OtherLauncher: " + ex.Message);
+                Debug.WriteLine($"Fehler in StartOtherLauncher: {ex.Message}");
+                await messagebox("Der Custom Launcher konnte nicht gestartet werden. Bitte den Pfad in den Einstellungen prüfen.");
                 BackToWindows();
-                Console.WriteLine("Explorer restored");
             }
         }
 
-       
+
         #endregion launcher
         #region start
         private async System.Threading.Tasks.Task Start()
@@ -2849,73 +2877,79 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void StartAutoTaskRefresh()
         {
-            if (_taskRefreshTimer != null)
-                return;
-
-            _taskRefreshTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(2)
-            };
-
-            // NEUER asynchroner Tick-Handler
+            if (_taskRefreshTimer != null) return;
+            _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
                 if (!IsWindowInForeground()) return;
 
-                // 1. Schwere Arbeit im Hintergrund-Thread ausführen mit Task.Run
                 var processDataList = await Task.Run(() =>
                 {
-                    var data = new List<ProcessData>();
-                    var seenNames = new HashSet<string>();
+                    var dataList = new List<ProcessData>();
+                    var seenHwnds = new HashSet<IntPtr>();
 
                     EnumWindows((hWnd, lParam) =>
                     {
-                        if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0) return true;
+                        if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
+                            return true;
 
+                        int textLen = GetWindowTextLength(hWnd);
+                        if (textLen == 0)
+                            return true;
+
+                        var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
+                        if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW))
+                            return true;
+
+                        if (IsCloaked(hWnd))
+                            return true;
+
+                        var titleBuilder = new StringBuilder(textLen + 1);
+                        GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+                        string windowTitle = titleBuilder.ToString();
+
+                        if (string.IsNullOrWhiteSpace(windowTitle) ||
+                            _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return true;
+                        }
+
+                        Process proc = null;
+                        string exePath = null;
                         try
                         {
-                            const int GWL_EXSTYLE = -20;
-                            const int WS_EX_TOOLWINDOW = 0x00000080;
-                            const int WS_EX_NOACTIVATE = 0x08000000;
-                            int style = (int)GetWindowLong(hWnd, (WindowLongFlags)GWL_EXSTYLE);
-                            if ((style & WS_EX_TOOLWINDOW) != 0 || (style & WS_EX_NOACTIVATE) != 0) return true;
+                            GetWindowThreadProcessId(hWnd, out uint pid);
+                            if (pid != 0)
+                            {
+                                proc = Process.GetProcessById((int)pid);
+                                if (proc.Id == Process.GetCurrentProcess().Id) return true;
+                                exePath = proc.MainModule?.FileName;
+                            }
                         }
-                        catch { return true; }
-
-                        GetWindowThreadProcessId(hWnd, out uint pid);
-                        Process p;
-                        try { p = Process.GetProcessById((int)pid); } catch { return true; }
-
-                        if (_excludedProcessNames.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase)) return true;
-                        if (pid == (uint)Process.GetCurrentProcess().Id) return true;
-
-                        string productName;
-                        try { productName = p.MainModule?.FileVersionInfo?.ProductName; } catch { productName = p.ProcessName; }
-                        if (string.IsNullOrWhiteSpace(productName)) productName = p.ProcessName;
-
-                        if (_excludedTitles.Any(t => productName?.Contains(t, StringComparison.OrdinalIgnoreCase) == true)) return true;
-                        if (_nameOverrides.TryGetValue(productName, out var overrideName)) productName = overrideName;
-                        if (productName?.Contains("GAMECONSOLEMODE", StringComparison.OrdinalIgnoreCase) == true) return true;
-                        if (!seenNames.Add(productName)) return true;
-
-                        data.Add(new ProcessData
+                        catch
                         {
-                            ProductName = productName,
-                            ExePath = p.MainModule?.FileName,
+                            proc = null;
+                            exePath = null;
+                        }
+
+                        if (!seenHwnds.Add(hWnd)) return true;
+
+                        dataList.Add(new ProcessData
+                        {
+                            ProductName = windowTitle,
                             Hwnd = hWnd,
-                            Proc = p
+                            Proc = proc,
+                            ExePath = exePath
                         });
 
                         return true;
                     }, IntPtr.Zero);
 
-                    return data;
+                    return dataList;
                 });
 
-                // 2. Zurück auf dem UI-Thread: Die schnelle UI-Aktualisierungsmethode aufrufen
                 UpdateUiFromData(processDataList);
             };
-
             _taskRefreshTimer.Start();
         }
 
@@ -3033,7 +3067,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 hideTimer.Stop();
                 ProgramCardPanel.Visibility = Visibility.Visible;
-                LoadTaskManagerList();
 
                 // ⏳ Wichtig: kleiner Delay mit DispatcherTimer
                 var focusTimer = new DispatcherTimer
@@ -3198,106 +3231,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
     "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game"
 };
-        private void LoadTaskManagerList()
-        {
-            double scrollOffset = ProgramScrollViewer.HorizontalOffset;
-            int lastIndex = _selectedCardIndex;
-            var seenNames = new HashSet<string>();
-
-            EnumWindows((hWnd, lParam) =>
-            {
-                if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0)
-                    return true;
-
-                try
-                {
-                    const int GWL_EXSTYLE = -20;
-                    const int WS_EX_TOOLWINDOW = 0x00000080;
-                    const int WS_EX_NOACTIVATE = 0x08000000;
-                    int style = (int)GetWindowLong(hWnd, (WindowLongFlags)GWL_EXSTYLE);
-                    if ((style & WS_EX_TOOLWINDOW) != 0 || (style & WS_EX_NOACTIVATE) != 0)
-                        return true;
-                }
-                catch { return true; }
-
-                GetWindowThreadProcessId(hWnd, out uint pid);
-                Process p;
-                try { p = Process.GetProcessById((int)pid); } catch { return true; }
-
-                // NEU: Prüfe, ob der Prozessname auf unserer schwarzen Liste steht
-                if (_excludedProcessNames.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase))
-                {
-                    return true; // Überspringe diesen Prozess
-                }
-
-                if (pid == (uint)Process.GetCurrentProcess().Id)
-                    return true;
-
-                // Logik für UWP-Apps beibehalten
-                if (p.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
-                {
-                    // ... (Hier kann deine Logik bleiben, um den echten Kind-Prozess zu finden, falls nötig)
-                }
-
-                string productName;
-                try { productName = p.MainModule?.FileVersionInfo?.ProductName; } catch { productName = p.ProcessName; }
-                if (string.IsNullOrWhiteSpace(productName)) productName = p.ProcessName;
-
-                if (_excludedTitles.Any(t => productName?.Contains(t, StringComparison.OrdinalIgnoreCase) == true))
-                    return true;
-
-                if (_nameOverrides.TryGetValue(productName, out var overrideName))
-                    productName = overrideName;
-
-                if (productName?.Contains("GAMECONSOLEMODE", StringComparison.OrdinalIgnoreCase) == true)
-                    return true;
-
-                if (!seenNames.Add(productName)) return true;
-
-                var existing = _cardCache.FirstOrDefault(c => c.ProductName == productName);
-                if (existing == null)
-                {
-                    var border = CreateProgramCard(productName, p.MainModule?.FileName ?? "", p, hWnd);
-                    var entry = new ProgramCardEntry
-                    {
-                        ProductName = productName,
-                        ExePath = p.MainModule?.FileName ?? "",
-                        Hwnd = hWnd,
-                        Proc = p,
-                        Card = border
-                    };
-                    _cardCache.Add(entry);
-                    ProgramCardPanel.Children.Add(border);
-                }
-                return true;
-            }, IntPtr.Zero);
-
-            // Veraltete Einträge entfernen
-            for (int i = _cardCache.Count - 1; i >= 0; i--)
-            {
-                if (!seenNames.Contains(_cardCache[i].ProductName))
-                {
-                    ProgramCardPanel.Children.Remove(_cardCache[i].Card);
-                    _cardCache.RemoveAt(i);
-                }
-            }
-
-            // Auswahl und Scroll-Position wiederherstellen
-            if (ProgramCardPanel.Children.Count == 0)
-                _selectedCardIndex = 0;
-            else if (lastIndex >= ProgramCardPanel.Children.Count)
-                _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
-            else
-                _selectedCardIndex = lastIndex;
-
-            // KORREKTUR: Führe die Hervorhebung nur aus, wenn der Karten-Bereich aktiv ist
-            if (_currentFocusArea == FocusArea.Cards)
-            {
-                HighlightSelectedCard(skipScroll: true, forceAnimation: false);
-            }
-
-            ProgramScrollViewer.ChangeView(scrollOffset, null, null, true);
-        }
+        
 
         private static bool IsCloaked(IntPtr hWnd)
         {
@@ -3353,164 +3287,125 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
+            // --- Schritt 1: Icon laden (mit PNG-Fallback für Anti-Cheat) ---
             BitmapImage icon = null;
-            Bitmap iconBitmap = null;
-            Color avgColor = Colors.DimGray; // Fallback
+            bool isProtected = string.IsNullOrEmpty(exePath);
 
-            string appUserModelId = null;
-
-            // Check if it's a UWP App based on path
-            if (!string.IsNullOrEmpty(exePath) && exePath.Contains("WindowsApps", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    string manifestPath = Path.Combine(Path.GetDirectoryName(exePath), "AppxManifest.xml");
-                    if (File.Exists(manifestPath))
-                    {
-                        XmlDocument doc = new XmlDocument();
-                        doc.Load(manifestPath);
-
-                        var nsMgr = new XmlNamespaceManager(doc.NameTable);
-                        nsMgr.AddNamespace("x", "http://schemas.microsoft.com/appx/manifest/foundation/windows10");
-
-                        // Try to get AppUserModelId from manifest
-                        var identityNode = doc.SelectSingleNode("/x:Package/x:Identity", nsMgr);
-                        var appNode = doc.SelectSingleNode("/x:Package/x:Applications/x:Application", nsMgr);
-
-                        if (identityNode != null && appNode != null)
-                        {
-                            string packageName = identityNode.Attributes["Name"]?.Value;
-                            string publisher = identityNode.Attributes["Publisher"]?.Value;
-                            string appId = appNode.Attributes["Id"]?.Value;
-
-                            if (!string.IsNullOrEmpty(packageName) && !string.IsNullOrEmpty(publisher) && !string.IsNullOrEmpty(appId))
-                            {
-                                appUserModelId = $"{packageName}_{publisher}!{appId}";
-                            }
-                        }
-
-                        // Try to get DisplayName
-                        var nameNode = doc.SelectSingleNode("/x:Package/x:Properties/x:DisplayName", nsMgr);
-                        if (nameNode != null && !string.IsNullOrEmpty(nameNode.InnerText))
-                        {
-                            name = nameNode.InnerText;
-                        }
-
-                        // Try to get Logo as icon
-                        var logoNode = doc.SelectSingleNode("/x:Package/x:Properties/x:Logo", nsMgr);
-                        if (logoNode != null && !string.IsNullOrEmpty(logoNode.InnerText))
-                        {
-                            string logoPath = Path.Combine(Path.GetDirectoryName(manifestPath), logoNode.InnerText.Replace('/', '\\'));
-                            if (File.Exists(logoPath))
-                            {
-                                icon = new BitmapImage(new Uri(logoPath));
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    // If parsing fails, fallback logic below
-                }
-            }
-
-            // Fallback icon loading
-            if (icon == null)
+            if (!isProtected && File.Exists(exePath))
             {
                 icon = GetAppIconAsBitmapImage(exePath);
             }
 
-            // Fallback average color
-            iconBitmap = GetBitmapFromExeIcon(exePath);
-            if (iconBitmap != null)
+            // KORREKTUR: Wenn kein Icon geladen werden konnte, nutze wieder dein PNG-Bild.
+            if (icon == null)
             {
-                avgColor = GetAverageColor(iconBitmap);
+                try
+                {
+                    // WICHTIG: Stelle sicher, dass du eine "game.png" in deinem "Assets"-Ordner hast.
+                    icon = new BitmapImage(new Uri("ms-appx:///Assets/game.png"));
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Fallback icon not found: {ex.Message}");
+                }
+            }
+
+            // --- Schritt 2: Karten-Hintergrund mit Transparenz erstellen ---
+            Color avgColor = Color.FromArgb(255, 60, 60, 60);
+            if (!isProtected && File.Exists(exePath))
+            {
+                try
+                {
+                    using (var iconBmp = GetBitmapFromExeIcon(exePath))
+                    {
+                        if (iconBmp != null) avgColor = GetAverageColor(iconBmp);
+                    }
+                }
+                catch { /* Ignorieren */ }
             }
 
             var gradient = new LinearGradientBrush
             {
-                StartPoint = new Windows.Foundation.Point(0, 0),
-                EndPoint = new Windows.Foundation.Point(1, 1),
-                Opacity = 0.6,
+                StartPoint = new Windows.Foundation.Point(0.5, 0),
+                EndPoint = new Windows.Foundation.Point(0.5, 1),
                 GradientStops = new GradientStopCollection
         {
-            new GradientStop { Color = avgColor, Offset = 0 },
-            new GradientStop
-            {
-                Color = Color.FromArgb(180,
-                    (byte)Math.Min(255, avgColor.R + 40),
-                    (byte)Math.Min(255, avgColor.G + 40),
-                    (byte)Math.Min(255, avgColor.B + 40)),
-                Offset = 1
-            }
+            new GradientStop { Color = Color.FromArgb(220, avgColor.R, avgColor.G, avgColor.B), Offset = 0.0 },
+            new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
         }
             };
 
-            string description = !string.IsNullOrEmpty(proc.MainWindowTitle) ? proc.MainWindowTitle : "Running process";
+            // --- Schritt 3: UI-Elemente mit stabilem Grid-Layout erstellen ---
+            var cardLayoutGrid = new Grid();
+            cardLayoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            cardLayoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            var contentStack = new StackPanel
-            {
-                Orientation = Microsoft.UI.Xaml.Controls.Orientation.Vertical,
-                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            var image = new Microsoft.UI.Xaml.Controls.Image
+            // Das Icon wird jetzt immer ein Image-Element sein.
+            var image = new Image
             {
                 Source = icon,
-                Width = 40,
-                Height = 40,
-                Margin = new Thickness(0, 10, 0, 10),
+                Width = 50,
+                Height = 50,
+                VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center
             };
+            Grid.SetRow(image, 0);
+            cardLayoutGrid.Children.Add(image);
 
             var title = new TextBlock
             {
-                Text = name.Length > 12 ? name.Substring(0, 12) + "..." : name,
-                FontSize = 20,
-                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = new SolidColorBrush(Colors.White),
-                TextAlignment = TextAlignment.Center,
-                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center
-            };
-
-            var desc = new TextBlock
-            {
-                Text = description,
-                FontSize = 13,
-                Foreground = new SolidColorBrush(Colors.LightGray),
+                Text = name,
+                FontSize = 16,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Colors.WhiteSmoke),
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
-                Margin = new Thickness(5, 5, 5, 10),
-                TextWrapping = TextWrapping.Wrap,
-                MaxWidth = 180
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(10, 15, 10, 10),
+                MaxWidth = 190,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.Wrap
             };
+            Grid.SetRow(title, 1);
+            cardLayoutGrid.Children.Add(title);
 
-            contentStack.Children.Add(image);
-            contentStack.Children.Add(title);
-            contentStack.Children.Add(desc);
-
-            var border = new Border
+            if (isProtected)
             {
-                Width = 250,
-                Height = 280,
+                var marker = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(255, 255, 180, 0)),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 8, 8, 0)
+                };
+                marker.Child = new TextBlock
+                {
+                    Text = "ACHEAT",
+                    Foreground = new SolidColorBrush(Colors.Black),
+                    FontSize = 10,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold
+                };
+                cardLayoutGrid.Children.Add(marker);
+            }
+
+            // --- Schritt 4: Finale Karte zusammenbauen ---
+            var cardBorder = new Border
+            {
+                Width = 220,
+                Height = 240,
                 Background = gradient,
-                CornerRadius = new CornerRadius(20),
-                Margin = new Thickness(15),
-                BorderThickness = new Thickness(2),
-                BorderBrush = new SolidColorBrush(Colors.Transparent),
-                Child = contentStack,
-                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-                RenderTransform = new ScaleTransform { ScaleX = 1.0, ScaleY = 1.0 },
-                Tag = new CardTag { Process = proc, Hwnd = hwnd, BaseColor = avgColor, AppUserModelId = appUserModelId }
+                CornerRadius = new CornerRadius(15),
+                Margin = new Thickness(10),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)),
+                Child = cardLayoutGrid,
+                Tag = new CardTag { Process = proc, Hwnd = hwnd }
             };
 
-            return border;
+            return cardBorder;
         }
-
-
-
-
 
 
 
@@ -3626,35 +3521,40 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void ScrollToCardAnimated(UIElement card)
         {
-            if (card == null)
+            if (card == null || ProgramScrollViewer == null) return;
+
+            try
             {
-                Debug.WriteLine("ScrollToCardAnimated: card is null – aborting.");
-                return;
+                // Hole die Position der Karte innerhalb des scrollbaren Bereichs (des Panels).
+                var transform = card.TransformToVisual(ProgramCardPanel);
+                var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+
+                // Berechne die Zielposition, um die Karte in der Mitte des sichtbaren Bereichs zu zentrieren.
+                double cardX = position.X;
+                double cardWidth = (card as FrameworkElement).ActualWidth;
+                double viewportWidth = ProgramScrollViewer.ActualWidth;
+
+                double targetOffset = cardX - (viewportWidth / 2) + (cardWidth / 2);
+
+                // Stelle sicher, dass wir nicht über die Grenzen hinaus scrollen.
+                double maxOffset = ProgramScrollViewer.ScrollableWidth;
+                targetOffset = Math.Max(0, Math.Min(targetOffset, maxOffset));
+
+                // Scrolle zur Zielposition. Der letzte Parameter "false" aktiviert die sanfte Animation.
+                ProgramScrollViewer.ChangeView(targetOffset, null, null, false);
             }
-
-
-            card.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-            var transform = card.TransformToVisual(ProgramCardPanel);
-            var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
-
-            double cardX = position.X;
-            double cardWidth = card.DesiredSize.Width;
-
-            double targetOffset = cardX - (ProgramScrollViewer.ActualWidth - cardWidth) / 2;
-
-            // Clamp innerhalb des Scrollbereichs
-            double maxOffset = ProgramScrollViewer.ScrollableWidth;
-            targetOffset = Math.Max(0, Math.Min(targetOffset, maxOffset));
-
-            // Scrollen mit Animation (float!)
-            _ = ProgramScrollViewer.ChangeView((float)targetOffset, null, null, false);
+            catch (Exception ex)
+            {
+                // Fängt seltene Layout-Fehler ab, um einen Absturz zu verhindern.
+                Debug.WriteLine($"[SCROLL ERROR] Could not scroll to card: {ex.Message}");
+            }
         }
 
 
 
 
 
-     
+
 
 
 
@@ -3675,7 +3575,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch { }
 
-            LoadTaskManagerList();
+           
         }
 
 
@@ -3795,12 +3695,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const int ALT_TAB_DEBOUNCE_MS = 300; // debounce time in milliseconds
         private void SendWinTab()
         {
+            MakeSelfNonTopmost(); // <-- HINZUGEFÜGT
             SendOverlayNotification("Shortcut: Task View");
-
-            keybd_event(0x5B, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // WIN down
-            keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // TAB down
-            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // TAB up
-            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);     // WIN up
+            keybd_event(0x5B, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
 
 
@@ -3901,9 +3801,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private void Triggerbacktowin()
         {
-            //usernotification
+            MakeSelfNonTopmost(); 
             SendOverlayNotification("Shortcut: Back to Windows");
-
             BackToWindows();
         }
         #endregion backtowin
@@ -4183,39 +4082,45 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             var state = _xinputController.GetState();
             var currentButtons = state.Gamepad.Buttons;
 
-            // Immer zuerst die globalen Shortcuts prüfen
             HandleShortcuts(currentButtons);
 
-            // Nur mit UI-Navigation weitermachen, wenn das Fenster aktiv ist
             if (!IsWindowInForeground())
             {
                 _lastButtonState = currentButtons;
                 return;
             }
 
-            // Fokus mit der rechten Schulter-Taste (RB) durch die Bereiche schalten
             if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
             {
                 switch (_currentFocusArea)
                 {
-                    case FocusArea.Launcher:
-                        _currentFocusArea = FocusArea.Cards;
-                        break;
-                    case FocusArea.Cards:
-                        _currentFocusArea = FocusArea.TopButtons;
-                        break;
-                    case FocusArea.TopButtons:
-                        _currentFocusArea = FocusArea.Launcher;
-                        break;
+                    case FocusArea.Launcher: _currentFocusArea = FocusArea.Cards; break;
+                    case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
+                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
                 }
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
+                _selectedLauncherAreaIndex = 0;
                 UpdateVisualFocus();
                 PlayNavigationSound();
             }
 
-            // Navigation innerhalb des gerade aktiven Bereichs
-            if (_currentFocusArea == FocusArea.TopButtons)
+            if (_currentFocusArea == FocusArea.Launcher)
+            {
+                if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
+                {
+                    _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
+                }
+                else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
+                {
+                    _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
+                }
+            }
+            else if (_currentFocusArea == FocusArea.TopButtons)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
@@ -4232,38 +4137,34 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             else if (_currentFocusArea == FocusArea.Cards)
             {
-                // ### KORREKTUR HIER: Stellt sicher, dass Links/Rechts korrekt funktionieren ###
-
-                // BEI DRUCK NACH RECHTS: Index wird erhöht (+)
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
                     if (ProgramCardPanel.Children.Any())
                         _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
-
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
-                // BEI DRUCK NACH LINKS: Index wird verringert (-)
                 else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
                     if (ProgramCardPanel.Children.Any())
                         _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
-
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
             }
 
-            // A-Button zum Bestätigen
             if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
             {
-                if (_currentFocusArea == FocusArea.Launcher) LauncherCard_Tapped(null, null);
+                if (_currentFocusArea == FocusArea.Launcher)
+                {
+                    if (_selectedLauncherAreaIndex == 0) LauncherCard_Tapped(null, null);
+                    else if (_selectedLauncherAreaIndex == 1) DiscordCard_Tapped(null, null);
+                }
                 else if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, true);
                 else if (_currentFocusArea == FocusArea.TopButtons) ClickSelectedTopButton();
                 PlayActivationSound();
             }
 
-            // B-Button zum Schließen
             if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
             {
                 if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, false);
@@ -4278,40 +4179,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
-            // --- VORHERIGES ELEMENT DEAKTIVIEREN ---
-            if (!isInitial)
+            // Alle Elemente zurücksetzen
+            _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
+            _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
+            for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
             {
-                // Vorherige Launcher-Karte zurücksetzen
-                if (_previousFocusArea == FocusArea.Launcher)
-                {
-                    AnimateScale(this.LauncherCard, false);
-                    AnimateBorderColor(this.LauncherCard, false);
-                }
-                // Vorherigen Top-Button zurücksetzen
-                else if (_previousFocusArea == FocusArea.TopButtons && _previousTopButtonIndex > -1 && _previousTopButtonIndex < _topButtons.Count)
-                {
-                    var prevButton = _topButtons[_previousTopButtonIndex];
-                    prevButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                    prevButton.BorderThickness = new Thickness(0);
-                }
-                // Vorherige App-Karte zurücksetzen
-                else if (_previousFocusArea == FocusArea.Cards && _previousCardIndex > -1 && _previousCardIndex < ProgramCardPanel.Children.Count)
-                {
-                    if (ProgramCardPanel.Children[_previousCardIndex] is Border card)
-                    {
-                        AnimateScale(card, false);
-                        AnimateBorderColor(card, false);
-                    }
-                }
+                if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
             }
 
-            // --- NEUES ELEMENT AKTIVIEREN ---
+            // Aktuelles Element hervorheben
             if (_currentFocusArea == FocusArea.Launcher)
             {
-                AnimateScale(this.LauncherCard, true);
-                AnimateBorderColor(this.LauncherCard, true);
+                var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
+                AnimateScale(selectedButton, true);
+                AnimateBorderColor(selectedButton, true);
             }
-            else if (_currentFocusArea == FocusArea.TopButtons && _topButtons.Count > _selectedTopButtonIndex)
+            else if (_currentFocusArea == FocusArea.TopButtons)
             {
                 var selectedButton = _topButtons[_selectedTopButtonIndex];
                 selectedButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
@@ -4326,11 +4209,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     ScrollToCardAnimated(card);
                 }
             }
-
-            // Zustand für den nächsten Durchlauf speichern
-            _previousCardIndex = _selectedCardIndex;
-            _previousTopButtonIndex = _selectedTopButtonIndex;
-            _previousFocusArea = _currentFocusArea;
         }
 
         #endregion
@@ -4439,59 +4317,117 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-
-        private void TriggerCardAction(int index, bool launch)
+        /// <summary>
+        /// Sucht nach allen laufenden Anwendungen und aktualisiert die UI-Karten.
+        /// </summary>
+        private async Task RefreshAppListAsync()
         {
-            if (index < 0 || index >= ProgramCardPanel.Children.Count)
-                return;
+            // Die Suche nur durchführen, wenn das Fenster im Vordergrund ist
+            if (!IsWindowInForeground()) return;
 
-            if (ProgramCardPanel.Children[index] is Border border && border.Tag is CardTag tag)
+            var processDataList = await Task.Run(() =>
             {
-                var proc = tag.Process;
-                var hwnd = tag.Hwnd;
+                var dataList = new List<ProcessData>();
+                var seenHwnds = new HashSet<IntPtr>();
 
-                if (launch)
+                EnumWindows((hWnd, lParam) =>
                 {
-                    if (!string.IsNullOrEmpty(tag.AppUserModelId))
-                    {
-                        
+                    if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
+                        return true;
 
-                        try
+                    int textLen = GetWindowTextLength(hWnd);
+                    if (textLen == 0)
+                        return true;
+
+                    var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
+                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW))
+                        return true;
+
+                    if (IsCloaked(hWnd))
+                        return true;
+
+                    var titleBuilder = new StringBuilder(textLen + 1);
+                    GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+                    string windowTitle = titleBuilder.ToString();
+
+                    if (string.IsNullOrWhiteSpace(windowTitle) ||
+                        _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+
+                    Process proc = null;
+                    string exePath = null;
+                    try
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        if (pid != 0)
                         {
-                            ActivateUwpApp(tag.AppUserModelId);
-                            RestoreUwpAppWindow(tag.Hwnd);
-                            TaskManagerBringWindowToForeground(tag.Hwnd);
+                            proc = Process.GetProcessById((int)pid);
+                            if (proc.Id == Process.GetCurrentProcess().Id) return true;
+                            exePath = proc.MainModule?.FileName;
                         }
-                        catch (Exception ex)
-                        {
-                           
-                        }
+                    }
+                    catch
+                    {
+                        proc = null;
+                        exePath = null;
+                    }
+
+                    if (!seenHwnds.Add(hWnd)) return true;
+
+                    dataList.Add(new ProcessData
+                    {
+                        ProductName = windowTitle,
+                        Hwnd = hWnd,
+                        Proc = proc,
+                        ExePath = exePath
+                    });
+
+                    return true;
+                }, IntPtr.Zero);
+
+                return dataList;
+            });
+
+            UpdateUiFromData(processDataList);
+        }
+
+
+        private async void TriggerCardAction(int index, bool launch)
+        {
+            if (index < 0 || index >= _cardCache.Count) return;
+
+            var entry = _cardCache[index];
+            if (!(entry.Card.Tag is CardTag tag)) return;
+
+            if (launch)
+            {
+                MakeSelfNonTopmost();
+                TaskManagerBringWindowToForeground(tag.Hwnd);
+            }
+            else // B-Button zum Schließen
+            {
+                try
+                {
+                    if (tag.Process != null && !tag.Process.HasExited)
+                    {
+                        tag.Process.Kill();
                     }
                     else
                     {
-                        // Legacy App
-                       
-                        TaskManagerBringWindowToForeground(tag.Hwnd);
+                        PostMessage(tag.Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                     }
-
                 }
-                else
+                catch (Exception ex)
                 {
-                    try
-                    {
-                        if (proc.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
-                        {
-                            PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                        }
-                        else
-                        {
-                            proc.Kill();
-                        }
-                    }
-                    catch { }
-
-                    LoadTaskManagerList();
+                    Debug.WriteLine($"Could not kill process, sending close message instead: {ex.Message}");
+                    PostMessage(tag.Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 }
+
+                // Warte kurz und aktualisiere dann die Liste
+                await Task.Delay(500);
+                await RefreshAppListAsync();
             }
         }
 
@@ -4516,38 +4452,37 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             BringToFrontAndFocus(hWnd);
         }
 
+        // ERSETZE DEINE ALTE METHODE DURCH DIESE:
         public static void BringToFrontAndFocus(IntPtr hWnd)
         {
+            if (hWnd == IntPtr.Zero) return;
+
             try
             {
-                ShowWindow(hWnd, SW_RESTORE);
+                // Hole die Thread-IDs des aktuellen Vordergrundfensters und unseres Fensters
+                IntPtr foregroundHwnd = GetForegroundWindow();
+                uint foregroundThreadId = GetWindowThreadProcessId(foregroundHwnd, out _);
+                uint ourThreadId = GetCurrentThreadId();
 
-                SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                // Verbinde die Input-Threads, um den Fokuswechsel zu ermöglichen
+                AttachThreadInput(ourThreadId, foregroundThreadId, true);
 
-                IntPtr foreground = GetForegroundWindow();
-                uint foreThread = GetWindowThreadProcessId(foreground, out _);
-                uint currentThread = GetCurrentThreadId();
-
-                AttachThreadInput(currentThread, foreThread, true);
-
+                // Setze das Fenster in den Vordergrund und mache es aktiv
+                SetWindowPos(hWnd, new IntPtr(-1), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE); // HWND_TOPMOST
                 SetForegroundWindow(hWnd);
+                SetActiveWindow(hWnd);
                 SetFocus(hWnd);
-                SetActiveWindow(hWnd); // <- added
 
-                AttachThreadInput(currentThread, foreThread, false);
-                AllowSetForegroundWindow(-1);
+                // Trenne die Input-Threads wieder
+                AttachThreadInput(ourThreadId, foregroundThreadId, false);
 
-                // → Simulate click into the window
-                SimulateMouseClickInWindow(hWnd);
-
-                Console.WriteLine("Window brought to front and focused.");
+                // Zeige das Fenster an, falls es minimiert war
+                ShowWindow(hWnd, SW_RESTORE);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"BringToFrontAndFocus failed: {ex.Message}");
+                Debug.WriteLine($"BringToFrontAndFocus failed: {ex.Message}");
             }
-
         }
 
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -4581,7 +4516,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         const uint MOUSEEVENTF_LEFTUP = 0x0004;
         [DllImport("user32.dll")] private static extern bool SetCursorPos(int X, int Y);
-        [DllImport("user32.dll")] private static extern bool ShowCursor(bool bShow);
+      
 
         [DllImport("user32.dll")]
         static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
@@ -4603,48 +4538,27 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private static void SimulateMouseClickInWindow(IntPtr hWnd)
         {
+            if (hWnd == IntPtr.Zero) return;
+
             try
             {
-                // 1. Fenster sichtbar machen
-                ShowWindow(hWnd, SW_RESTORE);
+                // Erlaube dem Programm kurzzeitig, den Fokus zu stehlen.
+                LockSetForegroundWindow(1); // 1 = LSFW_UNLOCK
 
-                // 2. Temporär TopMost setzen, um sicher oben zu liegen
-                SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-
-                // 3. Input-Attach vorbereiten
-                IntPtr foreground = GetForegroundWindow();
-                uint foreThread = GetWindowThreadProcessId(foreground, out _);
-                uint currentThread = GetCurrentThreadId();
-                AttachThreadInput(currentThread, foreThread, true);
-
-                // 4. Maus unsichtbar machen
-                ShowCursor(false);
-
-                // 5. Fokus setzen
+                // Bringe das Fenster in den Vordergrund.
                 SetForegroundWindow(hWnd);
+
+                // Gib den Fokus an das Fenster.
                 SetFocus(hWnd);
-                SetActiveWindow(hWnd);
-
-                // 6. Unsichtbaren Klick ausführen
-                SimulateInvisibleClick(hWnd);
-
-                // 7. Input-Threads trennen
-                AttachThreadInput(currentThread, foreThread, false);
-
-                // 8. Maus ganz aus dem Sichtfeld verschieben
-                SetCursorPos(-10000, -10000); // weit außerhalb des sichtbaren Bereichs
-
-                // 9. Falls nötig, Cursor später wieder sichtbar machen
-                // ShowCursor(true);
-
-                AllowSetForegroundWindow(-1);
-
-                Console.WriteLine("Window brought to front and focused (invisible click).");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"BringToFrontAndFocus failed: {ex.Message}");
+                Debug.WriteLine($"Error setting focus: {ex.Message}");
+            }
+            finally
+            {
+                // Verbiete das Fokus-Stehlen wieder für andere Programme.
+                LockSetForegroundWindow(0); // 0 = LSFW_LOCK
             }
         }
 

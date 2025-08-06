@@ -5,6 +5,7 @@
     Title="GCM TaskManager">
 
     <Grid>
+        <Button x:Name="FocusSink" Width="0" Height="0" IsTabStop="True"/>
         <StackPanel x:Name="LauncherTileRow"
                     Orientation="Horizontal"
                     Visibility="Collapsed"
@@ -36,18 +37,21 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
+
                     <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1">
                         <ToolTipService.ToolTip>
                             <TextBlock Text="Zurück zum Desktop"/>
                         </ToolTipService.ToolTip>
-                        <FontIcon Glyph="&#xE909;" FontSize="18"/>
+                        <FontIcon Glyph="&#xf1cb;" FontSize="18"/>
                     </Button>
+
                     <Button x:Name="ShutdownButton" Width="50" Height="40" Click="ShutdownButton_Click">
                         <ToolTipService.ToolTip>
                             <TextBlock Text="Herunterfahren"/>
                         </ToolTipService.ToolTip>
-                        <FontIcon Glyph="&#xE713;" FontSize="18"/>
+                        <FontIcon Glyph="&#xe7e8;" FontSize="18"/>
                     </Button>
+
                 </StackPanel>
                 <TextBlock x:Name="ClockText" Grid.Column="1" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
             </Grid>
@@ -62,21 +66,35 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border x:Name="LauncherCard"
-                    Grid.Column="0"
-                    Width="350" Height="250"
-                    Background="#33FFFFFF"
-                    CornerRadius="20"
-                    BorderBrush="Gray"
-                    BorderThickness="1"
-                    Tapped="LauncherCard_Tapped"
-                    VerticalAlignment="Center"
-                    Margin="60,0,0,0">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
-                    <FontIcon Glyph="&#xE80F;" FontSize="48" Foreground="White"/>
-                    <TextBlock Text="Launcher" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
-                </StackPanel>
-            </Border>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" 
+            VerticalAlignment="Center" HorizontalAlignment="Center" Margin="60,0,0,0">
+
+                <Border x:Name="LauncherCard"
+            Width="300" Height="250"
+            Background="#33FFFFFF"
+            CornerRadius="20"
+            BorderBrush="Gray"
+            BorderThickness="1"
+            Tapped="LauncherCard_Tapped">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
+                        <FontIcon Glyph="&#xE80F;" FontSize="48" Foreground="White"/>
+                        <TextBlock Text="Launcher" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
+                    </StackPanel>
+                </Border>
+
+                <Border x:Name="DiscordCard"
+            Width="150" Height="180"
+            Background="#337289DA"
+            CornerRadius="20"
+            Margin="20,0,0,0"
+            Tapped="DiscordCard_Tapped">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                        <Image Source="Assets/discord.png" Width="64" Height="64"/>
+                        <TextBlock Text="Discord" FontSize="20" FontWeight="SemiBold" Foreground="White"/>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
 
             <Rectangle Grid.Column="1"
                        Width="2"
@@ -87,10 +105,12 @@
                        Margin="40,0,40,0"/>
 
             <ScrollViewer x:Name="ProgramScrollViewer"
-                          Grid.Column="2"
-                          VerticalScrollBarVisibility="Disabled"
-                          VerticalAlignment="Center"
-                          Padding="0,0,60,0">
+              Grid.Column="2"
+              VerticalScrollBarVisibility="Disabled"
+              VerticalAlignment="Center"
+              Padding="0,0,60,0"
+              HorizontalScrollMode="Enabled" 
+              HorizontalScrollBarVisibility="Hidden">
                 <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
             </ScrollViewer>
         </Grid>
