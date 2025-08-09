@@ -4,140 +4,150 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="GCM TaskManager">
 
-    <Grid>
-        <Button x:Name="FocusSink" Width="0" Height="0" IsTabStop="True"/>
-        <StackPanel x:Name="LauncherTileRow"
-                    Orientation="Horizontal"
-                    Visibility="Collapsed"
-                    HorizontalAlignment="Center"
-                    Loaded="LauncherTileRow_Loaded"
+    <Grid x:Name="RootGrid">
+
+        <Grid x:Name="MainContent" Visibility="Collapsed">
+
+            <Button x:Name="FocusSink" Width="0" Height="0" IsTabStop="True"/>
+            <StackPanel x:Name="LauncherTileRow"
+                        Orientation="Horizontal"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Center"
+                        Loaded="LauncherTileRow_Loaded"
+                        VerticalAlignment="Top"
+                        Margin="0,40,0,0"
+                        Spacing="20">
+                <Border Width="120" Height="140" x:Name="LauncherTile0"/>
+                <Border Width="120" Height="140" x:Name="LauncherTile1"/>
+                <Border Width="120" Height="140" x:Name="LauncherTile2"/>
+                <Border Width="120" Height="140" x:Name="LauncherTile3"/>
+                <Border Width="120" Height="140" x:Name="LauncherTile4"/>
+            </StackPanel>
+
+            <Image x:Name="BackgroundImage"
+                   Stretch="UniformToFill"
+                   IsHitTestVisible="False"/>
+
+            <Border x:Name="infopanelright"
+                    Background="#88000000"
+                    CornerRadius="10"
+                    HorizontalAlignment="Right"
                     VerticalAlignment="Top"
-                    Margin="0,40,0,0"
-                    Spacing="20">
-            <Border Width="120" Height="140" x:Name="LauncherTile0"/>
-            <Border Width="120" Height="140" x:Name="LauncherTile1"/>
-            <Border Width="120" Height="140" x:Name="LauncherTile2"/>
-            <Border Width="120" Height="140" x:Name="LauncherTile3"/>
-            <Border Width="120" Height="140" x:Name="LauncherTile4"/>
-        </StackPanel>
+                    Margin="20" Padding="10">
+                <Grid ColumnSpacing="15" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
 
-        <Image x:Name="BackgroundImage"
-               Stretch="UniformToFill"
-               IsHitTestVisible="False"/>
+                        <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1">
+                            <ToolTipService.ToolTip>
+                                <TextBlock Text="Zurück zum Desktop"/>
+                            </ToolTipService.ToolTip>
+                            <FontIcon Glyph="&#xf1cb;" FontSize="18"/>
+                        </Button>
 
-        <Border x:Name="infopanelright"
-                Background="#88000000"
-                CornerRadius="10"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Margin="20" Padding="10">
-            <Grid ColumnSpacing="15" VerticalAlignment="Center">
+                        <Button x:Name="ShutdownButton" Width="50" Height="40" Click="ShutdownButton_Click">
+                            <ToolTipService.ToolTip>
+                                <TextBlock Text="Herunterfahren"/>
+                            </ToolTipService.ToolTip>
+                            <FontIcon Glyph="&#xe7e8;" FontSize="18"/>
+                        </Button>
+
+                    </StackPanel>
+                    <TextBlock x:Name="ClockText" Grid.Column="1" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
+                </Grid>
+            </Border>
+
+            <Grid VerticalAlignment="Bottom"    
+                  Height="420"
+                  HorizontalAlignment="Stretch">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
 
-                    <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1">
-                        <ToolTipService.ToolTip>
-                            <TextBlock Text="Zurück zum Desktop"/>
-                        </ToolTipService.ToolTip>
-                        <FontIcon Glyph="&#xf1cb;" FontSize="18"/>
-                    </Button>
+                <StackPanel Grid.Column="0" Orientation="Horizontal"    
+                            VerticalAlignment="Center" HorizontalAlignment="Center" Margin="60,0,0,0">
 
-                    <Button x:Name="ShutdownButton" Width="50" Height="40" Click="ShutdownButton_Click">
-                        <ToolTipService.ToolTip>
-                            <TextBlock Text="Herunterfahren"/>
-                        </ToolTipService.ToolTip>
-                        <FontIcon Glyph="&#xe7e8;" FontSize="18"/>
-                    </Button>
+                    <Border x:Name="LauncherCard"
+                            Width="300" Height="250"
+                            Background="#33FFFFFF"
+                            CornerRadius="20"
+                            BorderBrush="Gray"
+                            BorderThickness="1"
+                            Tapped="LauncherCard_Tapped">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
+                            <FontIcon Glyph="&#xE80F;" FontSize="48" Foreground="White"/>
+                            <TextBlock Text="Launcher" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="DiscordCard"
+                            Width="150" Height="180"
+                            Background="#337289DA"
+                            CornerRadius="20"
+                            Margin="20,0,0,0"
+                            Tapped="DiscordCard_Tapped">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                            <Image Source="Assets/discord.png" Width="64" Height="64"/>
+                            <TextBlock Text="Discord" FontSize="20" FontWeight="SemiBold" Foreground="White"/>
+                        </StackPanel>
+                    </Border>
 
                 </StackPanel>
-                <TextBlock x:Name="ClockText" Grid.Column="1" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
+
+                <Rectangle Grid.Column="1"
+                           Width="2"
+                           Fill="#55FFFFFF"
+                           Height="200"
+                           RadiusX="1" RadiusY="1"
+                           VerticalAlignment="Center"
+                           Margin="40,0,40,0"/>
+
+                <ScrollViewer x:Name="ProgramScrollViewer"
+                              Grid.Column="2"
+                              VerticalScrollBarVisibility="Disabled"
+                              VerticalAlignment="Center"
+                              Padding="0,0,60,0"
+                              HorizontalScrollMode="Enabled"    
+                              HorizontalScrollBarVisibility="Hidden">
+                    <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
+                </ScrollViewer>
             </Grid>
-        </Border>
 
-        <Grid VerticalAlignment="Bottom" 
-              Height="420"
-              HorizontalAlignment="Stretch">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Grid.Column="0" Orientation="Horizontal" 
-            VerticalAlignment="Center" HorizontalAlignment="Center" Margin="60,0,0,0">
-
-                <Border x:Name="LauncherCard"
-            Width="300" Height="250"
-            Background="#33FFFFFF"
-            CornerRadius="20"
-            BorderBrush="Gray"
-            BorderThickness="1"
-            Tapped="LauncherCard_Tapped">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
-                        <FontIcon Glyph="&#xE80F;" FontSize="48" Foreground="White"/>
-                        <TextBlock Text="Launcher" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
+            <Border Height="60"
+                    VerticalAlignment="Bottom"
+                    HorizontalAlignment="Stretch">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                        <GradientStop Color="#CC000000" Offset="0.0"/>
+                        <GradientStop Color="Transparent" Offset="1.0"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="40">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                        <TextBlock Text="A" FontSize="22" FontWeight="Bold" Foreground="#FFA5D952"/>
+                        <TextBlock Text="Start" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
-
-                <Border x:Name="DiscordCard"
-            Width="150" Height="180"
-            Background="#337289DA"
-            CornerRadius="20"
-            Margin="20,0,0,0"
-            Tapped="DiscordCard_Tapped">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
-                        <Image Source="Assets/discord.png" Width="64" Height="64"/>
-                        <TextBlock Text="Discord" FontSize="20" FontWeight="SemiBold" Foreground="White"/>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                        <TextBlock Text="B" FontSize="22" FontWeight="Bold" Foreground="#FFDB4E4E"/>
+                        <TextBlock Text="Close" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
-
-            </StackPanel>
-
-            <Rectangle Grid.Column="1"
-                       Width="2"
-                       Fill="#55FFFFFF"
-                       Height="200"
-                       RadiusX="1" RadiusY="1"
-                       VerticalAlignment="Center"
-                       Margin="40,0,40,0"/>
-
-            <ScrollViewer x:Name="ProgramScrollViewer"
-              Grid.Column="2"
-              VerticalScrollBarVisibility="Disabled"
-              VerticalAlignment="Center"
-              Padding="0,0,60,0"
-              HorizontalScrollMode="Enabled" 
-              HorizontalScrollBarVisibility="Hidden">
-                <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
-            </ScrollViewer>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                        <TextBlock Text="RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
+                        <TextBlock Text="Switch Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </Grid>
-
-        <Border Height="60"
-                VerticalAlignment="Bottom"
-                HorizontalAlignment="Stretch">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
-                    <GradientStop Color="#CC000000" Offset="0.0"/>
-                    <GradientStop Color="Transparent" Offset="1.0"/>
-                </LinearGradientBrush>
-            </Border.Background>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="40">
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                    <TextBlock Text="A" FontSize="22" FontWeight="Bold" Foreground="#FFA5D952"/>
-                    <TextBlock Text="Start" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                    <TextBlock Text="B" FontSize="22" FontWeight="Bold" Foreground="#FFDB4E4E"/>
-                    <TextBlock Text="Close" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                    <TextBlock Text="RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                    <TextBlock Text="Switch Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
-                </StackPanel>
-            </StackPanel>
-        </Border>
+        <MediaPlayerElement x:Name="StartupVideoPlayer"
+                              AreTransportControlsEnabled="False"
+                              Stretch="Uniform"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Background="Black"/>
     </Grid>
 </Window>

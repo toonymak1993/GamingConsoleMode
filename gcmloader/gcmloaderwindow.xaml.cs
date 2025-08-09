@@ -6,7 +6,7 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Hosting; // Für ElementCompositionPreview
+using Microsoft.UI.Xaml.Hosting; 
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -26,6 +26,9 @@ using System.IO;
 using System.IO.Pipes;
 using System.Linq;
 using System.Media;
+// SteamGridDBHelper.cs
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Numerics; 
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -45,6 +48,7 @@ using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.System;
 using Windows.UI;
+using WinRT.Interop;
 using static Vanara.PInvoke.Gdi32;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
@@ -55,14 +59,96 @@ using Image = Microsoft.UI.Xaml.Controls.Image;
 using Point = System.Drawing.Point;
 using Task = System.Threading.Tasks.Task;
 
-
-
 namespace gcmloader
 {
 
     public sealed partial class MainWindow : Window
     {
         #region needed
+        #region Startup Video
+        private MediaPlayer _startupMediaPlayer;
+        private bool startupVideoFinished = false;
+        private bool _isVideoPlaybackInitiated = false;
+        #endregion
+        #region steamgriddb
+        public record SearchResult(int id, string name);
+        public record SearchResponse(bool success, SearchResult[] data);
+        public record ImageResult(string url);
+        public record ImageResponse(bool success, ImageResult[] data);
+
+        private readonly Dictionary<string, SearchResult> _gameIdCache = new(); // Geändert von int? zu SearchResult
+        public SteamGridDBHelper _steamGridHelper;
+        private readonly string _imageCachePath = Path.Combine(SettingsFolder, "image_cache");
+
+        public class SteamGridDBHelper
+        {
+            // Die record-Definitionen wurden nach oben in die MainWindow-Klasse verschoben.
+            // Die Klasse ist jetzt sauberer.
+
+            private readonly HttpClient _httpClient = new();
+            private readonly string _apiKey;
+
+            public SteamGridDBHelper(string apiKey)
+            {
+                _apiKey = apiKey;
+                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            }
+
+            /// <summary>
+            /// Searches for a game on SteamGridDB and returns the entire search result object.
+            /// </summary>
+            public async Task<SearchResult> SearchForGameIdAsync(string gameName)
+            {
+                if (string.IsNullOrEmpty(_apiKey)) return null;
+
+                try
+                {
+                    var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/search/autocomplete/{Uri.EscapeDataString(gameName)}");
+                    if (!response.IsSuccessStatusCode) return null;
+
+                    var json = await response.Content.ReadAsStringAsync();
+                    var searchData = JsonSerializer.Deserialize<SearchResponse>(json);
+
+                    if (searchData != null && searchData.success && searchData.data.Length > 0)
+                    {
+                        return searchData.data[0];
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SteamGridDB] Error searching for '{gameName}': {ex.Message}");
+                }
+                return null;
+            }
+
+            /// <summary>
+            /// Gets the URL for the most popular grid/cover image for a given game ID.
+            /// </summary>
+            public async Task<string> GetGridImageUrlAsync(int gameId)
+            {
+                if (string.IsNullOrEmpty(_apiKey)) return null;
+
+                try
+                {
+                    var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/grids/game/{gameId}");
+                    if (!response.IsSuccessStatusCode) return null;
+
+                    var json = await response.Content.ReadAsStringAsync();
+                    var imageData = JsonSerializer.Deserialize<ImageResponse>(json);
+
+                    if (imageData != null && imageData.success && imageData.data.Length > 0)
+                    {
+                        return imageData.data[0].url;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SteamGridDB] Error getting grid for game ID '{gameId}': {ex.Message}");
+                }
+                return null;
+            }
+        }
+        #endregion dsteamgriddb
 
         private List<Border> _launcherAreaButtons;
         private int _selectedLauncherAreaIndex = 0;
@@ -401,11 +487,55 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             if (this.Content is FrameworkElement rootElement)
             {
                 rootElement.KeyDown += MainWindow_KeyDown;
-                rootElement.Loaded += (_, __) =>
+                rootElement.Loaded += (s, e) =>
                 {
-                    FocusSink.Focus(FocusState.Programmatic); 
+                    FocusSink.Focus(FocusState.Programmatic);
+
+                    // --- HIER IST DIE KORREKTUR ---
+                    // Prüfe, ob das Video nicht bereits gestartet wurde.
+                    if (!_isVideoPlaybackInitiated)
+                    {
+                        // Setze den "Türsteher", damit dieser Code nicht nochmal ausgeführt wird.
+                        _isVideoPlaybackInitiated = true;
+
+                        // Starte das Video
+                        PlayStartupVideo();
+                    }
+                    // --- ENDE DER KORREKTUR ---
                 };
             }
+
+            // Initialisiere den SteamGridDB Helper
+            try
+            {
+                // Lade den API-Schlüssel aus der Einstellungsdatei.
+                string apiKey = AppSettings.Load<string>("steamgriddb_api_key");
+
+                // Prüfe explizit, ob der geladene Schlüssel leer oder ungültig ist.
+                if (string.IsNullOrWhiteSpace(apiKey))
+                {
+                    // Wenn kein Schlüssel vorhanden ist, wird der Helper mit 'null' initialisiert.
+                    // Die SteamGridDB-Funktionalität ist damit sicher deaktiviert, ohne einen Fehler zu werfen.
+                    _steamGridHelper = new SteamGridDBHelper(null);
+                    Debug.WriteLine("[INFO] SteamGridDB API key is empty or not found in settings. Feature is disabled.");
+                }
+                else
+                {
+                    // Nur wenn ein gültiger Schlüssel vorhanden ist, wird der Helper damit initialisiert.
+                    _steamGridHelper = new SteamGridDBHelper(apiKey);
+                    Directory.CreateDirectory(_imageCachePath); // Erstelle den Cache-Ordner.
+                }
+            }
+            catch (Exception)
+            {
+                // Dieser Block fängt den Fehler ab, falls der Eintrag "steamgriddb_api_key"
+                // gar nicht in der Einstellungsdatei existiert. Auch in diesem Fall wird die Funktion sicher deaktiviert.
+                _steamGridHelper = new SteamGridDBHelper(null);
+                Debug.WriteLine("[WARN] SteamGridDB API key setting does not exist. Feature is disabled.");
+            }
+
+
+
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             _launcherAreaButtons = new List<Border> { LauncherCard, DiscordCard };
             _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
@@ -421,7 +551,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             LoadShortcutsFromSettings();
             SetupGamepad();
             Start();
-
             //ASYNC PROZES
             ShowTaskManager();
             SetupFocusWatcher();
@@ -429,7 +558,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // NEU: Starte einen einmaligen Timer, der die Gnadenfrist beendet.
             var gracePeriodTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(10) // 10 Sekunden warten
+                Interval = TimeSpan.FromSeconds(15) // 10 Sekunden warten
             };
             gracePeriodTimer.Tick += (s, e) =>
             {
@@ -736,7 +865,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
 
             // Set the wallpaper as the background
-            SetBackgroundImage(screenWidth, screenHeight);
+            //SetBackgroundImage(screenWidth, screenHeight); // nicht mehr hier
         }
 
         private bool IsWindowInForeground()
@@ -899,12 +1028,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Console.WriteLine("Error setting up log: " + ex.Message);
             }
         }
-        static bool IsAdministrator()
-        {
-            WindowsIdentity identity = WindowsIdentity.GetCurrent();
-            WindowsPrincipal principal = new WindowsPrincipal(identity);
-            return principal.IsInRole(WindowsBuiltInRole.Administrator);
-        }
+       
 
         #endregion methodes for code
         #region functions
@@ -1193,33 +1317,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Process[] processes = Process.GetProcessesByName(currentProcessName);
             return processes.Length > 1;
         }
-        static void AdminVerify()
+        private static bool IsAdministrator()
         {
-            if (!IsAdministrator())
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
             {
-                Console.WriteLine("Restarting as admin");
-                ProcessStartInfo startInfo = new ProcessStartInfo
-                {
-                    UseShellExecute = true,
-                    WorkingDirectory = Environment.CurrentDirectory,
-                    FileName = Process.GetCurrentProcess().MainModule.FileName,
-                    Verb = "runas"
-                };
-
-                try
-                {
-                    Process.Start(startInfo);
-                    Environment.Exit(0); // Ensure the program exits immediately
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Error restarting application as administrator: " + ex.Message);
-                    Environment.FailFast("Failed to restart as administrator.", ex);
-                }
-            }
-            else
-            {
-                uac("off");
+                WindowsPrincipal principal = new WindowsPrincipal(identity);
+                return principal.IsInRole(WindowsBuiltInRole.Administrator);
             }
         }
         private void SetBackgroundImage(int width, int height)
@@ -1632,280 +1735,77 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Schritt 1: Taskleiste und Icons für die aktuelle Sitzung wieder sichtbar machen
             TaskbarVisibility.ShowTaskbar();
-
             IntPtr progman = FindWindow("Progman", null);
-            if (progman != IntPtr.Zero)
-            {
-                ShowWindow(progman, 5); // 5 = SW_SHOW
-            }
-
+            if (progman != IntPtr.Zero) ShowWindow(progman, 5); // SW_SHOW
             IntPtr workerw = FindWindow("WorkerW", null);
-            if (workerw != IntPtr.Zero)
-            {
-                ShowWindow(workerw, 5); // 5 = SW_SHOW
-            }
+            if (workerw != IntPtr.Zero) ShowWindow(workerw, 5); // SW_SHOW
 
+            // Schritt 2: Windows-Standard wiederherstellen
             try
             {
-                // Schritt 1: Registry-Eintrag auf "explorer.exe" zurücksetzen
-                const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-                const string valueName = "Shell";
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
+                // Registry auf "explorer.exe" zurücksetzen
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", true))
                 {
                     if (key != null)
                     {
-                        key.SetValue(valueName, "explorer.exe", RegistryValueKind.String);
-                        Console.WriteLine("Windows Shell wurde auf explorer.exe zurückgesetzt.");
+                        key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
                     }
                 }
 
-                // Schritt 2: Alle Autostart-Apps wiederherstellen (dein bestehender Code)
-                try
+                // Alle Autostart-Apps wiederherstellen
+                if (AppSettings.Load<bool>("usewinpartstartapps"))
                 {
-                    if (AppSettings.Load<bool>("usewinpartstartapps"))
-                    {
-                        StartupControl.RestoreStartupApps();
-                    }
+                    StartupControl.RestoreStartupApps();
                 }
-                catch { /* Fehler ignorieren, falls Einstellung nicht existiert */ }
 
-                // Schritt 3 (NEU & WICHTIG): Explorer-Prozess starten
-                // Prüfen, ob der Explorer schon läuft, bevor wir ihn starten.
+                // Explorer.exe neu starten, falls er nicht läuft
                 if (!Process.GetProcessesByName("explorer").Any())
                 {
-                    Console.WriteLine("Explorer.exe läuft nicht, starte ihn neu...");
                     Process.Start("explorer.exe");
-                }
-                else
-                {
-                    Console.WriteLine("Explorer.exe läuft bereits.");
-                }
-
-                // Optional: Andere Prozesse wie Decky Loader beenden
-                Process[] deckyLoaderProcesses = Process.GetProcessesByName("PluginLoader_noconsole");
-                foreach (var process in deckyLoaderProcesses)
-                {
-                    process.Kill();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"error re create Windows: {ex.Message}");
+                Console.WriteLine($"Fehler beim Wiederherstellen von Windows: {ex.Message}");
             }
+
+            // --- HIER IST DIE WICHTIGE ERGÄNZUNG ---
+            // Stellt sicher, dass das originale Steam-Startvideo zuverlässig wiederhergestellt wird.
+            try
+            {
+                // Da die Methode jetzt Teil der MainWindow-Klasse ist, rufen wir sie direkt so auf:
+                RenameSteamStartupVideo_End();
+                Debug.WriteLine("[Cleanup] Steam startup video restored.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Cleanup] Error restoring Steam startup video: {ex.Message}");
+            }
+            // --- ENDE DER ERGÄNZUNG ---
 
             // Schritt 3: Restliche Aufräum-Aktionen
             displayfusion("end");
             CleanupLogging();
-            #region wingamepad
-            // check if wingamepas is aktiv and set tasksheduller
-            // test it needed
-            try
-            {
-                AppSettings.Load<bool>("useseamlessswitchtogcm");
-            }
-            catch
-            {
-                // if not set, set it to false
-                AppSettings.Save("useseamlessswitchtogcm", false);
-
-            }
-            // test if wingamepad is aktiv in task sheduller
-            bool taskExistsAndEnabled = IsTaskActive("GCM_wingamepad");
-
-            //task is OFF
-            if (!taskExistsAndEnabled) //if job is not aktivated and useseamlessswitchtogcm is true
-            {
-                if (AppSettings.Load<bool>("useseamlessswitchtogcm") == true)
-                {
-                    //aktivate task job
-                    using (TaskService ts = new TaskService())
-                    {
-                        try
-                        {
-                            string taskName = "GCM_wingamepad";
-
-                            // Clean up previous task
-                            ts.RootFolder.DeleteTask(taskName, false);
-
-
-                            TaskDefinition td = ts.NewTask();
-                            td.RegistrationInfo.Description = "Start GCM wingamepad mode";
-                            td.Principal.UserId = WindowsIdentity.GetCurrent().Name;
-                            td.Principal.LogonType = TaskLogonType.InteractiveToken;
-                            td.Principal.RunLevel = TaskRunLevel.Highest;
-
-                            td.Triggers.Add(new LogonTrigger
-                            {
-                                Delay = TimeSpan.FromSeconds(3),
-                                Enabled = true
-                            });
-
-                            string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
-                            td.Actions.Add(new ExecAction(exePath, null, null));
-
-                            td.Settings.StopIfGoingOnBatteries = false;
-                            td.Settings.DisallowStartIfOnBatteries = false;
-                            td.Settings.RunOnlyIfIdle = false;
-                            td.Settings.RunOnlyIfNetworkAvailable = false;
-                            td.Settings.AllowHardTerminate = false;
-                            td.Settings.StartWhenAvailable = true;
-                            td.Settings.AllowDemandStart = true;
-
-                            ts.RootFolder.RegisterTaskDefinition(taskName, td,
-                                TaskCreation.CreateOrUpdate, null, null,
-                                TaskLogonType.InteractiveToken);
-
-
-
-                            Microsoft.Win32.TaskScheduler.Task task = ts.FindTask(taskName);
-                            if (task != null)
-                            {
-                                task.Run();
-                                //Logger.Write("Task started.");
-                            }
-                            else
-                            {
-                                //Logger.Write("ERROR: Task was not found after registration.");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            //Logger.Write("Error while creating task: " + ex.ToString());
-                            throw;
-                        }
-                    }
-                }
-            }
-            //task is ON
-            if (taskExistsAndEnabled)
-            {
-                if (AppSettings.Load<bool>("useseamlessswitchtogcm") == false) //if job is aktivated and useseamlessswitchtogcm is false
-                {
-                    //deaktivate task job
-                    using (TaskService ts = new TaskService())
-                    {
-                        try
-                        {
-                            ts.RootFolder.DeleteTask("GCM_wingamepad", false);
-                        }
-                        catch
-                        {
-                            Console.WriteLine("Error deleting GCM_wingamepad task, it may not exist.");
-                        }
-                    }
-                }
-                else
-                {
-                    //job aktiviert / gcmswitch is true
-                    try
-                    {
-                        string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
-
-                        if (!File.Exists(exePath))
-                        {
-                            throw new FileNotFoundException("wingamepad.exe not found.", exePath);
-                        }
-
-                        var startInfo = new ProcessStartInfo
-                        {
-                            FileName = exePath,
-                            UseShellExecute = true,
-                            Verb = "runas"
-                        };
-
-                        Process.Start(startInfo);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[ERROR] Failed to launch wingamepad.exe: {ex.Message}");
-                    }
-                }
-            }
-            #endregion wingamepad
-            //rename steam standard video
-            try
-            {
-                StartupVideo.RenameSteamStartupVideo_End();
-            }
-            catch { }
-            //set Audio Back
             preaudio(false, true);
-            //handheld
-            #region Handheld
-            #region Ally
-            if (IsHandheld() == true)
-            {
 
-            }
-            #endregion Ally
-            #endregion Handheld
-            //uac
-            #region uac
+            // UAC-Einstellungen wiederherstellen
             try
             {
-
-                bool useuac = AppSettings.Load<bool>("uac");
-                if (useuac == true)
+                if (AppSettings.Load<bool>("uac"))
                 {
-                    Console.WriteLine("UAC is enabled, setting to on");
-                    //useuac is aktive 
                     uac("on");
                 }
-                else if (useuac == false)
-                {
-                    Console.WriteLine("UAC is disabled, setting to off");
-                    //User set it to off dont do nothing
-                    uac("off");
-                }
             }
-            catch
+            catch { uac("on"); } // Im Zweifel UAC wieder aktivieren
+
+            // Overlay-Prozess beenden
+            foreach (var proc in Process.GetProcessesByName("OverlayWindow"))
             {
-                Console.WriteLine("UAC is enabled, setting to on");
-                //error in read
-                AppSettings.Save("uac", true);
-                uac("on");
-            }
-            #endregion uac
-
-            // Kill all explorer processes
-            foreach (var process in Process.GetProcessesByName("explorer"))
-            {
-                try
-                {
-                    process.Kill();
-                    process.WaitForExit();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Error killing explorer: " + ex.Message);
-                }
+                try { proc.Kill(); } catch { }
             }
 
-
-            // =================================================================
-            // Suche und beende den OverlayWindow-Prozess
-            // =================================================================
-            try
-            {
-                // Finde alle Prozesse mit dem Namen "OverlayWindow"
-                Process[] overlayProcesses = Process.GetProcessesByName("OverlayWindow");
-                foreach (Process proc in overlayProcesses)
-                {
-                    // Beende jeden gefundenen Prozess
-                    proc.Kill();
-                    Console.WriteLine($"OverlayWindow process (ID: {proc.Id}) terminated.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error terminating OverlayWindow: {ex.Message}");
-            }
-            // =================================================================
-
-
-            // Schritt 4 (ANGEPASST): Beende den gesamten Prozess der Anwendung
+            // Schritt 4: Anwendung sauber beenden
             Environment.Exit(0);
-
         }
 
         //xbox
@@ -2249,26 +2149,45 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         // Import Win32 APIs
 
 
+        // Replace your existing MinimizeAllWindows method with this one
         public static void MinimizeAllWindows()
         {
             EnumWindows((hWnd, lParam) =>
             {
+                // Skip invisible windows
                 if (!IsWindowVisible(hWnd))
                     return true;
 
                 GetWindowThreadProcessId(hWnd, out uint pid);
+                if (pid == 0) return true;
+
                 try
                 {
                     var proc = Process.GetProcessById((int)pid);
-                    if (proc.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+
+                    // NEW: Check if the process name contains a GPU vendor name
+                    if (proc.ProcessName.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
+                        proc.ProcessName.Contains("Radeon", StringComparison.OrdinalIgnoreCase) ||
+                        proc.ProcessName.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
+                        proc.ProcessName.Contains("Intel", StringComparison.OrdinalIgnoreCase))
                     {
-                        // 🛑 Skip UWP shell host to preserve child window
+                        // If so, skip minimizing this window
                         return true;
                     }
 
+                    // Skip UWP shell host to preserve child window
+                    if (proc.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+
+                    // If it's a normal window, minimize it
                     ShowWindow(hWnd, SW_MINIMIZE);
                 }
-                catch { }
+                catch
+                {
+                    // Ignore processes we can't access
+                }
 
                 return true;
             }, IntPtr.Zero);
@@ -2778,98 +2697,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion launcher
         #region start
-        private async System.Threading.Tasks.Task Start()
+        // ERSETZE DEINE KOMPLETTE Start()-METHODE MIT DIESER VERSION
+
+        private async Task Start()
         {
-            if (IsAlreadyRunning())
+            // Warten, bis das Video beendet ist
+            while (startupVideoFinished == false)
             {
-                Console.WriteLine("Another instance of the application is already running.");
-                Environment.Exit(0);
+                await Task.Delay(50);
             }
-            else // First Instance
-            {
-                // Logger.Logger.Log($"start SETUPLOGGIN:");
-                SetupLogging();
-                // Logger.Logger.Log($"start ADMINVERIFY:");
-                AdminVerify();
-                if (IsAdministrator())
-                {
-                    SettingsVerify();
-                    MinimizeAllWindows();
-                    Console.WriteLine("--overlay--");
-                    await StartOverlayAsync();
-                    Console.WriteLine("--Start showwinpart--");
-                    if (startart == "xbox")
-                    {
-                        winpart();
-                        Thread.Sleep(5000);
-                    }
-                    else
-                    {
-                        Showwinpart();
-                    }
-                    Console.WriteLine("--preinstall check--");
-                    #region pre install/start check if needed
-                    if (IsHandheld() == true)
-                    {
 
-                        //infopanel
-                      
+            // Führe jetzt alle langwierigen Hintergrund-Aufgaben aus
+            SettingsVerify();
+            //MinimizeAllWindows();
+            await StartOverlayAsync();
+            Showwinpart();
 
-                        // Handheld Launcher
-                        try
-                            {
-                            bool handheldlauncher = AppSettings.Load<bool>("handheldtouchlauncher");
-                            if(handheldlauncher)
-                            {
-                                LauncherTileRow.Visibility = Visibility.Visible;
-                               
-                            }
-                            else
-                            {
-                                LauncherTileRow.Visibility = Visibility.Collapsed;
-                              
-                            }
+            await Task.Run(() => RunBoilrNoUI());
+            displayfusion("start");
+            IsJoyxoffInstalledAndStart();
 
-                            }
-                            catch
-                            {
-                            AppSettings.Save("handheldtouchlauncher", false);
-                            }
-                    }
-                    #endregion pre install/start check if needed
-                    Console.WriteLine("--startupvideo--");
-                    StartupVideo.Play();
-                    Console.WriteLine("--boilr--");
-                    string result = RunBoilrNoUI();
-                    Console.WriteLine(result);
-                    Console.WriteLine("--displayfusion--");
-                    displayfusion("start");
-                    Console.WriteLine("--joyxoff--");
-                    IsJoyxoffInstalledAndStart(); //only check if is installed, than start
-                    if (startart == "xbox")
-                    {
-                        Console.WriteLine("--start xbox launcher in startart xbox--");
-                        WaitForExplorerAndStartLauncher();
-                    }
-                    else
-                    {
-                        Console.WriteLine("--start normal launcher--");
-                        StartLauncher();
-                    }
-                    Console.WriteLine("--kill--");
-                    #region kill distubing process
-                    //KillTargetProcess("");
-                    #endregion kill distubing process
-                    Console.WriteLine("--cssloader--");
-                    cssloader(); //only check if is installed, than start
-                    Console.WriteLine("--modetoshell--");
-                    ConsoleModeToShell();
-                    Console.WriteLine("--preaudio--");
-                    preaudio(true,false);
-                    Console.WriteLine("--prestartlist--");
-                    prestartlist();
-                }
-            }
+            await StartLauncher();
+
+            cssloader();
+            ConsoleModeToShell();
+            preaudio(true, false);
+            prestartlist();
         }
         #endregion start
         #region TaskManager
@@ -2953,17 +2806,144 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _taskRefreshTimer.Start();
         }
 
+
+        /// <summary>
+        /// Berechnet die Ähnlichkeit von zwei Strings zwischen 0.0 (komplett anders) und 1.0 (identisch).
+        /// </summary>
+        public static double CalculateSimilarity(string source, string target)
+        {
+            if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(target)) return 0.0;
+
+            // Normalisiere die Strings für einen besseren Vergleich
+            source = source.ToLower().Trim();
+            target = target.ToLower().Trim();
+
+            if (source == target) return 1.0;
+
+            int stepsToSame = LevenshteinDistance(source, target);
+            return (1.0 - ((double)stepsToSame / (double)Math.Max(source.Length, target.Length)));
+        }
+
+        /// <summary>
+        /// Berechnet die Levenshtein-Distanz zwischen zwei Strings.
+        /// </summary>
+        private static int LevenshteinDistance(string source, string target)
+        {
+            int n = source.Length;
+            int m = target.Length;
+            int[,] d = new int[n + 1, m + 1];
+
+            if (n == 0) return m;
+            if (m == 0) return n;
+
+            for (int i = 0; i <= n; d[i, 0] = i++) ;
+            for (int j = 0; j <= m; d[0, j] = j++) ;
+
+            for (int i = 1; i <= n; i++)
+            {
+                for (int j = 1; j <= m; j++)
+                {
+                    int cost = (target[j - 1] == source[i - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(
+                        Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                        d[i - 1, j - 1] + cost);
+                }
+            }
+            return d[n, m];
+        }
+        private async void LoadCardImageAsync(Border card, string gameName, string exePath)
+        {
+            // Stufe 1: Keyword-Blacklist-Filter
+            if (_nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            // Suche im Cache oder über die API
+            SearchResult searchResult = null;
+            if (_gameIdCache.ContainsKey(gameName))
+            {
+                searchResult = _gameIdCache[gameName];
+            }
+            else
+            {
+                searchResult = await _steamGridHelper.SearchForGameIdAsync(gameName);
+                _gameIdCache[gameName] = searchResult;
+            }
+
+            if (searchResult == null)
+            {
+                return;
+            }
+
+            // Stufe 2: Ähnlichkeits-Filter
+            double similarity = CalculateSimilarity(gameName, searchResult.name);
+            if (similarity < 0.5)
+            {
+                return;
+            }
+
+            // Alle Filter bestanden. Lade das Bild.
+            var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
+
+            if (!string.IsNullOrEmpty(imageUrl))
+            {
+                try
+                {
+                    string localImagePath = Path.Combine(_imageCachePath, $"{searchResult.id}.jpg");
+                    if (!File.Exists(localImagePath))
+                    {
+                        using (var client = new HttpClient())
+                        {
+                            var imageData = await client.GetByteArrayAsync(imageUrl);
+                            await File.WriteAllBytesAsync(localImagePath, imageData);
+                        }
+                    }
+
+                    // --- UI-Update auf dem UI-Thread durchführen ---
+                    card.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        // 1. Hintergrund der Karte mit dem SteamGridDB-Bild ersetzen
+                        card.Background = new ImageBrush
+                        {
+                            ImageSource = new BitmapImage(new Uri(localImagePath)),
+                            Stretch = Stretch.UniformToFill
+                        };
+
+                        // 2. Zugriff auf das Grid und seine Elemente
+                        if (card.Child is Grid contentGrid)
+                        {
+                            // 3. Das ursprüngliche App-Icon ausblenden
+                            var iconImage = contentGrid.Children.OfType<Image>().FirstOrDefault(img => img.Name == "IconImage");
+                            if (iconImage != null)
+                            {
+                                iconImage.Visibility = Visibility.Collapsed;
+                            }
+
+                            // 4. Den Text mit dem präziseren Spieletitel von SteamGridDB aktualisieren
+                            var titleText = contentGrid.Children.OfType<TextBlock>().FirstOrDefault(tb => tb.Name == "TitleText");
+                            if (titleText != null)
+                            {
+                                titleText.Text = searchResult.name;
+                            }
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ImageCache] FEHLER beim Herunterladen für '{gameName}': {ex.Message}");
+                }
+            }
+        }
+
         private void UpdateUiFromData(List<ProcessData> processDataList)
         {
             if (processDataList == null) return;
 
-            double scrollOffset = ProgramScrollViewer.HorizontalOffset;
-            int lastIndex = _selectedCardIndex;
+            var currentProductNames = new HashSet<string>(_cardCache.Select(c => c.ProductName));
+            var newDataProductNames = new HashSet<string>(processDataList.Select(pd => pd.ProductName));
 
-            var currentProductNames = _cardCache.Select(c => c.ProductName).ToHashSet();
-            var newDataProductNames = processDataList.Select(pd => pd.ProductName).ToHashSet();
-
-            // 1. Veraltete Karten entfernen, die nicht mehr in der neuen Liste sind
+            // Remove old cards that are no longer in the new list
             var cardsToRemove = _cardCache.Where(c => !newDataProductNames.Contains(c.ProductName)).ToList();
             foreach (var entry in cardsToRemove)
             {
@@ -2971,12 +2951,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _cardCache.Remove(entry);
             }
 
-            // 2. Neue Karten hinzufügen, die noch nicht im Cache sind
+            // Add new cards that are not yet in the cache
             foreach (var data in processDataList)
             {
                 if (!currentProductNames.Contains(data.ProductName))
                 {
+                    // The card is created instantly
                     var border = CreateProgramCard(data.ProductName, data.ExePath, data.Proc, data.Hwnd);
+
+                    // CORRECTED: Create the cache entry with all required properties
                     var entry = new ProgramCardEntry
                     {
                         ProductName = data.ProductName,
@@ -2989,22 +2972,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     ProgramCardPanel.Children.Add(border);
                 }
             }
-
-            // 3. Auswahl und Scroll-Position wiederherstellen
-            if (ProgramCardPanel.Children.Count == 0)
-                _selectedCardIndex = 0;
-            else if (lastIndex >= ProgramCardPanel.Children.Count)
-                _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
-            else
-                _selectedCardIndex = lastIndex;
-
-            if (_currentFocusArea == FocusArea.Cards)
-            {
-                // Highlight anwenden, ohne zu scrollen, da wir die Position manuell wiederherstellen
-                HighlightSelectedCard(skipScroll: true, forceAnimation: false);
-            }
-
-            ProgramScrollViewer.ChangeView(scrollOffset, null, null, true);
         }
 
 
@@ -3113,15 +3080,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         }
 
-       
+
 
 
         // ====================================================================
         // Loads the list of applications
         // ====================================================================
 
+        // Replace your existing _excludedTitles array with this one
         private static readonly string[] _excludedTitles = new[]
         {
+    // General System Windows
     "Windows® Operating System",
     "System Microsoft® Windows",
     "Windows®-Betriebssystem",
@@ -3129,8 +3098,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Windows-Betriebssystem",
     "ApplicationFrameHost",
     "ShellExperienceHost",
-    "Realtek Audio Console",
     "StartMenuExperienceHost",
+    "Einstellungen",
+    "Settings",
+    "Task-Manager",
+    "Task Manager",
+    
+    // Specific Apps to always ignore
+    "Steam", // The main Steam window, not games
+    "Big-Picture-Modus", // NEW
+    "Big Picture Mode",  // NEW
+    "Realtek Audio Console",
     "NVIDIA App",
     "Xbox.Apps.TCUI"
 };
@@ -3283,36 +3261,58 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private readonly HashSet<string> _nonGameKeywords = new(StringComparer.OrdinalIgnoreCase)
+{
+    // -- Web Browsers --
+    "Edge", "Chrome", "Firefox", "Opera", "Brave",
 
+    // -- System Tools --
+    "Explorer", "Einstellungen", "Settings", "Task-Manager", "Manager",
+    "Console", "Terminal", "PowerShell", "Registry", "Editor",
+    "Rechner", "Calculator", "Snipping Tool", "Ausschneiden und Skizzieren",
+    "Systemsteuerung", "Control Panel",
+    
+    // -- Development --
+    "Visual Studio", "VS Code", "Rider", "Android Studio", "Debugger",
+    
+    // -- Office & Productivity --
+    "Word", "Excel", "PowerPoint", "Outlook", "OneNote", "Teams",
+    "Slack", "Zoom", "Notepad", "Editor",
+    
+    // -- Media Players --
+    "VLC", "Media Player", "Spotify", "iTunes",
+    
+    // -- Creative Software --
+    "Photoshop", "Illustrator", "Premiere", "After Effects",
+    "Blender", "OBS",
+    
+    // -- Utilities & Launchers (the apps themselves) --
+    "7-Zip", "WinRAR", "Discord", "Epic Games", "GOG GALAXY",
+    "Ubisoft Connect", "EA", "Battle.net",
+    
+    // -- Hardware & Drivers --
+    "NVIDIA", "GeForce", "AMD Software", "Radeon", "Intel",
+    
+    // -- Generic Terms --
+    "Properties", "Eigenschaften", "Installer", "Updater", "Helper",
+    "Dienst", "Host", "Service", "Server", "Launcher", "Runtime", "SDK", "CrashReporter"
+};
+
+        private readonly List<string> _gamePathKeywords = new()
+{
+    "\\steamapps\\common\\",
+    "\\GOG Galaxy\\Games\\",
+    "\\Epic Games\\",
+    "\\Ubisoft Game Launcher\\games\\",
+    "\\Origin Games\\",
+    "\\Battle.net\\"
+};
 
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
-            // --- Schritt 1: Icon laden (mit PNG-Fallback für Anti-Cheat) ---
-            BitmapImage icon = null;
-            bool isProtected = string.IsNullOrEmpty(exePath);
-
-            if (!isProtected && File.Exists(exePath))
-            {
-                icon = GetAppIconAsBitmapImage(exePath);
-            }
-
-            // KORREKTUR: Wenn kein Icon geladen werden konnte, nutze wieder dein PNG-Bild.
-            if (icon == null)
-            {
-                try
-                {
-                    // WICHTIG: Stelle sicher, dass du eine "game.png" in deinem "Assets"-Ordner hast.
-                    icon = new BitmapImage(new Uri("ms-appx:///Assets/game.png"));
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Fallback icon not found: {ex.Message}");
-                }
-            }
-
-            // --- Schritt 2: Karten-Hintergrund mit Transparenz erstellen ---
+            // Basis-Farbverlauf als Fallback erstellen
             Color avgColor = Color.FromArgb(255, 60, 60, 60);
-            if (!isProtected && File.Exists(exePath))
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
             {
                 try
                 {
@@ -3335,79 +3335,76 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
             };
 
-            // --- Schritt 3: UI-Elemente mit stabilem Grid-Layout erstellen ---
-            var cardLayoutGrid = new Grid();
-            cardLayoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardLayoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            // --- NEUE STRUKTUR MIT GRID FÜR TEXT-OVERLAY ---
 
-            // Das Icon wird jetzt immer ein Image-Element sein.
-            var image = new Image
-            {
-                Source = icon,
-                Width = 50,
-                Height = 50,
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center
-            };
-            Grid.SetRow(image, 0);
-            cardLayoutGrid.Children.Add(image);
+            // 1. Das Grid, das alles enthalten wird
+            var contentGrid = new Grid();
 
-            var title = new TextBlock
+            // 2. Das App-Icon (wird später bei Bedarf ausgeblendet)
+            var iconImage = new Image
             {
-                Text = name,
-                FontSize = 16,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Colors.WhiteSmoke),
-                TextAlignment = TextAlignment.Center,
+                Name = "IconImage", // Wichtig für späteren Zugriff
+                Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
+                Width = 64,
+                Height = 64,
                 HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(10, 15, 10, 10),
-                MaxWidth = 190,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextWrapping = TextWrapping.Wrap
+                VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetRow(title, 1);
-            cardLayoutGrid.Children.Add(title);
 
-            if (isProtected)
+            // 3. Der dunkle Farbverlauf am unteren Rand für die Lesbarkeit
+            var textBackground = new Border
             {
-                var marker = new Border
+                Height = 80,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Background = new LinearGradientBrush
                 {
-                    Background = new SolidColorBrush(Color.FromArgb(255, 255, 180, 0)),
-                    CornerRadius = new CornerRadius(5),
-                    Padding = new Thickness(6, 2, 6, 2),
-                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Top,
-                    Margin = new Thickness(0, 8, 8, 0)
-                };
-                marker.Child = new TextBlock
-                {
-                    Text = "ACHEAT",
-                    Foreground = new SolidColorBrush(Colors.Black),
-                    FontSize = 10,
-                    FontWeight = Microsoft.UI.Text.FontWeights.Bold
-                };
-                cardLayoutGrid.Children.Add(marker);
+                    StartPoint = new Windows.Foundation.Point(0.5, 0),
+                    EndPoint = new Windows.Foundation.Point(0.5, 1),
+                    GradientStops = new GradientStopCollection
+            {
+                new GradientStop { Color = Colors.Transparent, Offset = 0.0 },
+                new GradientStop { Color = Color.FromArgb(200, 0, 0, 0), Offset = 1.0 }
             }
+                }
+            };
 
-            // --- Schritt 4: Finale Karte zusammenbauen ---
+            // 4. Der TextBlock für den Titel
+            var titleText = new TextBlock
+            {
+                Name = "TitleText", // Wichtig für späteren Zugriff
+                Text = name, // Zuerst den Fenstertitel als Fallback verwenden
+                Foreground = new SolidColorBrush(Colors.White),
+                FontSize = 16,
+                Margin = new Thickness(10, 0, 10, 10),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                TextWrapping = TextWrapping.WrapWholeWords,
+                MaxLines = 2
+            };
+
+            // Elemente zum Grid hinzufügen
+            contentGrid.Children.Add(iconImage);
+            contentGrid.Children.Add(textBackground);
+            contentGrid.Children.Add(titleText);
+
+            // Die finale Karte erstellen
             var cardBorder = new Border
             {
                 Width = 220,
-                Height = 240,
-                Background = gradient,
+                Height = 260,
+                Background = gradient, // Der farbige Verlauf als Hintergrund
                 CornerRadius = new CornerRadius(15),
                 Margin = new Thickness(10),
                 BorderThickness = new Thickness(1),
                 BorderBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)),
-                Child = cardLayoutGrid,
-                Tag = new CardTag { Process = proc, Hwnd = hwnd }
+                Tag = new CardTag { Process = proc, Hwnd = hwnd },
+                Child = contentGrid // Das Grid mit dem Inhalt ist jetzt das Child
             };
+
+            // Asynchron das SteamGridDB-Bild laden
+            LoadCardImageAsync(cardBorder, name, exePath);
 
             return cardBorder;
         }
-
-
 
 
 
@@ -3709,32 +3706,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #region performance overlay shortcut AHK
         private void TriggerPerformanceOverlay()
         {
-            //usernotification
-            SendOverlayNotification("Shortcut: Performance Overlay");
+            // User notification
+            SendOverlayNotification("Toggle Performance Overlay");
 
-            // Build full path to the overlay .exe located in the same folder 
-            string overlayPath = Path.Combine(AppContext.BaseDirectory, "amdnvidiap.exe");
-
-            if (File.Exists(overlayPath))
+            try
             {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = overlayPath,
-                        UseShellExecute = true
-                    });
+                // Simulate Alt + R
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // Alt down
+                keybd_event(VK_R, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);    // R down
+                keybd_event(VK_R, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);      // R up
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // Alt up
 
-                    Console.WriteLine("Performance overlay trigger executed.");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error launching overlay trigger: {ex.Message}");
-                }
+                Console.WriteLine("Performance overlay shortcut (Alt+R) sent.");
             }
-            else
+            catch (Exception ex)
             {
-                Console.WriteLine("Overlay trigger executable not found.");
+                Console.WriteLine($"Error sending performance overlay shortcut: {ex.Message}");
             }
         }
 
@@ -4567,227 +4554,153 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion
         #region Startupvideo
 
-        public static class StartupVideo
+        #region Startup Video Logic
+
+        private void PlayStartupVideo()
         {
-            [DllImport("user32.dll")]
-            private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-            [DllImport("user32.dll")]
-            private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-            private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-            private const uint SWP_NOSIZE = 0x0001;
-            private const uint SWP_NOMOVE = 0x0002;
-            private const uint SWP_SHOWWINDOW = 0x0040;
-           
-
-            #region SteamStartup
-
-            public static void RenameFile(string oldFilePath, string newFilePath)
+            try
             {
-                try
+                bool useVideo = AppSettings.Load<bool>("usestartupvideo");
+                bool useSteamHack = AppSettings.Load<bool>("usesteamstartupvideo");
+
+                if (!useVideo || useSteamHack)
                 {
-                    // Vérifie si le fichier existe
-                    if (File.Exists(oldFilePath))
-                    {
-                        // Renomme le fichiersekunde ses
-                        File.Move(oldFilePath, newFilePath);
-                        Console.WriteLine($"Le fichier a été renommé avec succès : {newFilePath}");
-                    }
-                    else
-                    {
-                        Console.WriteLine("Le fichier spécifié n'existe pas.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Erreur lors du renommage du fichier : {ex.Message}");
-                }
-            }
-
-            public static void RenameSteamStartupVideo_Start()
-            {
-                string SteamVideoPath = Path.Combine(Path.GetDirectoryName(AppSettings.Load<string>("steamlauncherpath")), "steamui", "movies", "bigpicture_startup.webm");
-                string SteamVideoPathNew = Path.Combine(Path.GetDirectoryName(AppSettings.Load<string>("steamlauncherpath")), "steamui", "movies", "bigpicture_startup.old.webm");
-                string GCMVideoPath = Path.Combine(Path.GetDirectoryName(AppSettings.Load<string>("steamlauncherpath")), "steamui", "movies", "GCM_vid.webm");
-                RenameFile(SteamVideoPath, SteamVideoPathNew); //change the name of the real file
-                RenameFile(GCMVideoPath, SteamVideoPath); //put the name of the real file to the selected video
-            }
-
-            public static void RenameSteamStartupVideo_End()
-            {
-                string SteamVideoPath = Path.Combine(Path.GetDirectoryName(AppSettings.Load<string>("steamlauncherpath")), "steamui", "movies", "bigpicture_startup.webm");
-                string SteamVideoPathNew = Path.Combine(Path.GetDirectoryName(AppSettings.Load<string>("steamlauncherpath")), "steamui", "movies", "bigpicture_startup.old.webm");
-                string GCMVideoPath = Path.Combine(Path.GetDirectoryName(AppSettings.Load<string>("steamlauncherpath")), "steamui", "movies", "GCM_vid.webm");
-                RenameFile(SteamVideoPath, GCMVideoPath); // give the GCM Video file its real name
-                RenameFile(SteamVideoPathNew, SteamVideoPath); // give the steam file its real name
-            }
-            #endregion SteamStartup
-
-
-            [DllImport("user32.dll")]
-            private static extern bool SetFocus(IntPtr hWnd);
-
-            [DllImport("user32.dll")]
-            private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-            [DllImport("user32.dll")]
-            private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-            [DllImport("user32.dll")]
-            private static extern int GetSystemMetrics(int nIndex);
-
-            private const int GWL_STYLE = -16;
-            private const int GWL_EXSTYLE = -20;
-            private const int WS_POPUP = unchecked((int)0x80000000);
-            private const int WS_VISIBLE = 0x10000000;
-            private const int WS_EX_TOOLWINDOW = 0x00000080;
-            private const int WS_EX_NOACTIVATE = 0x08000000;
-
-
-
-            private const int SM_CXSCREEN = 0;
-            private const int SM_CYSCREEN = 1;
-
-            private const uint SWP_FRAMECHANGED = 0x0020;
-
-            public static void Play()
-            {
-                //Set steam startup video if not set
-                try
-                {
-                    AppSettings.Load<bool>("usesteamstartupvideo");
-                }
-                catch
-                {
-                    AppSettings.Save("usesteamstartupvideo", false);
-                }
-                //Standard Use Startup Video
-                try
-                {
-                    AppSettings.Load<bool>("usestartupvideo");
-                }
-                catch
-                {
-                    AppSettings.Save("usestartupvideo", false); // oder true, wenn du es standardmäßig aktivieren willst
-                }
-
-
-                try
-                {
-                    Console.WriteLine("Playing startup video...");
-
-                    bool useStartupVideo = AppSettings.Load<bool>("usestartupvideo");
-                    if (!useStartupVideo)
-                    {
-                        Console.WriteLine("Startup video disabled.");
-                        return;
-                    }
-
-                    if (AppSettings.Load<bool>("usesteamstartupvideo"))
+                    TransitionToMainUI();
+                    if (useSteamHack)
                     {
                         RenameSteamStartupVideo_Start();
-                        return;
                     }
-
-                    string videoPath = AppSettings.Load<string>("startupvideo_path");
-                    if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
-                    {
-                        ShowErrorMessage("The specified video file was not found.");
-                        return;
-                    }
-
-                    string extension = Path.GetExtension(videoPath)?.ToLower();
-                    string[] validExtensions = { ".mp4", ".avi", ".mkv", ".mov", ".wmv" };
-                    if (Array.IndexOf(validExtensions, extension) == -1)
-                    {
-                        ShowErrorMessage("Unsupported video format.");
-                        return;
-                    }
-
-                    var videoWindow = new Window();
-                    var mediaElement = CreateMediaElement(videoPath, videoWindow);
-                    mediaElement.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
-                    mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
-                    videoWindow.Content = mediaElement;
-                    videoWindow.Activate();
-
-                    IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(videoWindow);
-
-                    // Make it a true invisible system-level fullscreen window
-                    int style = GetWindowLong(hWnd, GWL_STYLE);
-                    SetWindowLong(hWnd, GWL_STYLE, style | WS_POPUP | WS_VISIBLE);
-
-                    int exStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
-                    SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
-
-                    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-                    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
-                    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-                    SetForegroundWindow(hWnd);
-                    SetFocus(hWnd);
-
-                    System.Diagnostics.Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
-
-                    KeepWindowOnTop(hWnd);
-                }
-                catch (Exception ex)
-                {
-                    ShowErrorMessage($"Error playing video: {ex.Message}");
+                    return;
                 }
             }
-
-            private static MediaPlayerElement CreateMediaElement(string videoPath, Window window)
+            catch
             {
-                var mediaPlayer = new MediaPlayer { AutoPlay = true };
-                string uriPath = new Uri(Path.GetFullPath(videoPath)).AbsoluteUri;
-                mediaPlayer.Source = MediaSource.CreateFromUri(new Uri(uriPath));
-
-                mediaPlayer.MediaFailed += (s, e) =>
-                {
-                    Console.WriteLine("Video load failed: " + e.ErrorMessage);
-                };
-
-                mediaPlayer.MediaEnded += (s, e) =>
-                {
-                    window.DispatcherQueue.TryEnqueue(() => window.Close());
-                };
-
-                var mediaPlayerElement = new MediaPlayerElement
-                {
-                    AreTransportControlsEnabled = false,
-                    Stretch = Microsoft.UI.Xaml.Media.Stretch.Fill
-                };
-
-                mediaPlayerElement.SetMediaPlayer(mediaPlayer);
-                return mediaPlayerElement;
+                TransitionToMainUI();
+                return;
             }
 
-
-
-            private static AppWindow GetAppWindow(Window window)
+            try
             {
-                var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
-                var windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
-                return AppWindow.GetFromWindowId(windowId);
-            }
-
-            private static async void KeepWindowOnTop(IntPtr hWnd)
-            {
-                while (true)
+                string videoPath = AppSettings.Load<string>("startupvideo_path");
+                if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
                 {
-                    await System.Threading.Tasks.Task.Delay(1000); // Vérifie toutes les secondes
-                    SetForegroundWindow(hWnd);
-                    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW);
+                    TransitionToMainUI();
+                    return;
                 }
-            }
 
-            private static void ShowErrorMessage(string message)
+                _startupMediaPlayer = new MediaPlayer { AutoPlay = true };
+                _startupMediaPlayer.Source = MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute));
+                _startupMediaPlayer.MediaEnded += OnStartupVideoEnded;
+                StartupVideoPlayer.SetMediaPlayer(_startupMediaPlayer);
+            }
+            catch (Exception ex)
             {
-                Console.WriteLine(message);
+                Debug.WriteLine($"[StartupVideo] Error playing video: {ex.Message}");
+                TransitionToMainUI();
             }
         }
+
+        private void OnStartupVideoEnded(MediaPlayer sender, object args)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                TransitionToMainUI();
+            });
+        }
+
+        private void TransitionToMainUI()
+        {
+            // === HIER IST DIE ÄNDERUNG ===
+            // Lade das Hintergrundbild JETZT, direkt bevor die UI erscheint.
+            SetBackgroundImage(GetScreenWidth(), GetScreenHeight());
+            // =============================
+
+            // Video-Player aufräumen
+            if (_startupMediaPlayer != null)
+            {
+                _startupMediaPlayer.MediaEnded -= OnStartupVideoEnded;
+                _startupMediaPlayer.Dispose();
+                _startupMediaPlayer = null;
+            }
+            StartupVideoPlayer.SetMediaPlayer(null);
+            StartupVideoPlayer.Visibility = Visibility.Collapsed;
+
+            // Haupt-UI mit einer sanften Einblend-Animation sichtbar machen
+            MainContent.Visibility = Visibility.Visible;
+            var fadeInAnimation = new DoubleAnimation
+            {
+                From = 0.0,
+                To = 1.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(500))
+            };
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(fadeInAnimation);
+            Storyboard.SetTarget(fadeInAnimation, MainContent);
+            Storyboard.SetTargetProperty(fadeInAnimation, "Opacity");
+            storyboard.Begin();
+
+            // Signal an die Start()-Methode, dass sie weitermachen kann
+            startupVideoFinished = true;
+        }
+
+        // Logik für den Steam-Videotausch
+        public static void RenameFile(string oldFilePath, string newFilePath)
+        {
+            try { if (File.Exists(oldFilePath)) { File.Move(oldFilePath, newFilePath, true); } }
+            catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error renaming file '{oldFilePath}': {ex.Message}"); }
+        }
+
+        public static void RenameSteamStartupVideo_Start()
+        {
+            try
+            {
+                string steamPath = AppSettings.Load<string>("steamlauncherpath");
+                if (string.IsNullOrEmpty(steamPath)) return;
+                string moviesPath = Path.Combine(Path.GetDirectoryName(steamPath), "steamui", "movies");
+                string steamVideoPath = Path.Combine(moviesPath, "bigpicture_startup.webm");
+                string steamVideoBackupPath = Path.Combine(moviesPath, "bigpicture_startup.old.webm");
+                string gcmVideoPath = Path.Combine(moviesPath, "GCM_vid.webm");
+
+                if (File.Exists(steamVideoBackupPath))
+                {
+                    File.Move(steamVideoBackupPath, steamVideoPath, true);
+                }
+
+                if (File.Exists(steamVideoPath))
+                {
+                    File.Move(steamVideoPath, steamVideoBackupPath, true);
+                }
+                if (File.Exists(gcmVideoPath))
+                {
+                    File.Copy(gcmVideoPath, steamVideoPath, true);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error in RenameSteamStartupVideo_Start: {ex.Message}"); }
+        }
+
+        public static void RenameSteamStartupVideo_End()
+        {
+            try
+            {
+                string steamPath = AppSettings.Load<string>("steamlauncherpath");
+                if (string.IsNullOrEmpty(steamPath)) return;
+                string moviesPath = Path.Combine(Path.GetDirectoryName(steamPath), "steamui", "movies");
+                string steamVideoPath = Path.Combine(moviesPath, "bigpicture_startup.webm");
+                string steamVideoBackupPath = Path.Combine(moviesPath, "bigpicture_startup.old.webm");
+
+                if (File.Exists(steamVideoBackupPath))
+                {
+                    if (File.Exists(steamVideoPath))
+                    {
+                        File.Delete(steamVideoPath);
+                    }
+                    File.Move(steamVideoBackupPath, steamVideoPath, true);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error in RenameSteamStartupVideo_End: {ex.Message}"); }
+        }
+
+        #endregion
 
         #endregion Startupvideo
 
@@ -4799,26 +4712,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
         /// <summary>
-        /// Beendet den GCM-Modus und kehrt zum normalen Windows-Desktop zurück.
-        /// </summary>
-      
-
-        /// <summary>
-        /// Versetzt den Computer in den Ruhezustand (Energie sparen).
-        /// </summary>
-        private void SleepButton_Click(object sender, RoutedEventArgs e)
-        {
-            Process.Start("shutdown", "/s /t 0");
-        }
-
-        /// <summary>
         /// Fährt den Computer herunter.
         /// </summary>
-        private void ShutdownButton_Click(object sender, RoutedEventArgs e)
+        private async void ShutdownButton_Click(object sender, RoutedEventArgs e)
         {
-            Console.WriteLine("Shutdown-Button geklickt. Computer wird heruntergefahren...");
+            Console.WriteLine("Shutdown-Button geklickt. Räume auf und fahre den Computer herunter...");
 
-            // Startet den Shutdown-Prozess von Windows (sofort, ohne Timer)
+            // ZUERST die Aufräum-Methode aufrufen
+            RenameSteamStartupVideo_End();
+
+            // Gib dem System einen winzigen Moment Zeit, die Dateioperation abzuschließen
+            await Task.Delay(200);
+
+            // DANN den Computer herunterfahren
             Process.Start("shutdown", "/s /t 0");
         }
 

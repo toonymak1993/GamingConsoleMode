@@ -1,3 +1,5 @@
+// ERSETZE DEN KOMPLETTEN INHALT DEINER taskmanager.xaml.cs HIERMIT
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -8,6 +10,7 @@ using System.Threading.Tasks;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
+// Stelle sicher, dass der Namespace zu deinem Projekt passt
 namespace GAMINGCONSOLEMODE
 {
     public sealed partial class taskmanager : Page
@@ -15,77 +18,102 @@ namespace GAMINGCONSOLEMODE
         public taskmanager()
         {
             this.InitializeComponent();
-            UpdateUI();
+            // Die UI wird jetzt beim Laden der Seite aktualisiert, was robuster ist
+            this.Loaded += (s, e) => UpdateUI();
         }
+
         #region update ui
+
+        /// <summary>
+        /// Lädt alle Einstellungen und aktualisiert die gesamte Benutzeroberfläche.
+        /// </summary>
         private void UpdateUI()
         {
-            // Load saved image paths and apply them to the respective Image controls
+            // Lädt die Bilder für die 5 Launcher-Buttons
             LoadImageIfExists(Image1, "button1");
             LoadImageIfExists(Image2, "button2");
             LoadImageIfExists(Image3, "button3");
             LoadImageIfExists(Image4, "button4");
             LoadImageIfExists(Image5, "button5");
+
+            // Lädt die Einstellung für den Handheld-Toggle
             LoadHandheldTouchLauncherSetting();
 
+            // NEU: Lädt die Einstellung für den SteamGridDB API Key
+            LoadSteamGridDbApiKey();
         }
+
         #endregion update ui
-        #region launcher
+
+        // --- NEUE METHODEN FÜR STEAMGRIDDB ---
+        #region SteamGridDB
+
+        /// <summary>
+        /// Lädt den gespeicherten SteamGridDB API-Schlüssel und zeigt ihn im Textfeld an.
+        /// </summary>
+        private void LoadSteamGridDbApiKey()
+        {
+            try
+            {
+                string apiKey = AppSettings.Load<string>("steamgriddb_api_key");
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    SteamGridDbApiKeyBox.Text = apiKey;
+                }
+            }
+            catch
+            {
+                // Einstellung existiert noch nicht, das ist in Ordnung.
+            }
+        }
+
+        /// <summary>
+        /// Speichert den eingegebenen API-Schlüssel, wenn der Button geklickt wird.
+        /// </summary>
+        private async void SaveApiKeyButton_Click(object sender, RoutedEventArgs e)
+        {
+            string apiKey = SteamGridDbApiKeyBox.Text.Trim();
+
+            AppSettings.Save("steamgriddb_api_key", apiKey);
+
+            // Zeigt dem Benutzer eine Erfolgsmeldung.
+            ContentDialog confirmationDialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Success",
+                Content = "API Key saved successfully!",
+                CloseButtonText = "Ok"
+            };
+
+            await confirmationDialog.ShowAsync();
+        }
+
+        #endregion SteamGridDB
+
+
+        #region launcher 
 
         private void LoadHandheldTouchLauncherSetting()
         {
             try
             {
-                // Try to load the saved setting; default to false if it fails
-                bool isOn = false;
-
-                try
-                {
-                    isOn = AppSettings.Load<bool>("handheldtouchlauncher");
-                }
-                catch
-                {
-                    isOn = false; // fallback if key doesn't exist or fails
-                }
-
-                // Apply the value to the ToggleSwitch's IsOn property
+                bool isOn = AppSettings.Load<bool>("handheldtouchlauncher");
                 handheldtouchlauncher.IsOn = isOn;
             }
             catch
             {
-                // fail silently to avoid crashing
+                handheldtouchlauncher.IsOn = false; // Fallback
             }
         }
-
-
 
         private void handheldtouchlauncher_Toggled(object sender, RoutedEventArgs e)
         {
-            try
+            if (sender is ToggleSwitch toggle)
             {
-                // Cast sender to ToggleSwitch
-                if (sender is ToggleSwitch toggle)
-                {
-                    if (toggle.IsOn)
-                    {
-                        // Save true if switch is turned on
-                        AppSettings.Save("handheldtouchlauncher", true);
-                    }
-                    else
-                    {
-                        // Save false if switch is turned off
-                        AppSettings.Save("handheldtouchlauncher", false);
-                    }
-                }
-            }
-            catch
-            {
-                // Silent fail, optional logging can be added here
+                AppSettings.Save("handheldtouchlauncher", toggle.IsOn);
             }
         }
 
-
-        // Helper method to load image if path exists
         private void LoadImageIfExists(Image imageControl, string keyName)
         {
             try
@@ -103,9 +131,6 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-
-
-        // --- Shared logic for selecting images ---
         private async Task SetImageAsync(Image imageControl, string keyName)
         {
             var picker = new FileOpenPicker();
@@ -115,7 +140,6 @@ namespace GAMINGCONSOLEMODE
             picker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
 
             var hwnd = WindowNative.GetWindowHandle(App.MainWindow);
-
             InitializeWithWindow.Initialize(picker, hwnd);
 
             var file = await picker.PickSingleFileAsync();
@@ -137,7 +161,6 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        // --- Shared logic for selecting links ---
         private async Task SetLinkAsync(string keyName)
         {
             var picker = new FileOpenPicker();
@@ -155,14 +178,12 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        // ---- Click Handlers: IMAGE ----
         private async void SelectImage1_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image1, "button1");
         private async void SelectImage2_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image2, "button2");
         private async void SelectImage3_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image3, "button3");
         private async void SelectImage4_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image4, "button4");
         private async void SelectImage5_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image5, "button5");
 
-        // ---- Click Handlers: LINK ----
         private async void SelectLink1_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button1");
         private async void SelectLink2_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button2");
         private async void SelectLink3_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button3");
@@ -182,7 +203,6 @@ namespace GAMINGCONSOLEMODE
                 AppSettings.Save($"{keyName}", false);
                 AppSettings.Save($"{keyName}link", string.Empty);
                 AppSettings.Save($"{keyName}image", string.Empty);
-
                 imageControl.Source = null;
             }
             catch (Exception ex)
@@ -190,7 +210,6 @@ namespace GAMINGCONSOLEMODE
                 Debug.WriteLine($"[ERROR] Failed to reset {keyName}: {ex.Message}");
             }
         }
-
 
         private void Test1_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button1link");
         private void Test2_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button2link");
@@ -221,9 +240,6 @@ namespace GAMINGCONSOLEMODE
                 Debug.WriteLine($"[ERROR] Failed to launch {settingKey}: {ex.Message}");
             }
         }
-
         #endregion launcher
-
-       
     }
 }
