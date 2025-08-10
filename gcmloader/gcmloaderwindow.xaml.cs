@@ -550,6 +550,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             LoadShortcutsFromSettings();
             SetupGamepad();
+            
             Start();
             //ASYNC PROZES
             ShowTaskManager();
@@ -2036,7 +2037,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     if (success)
                     {
                         KillProcess("explorer.exe");
-                        
+                        Showwinpart();
+
                     }
                     else
                     {
@@ -2701,17 +2703,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private async Task Start()
         {
-            // Warten, bis das Video beendet ist
+            // Warten, bis das Video fertig ist
             while (startupVideoFinished == false)
             {
                 await Task.Delay(50);
             }
 
-            // Führe jetzt alle langwierigen Hintergrund-Aufgaben aus
+            
+            // Die "IsAlreadyRunning"-Prüfung ist dank des Mutex in App.xaml.cs überflüssig.
+
+            SetupLogging();
+
+            // === HIER IST DIE WICHTIGE ÄNDERUNG ===
+            // Da App.xaml.cs sicherstellt, dass wir Admin sind, können wir hier die UAC-Abfragen
+            // für zukünftige Starts deaktivieren.
+            uac("off");
+            // ===================================
+
             SettingsVerify();
-            //MinimizeAllWindows();
+            
+
             await StartOverlayAsync();
-            Showwinpart();
+            
 
             await Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
@@ -2721,6 +2734,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             cssloader();
             ConsoleModeToShell();
+            
             preaudio(true, false);
             prestartlist();
         }
