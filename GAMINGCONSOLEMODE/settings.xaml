@@ -45,21 +45,15 @@
                                         <ColumnDefinition Width="2*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Button x:Name="windowsloginwithoutpassword" Grid.Column="0" Content="Windows login without password"
+                                    <Button x:Name="windowsloginwithoutpassword" Grid.Column="0" Content="Download Windows Autologon"
                                             Padding="10,5" Margin="10,0,20,0"
                                             Background="LightBlue" Foreground="Black"
                                             HorizontalAlignment="Left"
                                             Click="windowsloginwithoutpassword_Click"/>
-                                    <TextBlock Grid.Column="1" Text="We believe that a password-free login is the right approach because Windows does not offer this simple functionality, and entering a password every time you start your PC can ruin the experience.
-
-With USB logon, we have found a way to maintain security while allowing access to GCM without a password. Please make sure to configure the settings correctly as shown in the image to ensure that your computer locks automatically when the USB stick is removed."
+                                    <TextBlock Grid.Column="1" Text="Autologon enables you to easily configure Windows’ built-in autologon mechanism. Instead of waiting for a user to enter their name and password, Windows uses the credentials you enter with Autologon, which are encrypted in the Registry, to log on the specified user automatically."
                                                VerticalAlignment="Center" TextWrapping="Wrap"
                                                FontSize="14" Foreground="White"/>
-                                    <Image Grid.Column="2" Height="150" VerticalAlignment="Center" Stretch="Uniform" Margin="10,10,10,10">
-                                        <Image.Source>
-                                            <BitmapImage UriSource="/Assets/settings/usblogon.png" DecodePixelHeight="400"/>
-                                        </Image.Source>
-                                    </Image>
+                                    
                                 </Grid>
                             </Border>
                         </StackPanel>
@@ -87,8 +81,8 @@ With USB logon, we have found a way to maintain security while allowing access t
                             </Grid.ColumnDefinitions>
                             <TextBlock  Text="GCM respects your decision and UAC is set immediately" Grid.Column="1" VerticalAlignment="Center" FontSize="14" />
                             <StackPanel Orientation="Horizontal" Grid.Column="2" HorizontalAlignment="Right" Margin="10">
-                                <Button x:Name="uactoggleon"  Content="Disable UAC completely" Margin="5" Click="uactoggle_Click"  />
-                                <Button x:Name="uactoggleoff"  Content="Enable UAC completely" Margin="5" Click="uactoggleoff_Click"  />
+                                <Button x:Name="uactoggleon"  Content="Activate UAC after GCM" Margin="5" Click="uactoggle_Click"  />
+                                <Button x:Name="uactoggleoff"  Content="Deactivate UAC after GCM" Margin="5" Click="uactoggleoff_Click"  />
                             </StackPanel>
                         </Grid>
                     </StackPanel>

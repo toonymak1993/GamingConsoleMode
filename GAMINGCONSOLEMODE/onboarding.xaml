@@ -8,8 +8,8 @@
         <!-- Hintergrund Steam Gradient -->
         <Grid.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#1B2838" Offset="0.0"/>
-                <GradientStop Color="#2A475E" Offset="0.5"/>
+                <GradientStop Color="#171A21" Offset="0.0"/>
+                <GradientStop Color="#171A21" Offset="0.5"/>
                 <GradientStop Color="#171A21" Offset="1.0"/>
             </LinearGradientBrush>
         </Grid.Background>

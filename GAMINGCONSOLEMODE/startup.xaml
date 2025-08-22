@@ -272,6 +272,20 @@
                                 </Grid>
                             </StackPanel>
                         </Button>
+
+                        <Button x:Name="boilrbutton"  Click="boilrbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
+                            <StackPanel Tag="DISABLED">
+                                <Image Source="/functions/boilrlogo.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Sync Games to Steam" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Sync other Launcher to Steam" Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
+                                    <Border x:Name="boilrstate_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
+                                        <TextBlock x:Name="boilrstate_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </Button>
+                    
                     </ItemsControl>
                 </ScrollViewer>
             </Grid>
@@ -296,9 +310,9 @@
                                 <ScaleTransform ScaleX="3" ScaleY="3"/>
                             </Grid.RenderTransform>
                             <BreadcrumbBar x:Name="BreadcrumbBar1" ItemClicked="BreadcrumbBar1_ItemClicked" FontSize="66"/>
-                               
+
                         </Grid>
-                            <Grid x:Name="DetailContentGrid">
+                        <Grid x:Name="DetailContentGrid">
                             <!-- Panels -->
                             <!--joyxoff-->
                             <Grid x:Name="JoyxoffPanel"
@@ -592,14 +606,14 @@
                                               VerticalScrollBarVisibility="Visible"
                                               Grid.Row="0"
                                               Height="400">
-                                    
+
                                     <Grid Padding="24">
-                                        
+
                                         <StackPanel Spacing="4">
 
                                             <TextBlock Text="Settings" FontSize="14" FontWeight="SemiBold" Margin="0,8,36,0"/>
-                                            
-                                            
+
+
                                             <controls:SettingsCard Description="Enable Decky Loader in GCM mode"
                                               Header="ON/OFF" >
                                                 <ToggleSwitch x:Name="use_decky_loader"
@@ -607,7 +621,7 @@
                                                               HorizontalAlignment="Center"/>
                                             </controls:SettingsCard>
 
-                                            
+
                                             <controls:SettingsCard Header="INSTALLATION PANEL">
                                                 <controls:SettingsCard.Description>
                                                     <Border x:Name="border_install_state_decky_loader"
@@ -622,7 +636,7 @@
                                                                    Foreground="White"
                                                                    FontSize="13"
                                                                    FontWeight="Bold"
-                                                                   TextAlignment="Center"/>     
+                                                                   TextAlignment="Center"/>
                                                     </Border>
                                                 </controls:SettingsCard.Description>
 
@@ -630,8 +644,8 @@
                                                     <Button x:Name="button_install_decky_loader" Content="DOWNLOAD" Margin="10" Width="150" Click="button_install_decky_loader_Click"/>
                                                 </StackPanel>
                                             </controls:SettingsCard>
-      
-                        
+
+
                                             <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
 
                                             <controls:SettingsCard  Description="Please extract all files into a folder and run the executable inside. Then, return to GCM."
@@ -680,13 +694,13 @@
 
 
                                             <!-- Installationsanleitung -->
-                                            
+
                                         </StackPanel>
 
 
                                     </Grid>
                                 </ScrollViewer>
-                            </Grid> 
+                            </Grid>
                             <!--startup video-->
                             <Grid x:Name="startupvideo" Visibility="Collapsed"
                                     xmlns:controls="using:CommunityToolkit.WinUI.Controls">
@@ -1100,6 +1114,204 @@
                                                     <TextBlock Text="Inject custom styles into Steam's desktop and Big Picture Mode interfaces," TextAlignment="Right"/>
                                                     <TextBlock Text="browse an ever-growing storefront of community creations," TextAlignment="Right"/>
                                                     <TextBlock Text="easily manage your themes' settings and updates, and more." TextAlignment="Right"/>
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+
+                                        </StackPanel>
+
+                                    </Grid>
+
+                                </ScrollViewer>
+
+                            </Grid>
+                            <!--boilr sync to Steam-->
+                            <Grid x:Name="boilr" Visibility="Collapsed"
+      xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Visible"
+                  Grid.Row="0"
+                  Height="400">
+
+                                    <Grid Padding="24">
+
+                                        <StackPanel Spacing="4">
+
+                                            <TextBlock Text="Settings" FontSize="14" FontWeight="SemiBold" Margin="0,8,36,0"/>
+
+
+                                            <controls:SettingsCard Description="Enable Auto Game sync at GCM start"
+                  Header="ON/OFF" >
+                                                <ToggleSwitch x:Name="use_boilr"
+                                  Toggled="use_boilr_Toggled"
+                                  HorizontalAlignment="Center"/>
+                                            </controls:SettingsCard>
+                                            <controls:SettingsCard Header="Download BoilR"
+                       Description="Automatically download the latest BoilR executable from GitHub.">
+                                                <StackPanel Spacing="12">
+
+                                                    <TextBlock Text="Click the button below to download the latest version of BoilR and save it in GCM settings."
+                   TextWrapping="Wrap"
+                   Width="500"/>
+
+                                                    <Button x:Name="btnDownloadBoilr"
+                Content="Download Boilr "
+                Width="250"
+                Height="40"
+                Background="Green"
+                CornerRadius="5"
+                Click="btnDownloadBoilr_Click"/>
+
+                                                    <TextBlock x:Name="txtDownloadStatus"
+                   Text=""
+                   Foreground="Green"
+                   FontWeight="SemiBold"
+                   TextWrapping="Wrap"
+                   Width="500"/>
+
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard Header="INSTALLATION PANEL">
+                                                <controls:SettingsCard.Description>
+                                                    <Border x:Name="border_install_state_boilr"
+                                Grid.Column="1"
+                                Background="Green"
+                                CornerRadius="8"
+                                Padding="10,5"
+                                Margin="0,10,0,0"
+                                HorizontalAlignment="Left">
+                                                        <TextBlock x:Name="text_install_state_boilr"
+                                       Text="INSTALLED"
+                                       Foreground="White"
+                                       FontSize="13"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                                                    </Border>
+                                                </controls:SettingsCard.Description>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard x:Name="boilr_api_field" Header="API KEY"
+                                       Description="To download images you need an API Key from SteamGridDB">
+                                                <StackPanel>
+                                                    <Button x:Name="btn_create_or_open_boilr"
+                            Content="Get Steam Grid DB API KEY"
+                            Width="250"
+                            Height="40"
+                            CornerRadius="5"
+                            Click="btn_create_or_open_boilr_Click"
+                            HorizontalAlignment="Stretch"/>
+                                                    <TextBox x:Name="boilr_path"
+                                 Header="Api Key Input"
+                                 PlaceholderText="API KEY"
+                                 TextChanged="boilr_path_TextChanged"
+                                 IsEnabled="True"
+                                 Width="500"
+                                 CornerRadius="5"
+                                 
+                                 Grid.Column="1"/>
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard x:Name="boilr_launcher" Header="Launcher Integration"
+                       Description="Enable or disable automatic syncing for each launcher.">
+                                                <StackPanel Spacing="12">
+
+                                                    <!-- Amazon -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Amazon" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_Amazon"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_Amazon_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- Epic -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Epic" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_Epic"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_Epic_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- GOG -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="GOG" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_GOG"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_GOG_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- Itch -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Itch" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_Itch"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_Itch_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- Origin -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Origin" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_Origin"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_Origin_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- Uplay -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Uplay" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_Uplay"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_Uplay_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- Playnite -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Playnite" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_Playnite"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_Playnite_Toggled"/>
+                                                    </StackPanel>
+
+                                                    <!-- Game Pass -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="Game Pass" Width="150" VerticalAlignment="Center"/>
+                                                        <ToggleSwitch x:Name="Switch_GamePass"
+                          OffContent="Disabled"
+                          OnContent="Enabled"
+                          Toggled="Switch_GamePass_Toggled"/>
+                                                    </StackPanel>
+
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+
+
+                                            <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
+
+                                            <controls:SettingsCard  Description="Download Boilr using the download button and then create an API key"
+                                        Header="Installation instructions" >
+                                                <controls:SettingsCard.Resources>
+                                                    <x:Double x:Key="SettingsCardWrapThreshold">800</x:Double>
+                                                    <x:Double x:Key="SettingsCardWrapNoIconThreshold">600</x:Double>
+                                                </controls:SettingsCard.Resources>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard x:Name="Aboutboilr"
+                                       Header="About">
+                                                <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top">
+                                                    <TextBlock Text="Automatically searches for all games of the selected launcher and syncs them with steam" Margin="0,0,0,20" FontWeight="SemiBold" TextAlignment="Right"/>
+                                                    <TextBlock Text="Everything can be set via the GCM interface" TextAlignment="Right"/>
                                                 </StackPanel>
                                             </controls:SettingsCard>
 

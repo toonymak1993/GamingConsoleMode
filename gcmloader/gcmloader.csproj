@@ -19,18 +19,26 @@
     <Compile Remove="OverlayWindow.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Content Remove="Assets\discord.png" />
+    <Content Remove="Assets\game.png" />
     <Content Remove="Assets\GCM_Startup_Video.webm" />
     <Content Remove="Assets\logo.ico" />
     <Content Remove="Assets\logo_gcm.png" />
     <Content Remove="Assets\nav.wav" />
+    <Content Remove="Assets\pause.wav" />
     <Content Remove="Assets\play.wav" />
+    <Content Remove="Assets\shortcut.wav" />
     <Content Remove="Assets\xbox-controller.png" />
   </ItemGroup>
   <ItemGroup>
     <None Remove="asforally.exe" />
+    <None Remove="Assets\discord.png" />
+    <None Remove="Assets\game.png" />
     <None Remove="Assets\GCM_Startup_Video.webm" />
     <None Remove="Assets\nav.wav" />
+    <None Remove="Assets\pause.wav" />
     <None Remove="Assets\play.wav" />
+    <None Remove="Assets\shortcut.wav" />
     <None Remove="nircmd.exe" />
     <None Remove="Settings.xml" />
   </ItemGroup>
@@ -46,10 +54,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="amdnvidiap.exe">
+    <EmbeddedResource Include="asforally.exe">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
-    <EmbeddedResource Include="asforally.exe">
+    <EmbeddedResource Include="Assets\game.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\GCM_Startup_Video.webm">
@@ -61,7 +69,13 @@
     <EmbeddedResource Include="Assets\nav.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\pause.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\play.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\shortcut.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\xbox-controller.png">
@@ -102,6 +116,15 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="SharpDX.XInput" Version="4.2.0" />
     <PackageReference Include="System.Management" Version="9.0.4" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.6" />
+    <PackageReference Include="TaskScheduler" Version="2.12.1" />
+    <PackageReference Include="Tomlyn" Version="0.19.0" />
+    <PackageReference Include="Vanara.PInvoke.Shell32" Version="4.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\discord.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!--

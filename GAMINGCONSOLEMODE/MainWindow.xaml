@@ -28,8 +28,8 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left Logo -->
-            <Image Source="Assets/logo_gcm.png" Height="60" Margin="25,5"/>
-
+            <Image Source="Assets/gcm_ui_logo.png" Height="100" Margin="25,5"/>
+            
             <!-- Right Panel with Button and ToggleSwitch SIDE-BY-SIDE -->
             <StackPanel Grid.Column="2"
                 Orientation="Horizontal"
@@ -37,53 +37,48 @@
                 VerticalAlignment="Center"
                 Margin="10"
                 Spacing="12">
-                <Button Width="28" Height="28"
-HorizontalAlignment="Center"
-VerticalAlignment="Center"
-Padding="0"
-Background="Transparent"
-BorderBrush="Transparent">
-                    <FontIcon Glyph="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="LightGray" FontSize="20"/>
-                    <Button.Flyout>
-                        <Flyout Placement="Top">
-                            <TextBlock Text="You can choose to let GCM disable the default autostart applications to ensure you're not interrupted. Alternatively, you can manage this yourself by making sure no apps pop up that might interfere with GCM. This setting is optional."
-               Width="250"
-               TextWrapping="WrapWholeWords"
-               Foreground="White"
-               FontSize="12"
-               Padding="5"/>
-                        </Flyout>
-                    </Button.Flyout>
+                <Button x:Name="DiscordButton"
+        Click="DiscordImageButton_Click"
+        Background="Transparent"
+        BorderBrush="Transparent"
+        Padding="0"
+        HorizontalAlignment="Stretch"
+        Margin="0,0,20,0">
+
+                    <Border Background="#22FFFFFF"
+            CornerRadius="8"
+            Padding="15"
+                            
+            MaxWidth="500">
+
+                        <Grid ColumnSpacing="15">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Image Grid.Column="0"
+                   Source="ms-appx:///Assets/onboarding/discord.jpg" 
+                   Width="48" 
+                   Height="48"
+                   VerticalAlignment="Center"/>
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="Join us on Discord"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="White"/>
+                                <TextBlock Text="Support, Suggestions, Updates &amp; Community"
+                           Foreground="LightGray"
+                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </Button>
+               
+                
                 <!-- ToggleSwitch next to Button -->
-                <Border CornerRadius="10"
-        Padding="10"
-        Margin="10"
-        Width="300"
-        Height="80"
-        BorderBrush="SlateGray"
-        BorderThickness="0"
-                        >
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#FF2D2D30" Offset="0.0"/>
-                            <GradientStop Color="#FF3E3E42" Offset="1.0"/>
-                        </LinearGradientBrush>
-                        
-                    </Border.Background>
-
-                    <!-- ToggleSwitch inside the panel -->
-                    <ToggleSwitch x:Name="UsewinpartStartapps"
-                  Header="Disable autostart apps"
-                  OnContent="On"
-                  OffContent="Off"
-                  VerticalAlignment="Center"
-                  HorizontalAlignment="Center"
-                  Toggled="UsewinpartStartapps_Toggled"/>
-
-                    
-
-                </Border>
+              
 
 
                 <!-- START GCM Button mit mehrfarbigem Verlauf -->

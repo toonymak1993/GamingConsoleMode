@@ -5,56 +5,54 @@ using System.IO;
 using System.IO.Pipes;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using SharpDX.XInput;
+using Tomlyn;
+using System.Globalization;
+using System.Windows.Data;
+using Tomlyn.Model;
 
 namespace OverlayWindow
 {
     public partial class MainWindow : Window
     {
-        private Controller controller = new Controller(UserIndex.One);
-        private State previousState;
-        private DispatcherTimer gamepadTimer;
-        private DispatcherTimer timer;
-        private readonly string shortcutPath;
+        private Controller _controller;
+        private State _previousState;
+        private DispatcherTimer _gamepadTimer;
         public ObservableCollection<Shortcut> Shortcuts { get; set; }
+        private Expander[] _categoryExpanders;
+        // FÜGE DIESE ZEILE HIER EIN:
         private int currentExpanderIndex = 0;
-        private Expander[] categoryExpanders;
+
 
         public MainWindow()
         {
             InitializeComponent();
 
+            // Verhindert, dass mehrere Instanzen des Overlays laufen
             if (IsAnotherInstanceRunning())
             {
                 this.Close();
                 return;
             }
 
-            shortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "shortcuts");
             Shortcuts = new ObservableCollection<Shortcut>();
             ShortcutList.ItemsSource = Shortcuts;
 
-            LoadShortcuts();
-            StartShortcutWatcher();
-            StartPipeServer();
+            // Lade die Shortcuts EINMAL beim Start aus der TOML-Datei
+            LoadShortcutsFromToml();
 
+            StartPipeServer();
             this.Visibility = Visibility.Hidden;
 
-            // Gamepad UI setup
-            categoryExpanders = new[] { ShortcutExpander };
+            _categoryExpanders = new[] { ShortcutExpander };
             InitGamepadControl();
-
-           
         }
-
 
         private bool IsAnotherInstanceRunning()
         {
@@ -62,30 +60,41 @@ namespace OverlayWindow
             return Process.GetProcessesByName(current.ProcessName).Any(p => p.Id != current.Id);
         }
 
-        private void StartShortcutWatcher()
+        /// <summary>
+        /// GEÄNDERT: Liest jetzt einmalig die settings.toml und lädt nur aktivierte Shortcuts.
+        /// </summary>
+        private void LoadShortcutsFromToml()
         {
-            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0) };
-            timer.Tick += (s, e) => LoadShortcuts();
-            timer.Start();
-        }
+            Shortcuts.Clear();
+            string settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "settings.toml");
 
-        private void LoadShortcuts()
-        {
+            if (!File.Exists(settingsFilePath)) return;
+
             try
             {
-                Shortcuts.Clear();
-                var files = Directory.GetFiles(shortcutPath, "*.json");
-                foreach (var file in files)
+                var model = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
+                if (model.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
                 {
-                    var content = File.ReadAllText(file);
-                    var shortcut = JsonSerializer.Deserialize<Shortcut>(content);
-                    if (shortcut != null && shortcut.Enabled)
-                        Shortcuts.Add(shortcut);
+                    foreach (TomlTable shortcutTable in shortcutsArray)
+                    {
+                        var shortcut = new Shortcut
+                        {
+                            Key1 = shortcutTable["key1"]?.ToString(),
+                            Key2 = shortcutTable["key2"]?.ToString(),
+                            Function = shortcutTable["function"]?.ToString(),
+                            Enabled = Convert.ToBoolean(shortcutTable["enabled"])
+                        };
+
+                        if (shortcut.Enabled) // Nur aktivierte Shortcuts hinzufügen
+                        {
+                            Shortcuts.Add(shortcut);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Shortcut load error: " + ex.Message);
+                Debug.WriteLine($"Error loading shortcuts from TOML: {ex.Message}");
             }
         }
 
@@ -105,13 +114,11 @@ namespace OverlayWindow
 
                         Dispatcher.Invoke(() =>
                         {
-                            if (command == "TOGGLE")
-                                ToggleOverlay();
-                            else if (command.StartsWith("NOTIFY:"))
-                                ShowToast(command.Substring(7));
+                            if (command == "TOGGLE") ToggleOverlay();
+                            else if (command != null && command.StartsWith("NOTIFY:")) ShowToast(command.Substring(7));
                         });
                     }
-                    catch { }
+                    catch { /* Ignoriere Fehler und versuche es erneut */ }
                 }
             });
         }
@@ -123,10 +130,8 @@ namespace OverlayWindow
 
             if (this.Visibility == Visibility.Visible)
             {
-                var slideOut = new DoubleAnimation
+                var slideOut = new DoubleAnimation(screenWidth, TimeSpan.FromMilliseconds(300))
                 {
-                    To = screenWidth,
-                    Duration = TimeSpan.FromMilliseconds(300),
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
                 };
                 slideOut.Completed += (s, e) => this.Visibility = Visibility.Hidden;
@@ -134,33 +139,26 @@ namespace OverlayWindow
             }
             else
             {
-                this.Left = screenWidth; // Start off-screen
+                this.Left = screenWidth;
                 this.Visibility = Visibility.Visible;
                 this.Topmost = true;
-                this.Show();
 
-                // Focus handling (robust native version)
-                var helper = new System.Windows.Interop.WindowInteropHelper(this);
-                NativeMethods.SetForegroundWindow(helper.Handle); // Native call
-
-                this.Focus();
-                Keyboard.Focus(this);
-
-                Debug.WriteLine($"[DEBUG] Overlay is active: {this.IsActive}");
-                Debug.WriteLine($"[DEBUG] Focused element: {Keyboard.FocusedElement}");
-
-                var slideIn = new DoubleAnimation
+                // Zuverlässigere Methode, um das Fenster in den Vordergrund zu zwingen
+                Dispatcher.InvokeAsync(() =>
                 {
-                    To = targetLeft,
-                    Duration = TimeSpan.FromMilliseconds(300),
+                    var helper = new System.Windows.Interop.WindowInteropHelper(this);
+                    NativeMethods.SetForegroundWindow(helper.Handle);
+                    this.Activate();
+                    this.Focus();
+                }, DispatcherPriority.ApplicationIdle);
+
+                var slideIn = new DoubleAnimation(targetLeft, TimeSpan.FromMilliseconds(300))
+                {
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                 };
                 this.BeginAnimation(Window.LeftProperty, slideIn);
             }
         }
-
-
-
 
         private void ShowToast(string message)
         {
@@ -170,155 +168,125 @@ namespace OverlayWindow
 
         private void InitGamepadControl()
         {
-            gamepadTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
-            gamepadTimer.Tick += GamepadTick;
+            // Effizienteres Intervall für die Gamepad-Abfrage
+            _gamepadTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+            _gamepadTimer.Tick += GamepadTick;
 
-            // Controller-Polling nur aktiv, wenn sichtbar
             this.IsVisibleChanged += (s, e) =>
             {
                 if (this.IsVisible)
                 {
-                    gamepadTimer.Start();
+                    _controller = new Controller(UserIndex.One);
+                    _gamepadTimer.Start();
                     FocusFirstExpander();
                 }
                 else
                 {
-                    gamepadTimer.Stop();
+                    _gamepadTimer.Stop();
                 }
             };
         }
 
         private void FocusFirstExpander()
         {
-            if (categoryExpanders.Length > 0)
+            if (_categoryExpanders.Any())
             {
                 currentExpanderIndex = 0;
                 HighlightCurrentExpander();
             }
         }
 
-        private bool aWasPressed = false;
-        private bool bWasPressed = false;
-        private bool upWasPressed = false;
-        private bool downWasPressed = false;
-
-        private int lastPacketNumber = -1;
-
+        /// <summary>
+        /// BEREINIGT: Verarbeitet Gamepad-Eingaben nur bei neuen Tastendrücken.
+        /// </summary>
         private void GamepadTick(object sender, EventArgs e)
         {
-            if (!controller.IsConnected)
-            {
-                Debug.WriteLine("[DEBUG] Controller not connected");
-                controller = new Controller(UserIndex.One);
-                return;
-            }
+            if (!_controller.IsConnected) return;
 
-            var state = controller.GetState();
+            var state = _controller.GetState();
+            if (state.PacketNumber == _previousState.PacketNumber) return;
 
-            // Debug packet number
-            if (state.PacketNumber == lastPacketNumber)
-            {
-                Debug.WriteLine("[DEBUG] No new input (PacketNumber unchanged)");
-                return;
-            }
-
-            Debug.WriteLine($"[DEBUG] PacketNumber changed: {lastPacketNumber} -> {state.PacketNumber}");
-            lastPacketNumber = state.PacketNumber;
-
-            var buttons = state.Gamepad.Buttons;
-            var prevButtons = previousState.Gamepad.Buttons;
-
-            Debug.WriteLine($"[DEBUG] Current Buttons: {buttons}");
+            var currentButtons = state.Gamepad.Buttons;
+            var prevButtons = _previousState.Gamepad.Buttons;
 
             // DPad Down
-            if ((buttons & GamepadButtonFlags.DPadDown) != 0)
-                Console.WriteLine("[DEBUG] DPadDown PRESSED");
-            if ((buttons & GamepadButtonFlags.DPadDown) != 0 && (prevButtons & GamepadButtonFlags.DPadDown) == 0)
+            if (currentButtons.HasFlag(GamepadButtonFlags.DPadDown) && !prevButtons.HasFlag(GamepadButtonFlags.DPadDown))
             {
-                Debug.WriteLine("[DEBUG] DPadDown NEW PRESS → FocusNextCategory()");
                 FocusNextCategory();
             }
 
             // DPad Up
-            if ((buttons & GamepadButtonFlags.DPadUp) != 0)
-                Debug.WriteLine("[DEBUG] DPadUp PRESSED");
-            if ((buttons & GamepadButtonFlags.DPadUp) != 0 && (prevButtons & GamepadButtonFlags.DPadUp) == 0)
+            if (currentButtons.HasFlag(GamepadButtonFlags.DPadUp) && !prevButtons.HasFlag(GamepadButtonFlags.DPadUp))
             {
-                Debug.WriteLine("[DEBUG] DPadUp NEW PRESS → FocusPreviousCategory()");
                 FocusPreviousCategory();
             }
 
             // A Button
-            if ((buttons & GamepadButtonFlags.A) != 0)
-                Debug.WriteLine("[DEBUG] A PRESSED");
-            if ((buttons & GamepadButtonFlags.A) != 0 && (prevButtons & GamepadButtonFlags.A) == 0)
+            if (currentButtons.HasFlag(GamepadButtonFlags.A) && !prevButtons.HasFlag(GamepadButtonFlags.A))
             {
-                Debug.WriteLine("[DEBUG] A NEW PRESS → ToggleCurrentCategory()");
                 ToggleCurrentCategory();
             }
 
             // B Button
-            if ((buttons & GamepadButtonFlags.B) != 0)
-                Console.WriteLine("[DEBUG] B PRESSED");
-            if ((buttons & GamepadButtonFlags.B) != 0 && (prevButtons & GamepadButtonFlags.B) == 0)
+            if (currentButtons.HasFlag(GamepadButtonFlags.B) && !prevButtons.HasFlag(GamepadButtonFlags.B))
             {
-                Console.WriteLine("[DEBUG] B NEW PRESS → CollapseCurrentCategory()");
                 CollapseCurrentCategory();
             }
 
-            previousState = state;
+            _previousState = state;
         }
-
-
-
-
 
         private void FocusNextCategory()
         {
-            currentExpanderIndex = (currentExpanderIndex + 1) % categoryExpanders.Length;
+            currentExpanderIndex = (currentExpanderIndex + 1) % _categoryExpanders.Length;
             HighlightCurrentExpander();
         }
 
         private void FocusPreviousCategory()
         {
-            currentExpanderIndex = (currentExpanderIndex - 1 + categoryExpanders.Length) % categoryExpanders.Length;
+            currentExpanderIndex = (currentExpanderIndex - 1 + _categoryExpanders.Length) % _categoryExpanders.Length;
             HighlightCurrentExpander();
         }
 
         private void ToggleCurrentCategory()
         {
-            if (categoryExpanders.Length == 0) return;
-            var exp = categoryExpanders[currentExpanderIndex];
+            if (!_categoryExpanders.Any()) return;
+            var exp = _categoryExpanders[currentExpanderIndex];
             exp.IsExpanded = !exp.IsExpanded;
         }
 
         private void CollapseCurrentCategory()
         {
-            if (categoryExpanders.Length == 0) return;
-            categoryExpanders[currentExpanderIndex].IsExpanded = false;
+            if (!_categoryExpanders.Any()) return;
+            _categoryExpanders[currentExpanderIndex].IsExpanded = false;
         }
 
         private void HighlightCurrentExpander()
         {
-            for (int i = 0; i < categoryExpanders.Length; i++)
+            for (int i = 0; i < _categoryExpanders.Length; i++)
             {
-                categoryExpanders[i].BorderThickness = (i == currentExpanderIndex) ? new Thickness(3) : new Thickness(1);
-                categoryExpanders[i].BorderBrush = (i == currentExpanderIndex) ? Brushes.DodgerBlue : Brushes.Gray;
+                _categoryExpanders[i].BorderThickness = (i == currentExpanderIndex) ? new Thickness(2) : new Thickness(0);
+                _categoryExpanders[i].BorderBrush = (i == currentExpanderIndex) ? System.Windows.Media.Brushes.WhiteSmoke : System.Windows.Media.Brushes.Transparent;
             }
-
-            categoryExpanders[currentExpanderIndex].Focus();
+            _categoryExpanders[currentExpanderIndex].Focus();
         }
 
-        private void Window_Deactivated(object sender, EventArgs e)
-        {
-            if (this.Visibility == Visibility.Visible)
-            {
-                Debug.WriteLine("[DEBUG] Lost focus → overlay will close");
-                ToggleOverlay();
-            }
-        }
+        /// <summary>
+        /// ENTFERNT: Diese Methode hat das Overlay zu aggressiv geschlossen.
+        /// Das Fenster bleibt jetzt offen, auch wenn es den Fokus verliert.
+        /// </summary>
+        //private void Window_Deactivated(object sender, EventArgs e)
+        //{
+        //    if (this.Visibility == Visibility.Visible)
+        //    {
+        //        ToggleOverlay();
+        //    }
+        //}
     }
 
+
+
+    // Die Shortcut-Klasse bleibt unverändert
     public class Shortcut
     {
         public string Key1 { get; set; }
@@ -326,10 +294,24 @@ namespace OverlayWindow
         public string Function { get; set; }
         public bool Enabled { get; set; }
     }
-}
 
-internal static class NativeMethods
-{
-    [DllImport("user32.dll")]
-    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+    internal static class NativeMethods
+    {
+        [DllImport("user32.dll")]
+        internal static extern bool SetForegroundWindow(IntPtr hWnd);
+    }
+
+    public class ToUpperConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            return value is string s ? s.ToUpper() : value;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
 }
