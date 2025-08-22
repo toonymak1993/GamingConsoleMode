@@ -2,7 +2,6 @@
 using Discord.WebSocket;
 using GAMINGCONSOLEMODE;
 using Microsoft.UI;
-using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -65,6 +64,12 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+      
+
+        #region wingamepad
+        private DispatcherTimer _wingamepadMonitor;
+        private bool _isExiting = false; 
+        #endregion wingamepad
         #region Startup Video
         private MediaPlayer _startupMediaPlayer;
         private bool startupVideoFinished = false;
@@ -484,6 +489,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             this.InitializeComponent();
             perfectsettings();
             // Zugriff auf das Grid-Root-Element
+
             if (this.Content is FrameworkElement rootElement)
             {
                 rootElement.KeyDown += MainWindow_KeyDown;
@@ -534,7 +540,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine("[WARN] SteamGridDB API key setting does not exist. Feature is disabled.");
             }
 
-
+            MinimizeAllWindows();
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             _launcherAreaButtons = new List<Border> { LauncherCard, DiscordCard };
@@ -559,7 +565,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // NEU: Starte einen einmaligen Timer, der die Gnadenfrist beendet.
             var gracePeriodTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(15) // 10 Sekunden warten
+                Interval = TimeSpan.FromSeconds(15) 
             };
             gracePeriodTimer.Tick += (s, e) =>
             {
@@ -572,7 +578,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             StartAsynctasks();
 
         }
-       private void perfectsettings()
+
+    
+
+        private void perfectsettings()
         {
             // Usewinpartstartapps
             try
@@ -1661,24 +1670,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private void FirstStart()
         {
-            // Warning message about modifying the Windows registry
-            string message = "This application modifies the Windows registry and may temporarily block your PC if used improperly. " +
-                             "I disclaim any responsibility for improper use. If you encounter any issues, please visit the project on GitHub: " +
-                             "https://github.com/Kosnix/GameConsoleMode";
-            string caption = "First Start";
-
-            Console.WriteLine(message);
-
-            // Thank you message and initial configuration instructions
-            message = "Thank you for downloading my app. This is the first start of the application, please configure it. The settings window will appear.";
-            Console.WriteLine(message);
-            // Notification for the next startup
-            message = "Next time, the application will start directly.";
-            Console.WriteLine(message);
-
-            // Launch the settings file and terminate the program
-            Process.Start(new ProcessStartInfo(Path.Combine(exeFolder(), "GAMINGCONSOLEMODE.exe")));
-            Console.WriteLine("Settings launched");
             CleanupLogging();
             Environment.Exit(0);
         }
@@ -1732,6 +1723,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private void BackToWindows()
         {
             MakeSelfNonTopmost();
+         
             Console.WriteLine("Exit-Button geklickt. Stelle den Desktop wieder her und beende die App...");
 
             // Schritt 1: Taskleiste und Icons für die aktuelle Sitzung wieder sichtbar machen
@@ -1762,8 +1754,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // Explorer.exe neu starten, falls er nicht läuft
                 if (!Process.GetProcessesByName("explorer").Any())
                 {
+                    
+                   
+                }
+                else
+                {
+                    KillProcess("explorer.exe");
+                    Thread.Sleep(500);
                     Process.Start("explorer.exe");
                 }
+
+                   
             }
             catch (Exception ex)
             {
@@ -1788,6 +1789,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             displayfusion("end");
             CleanupLogging();
             preaudio(false, true);
+            StartWingamepad();
+           
+
+            // Overlay-Prozess beenden
+            foreach (var proc in Process.GetProcessesByName("OverlayWindow"))
+            {
+                try { proc.Kill(); } catch { }
+            }
 
             // UAC-Einstellungen wiederherstellen
             try
@@ -1798,12 +1807,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
             catch { uac("on"); } // Im Zweifel UAC wieder aktivieren
-
-            // Overlay-Prozess beenden
-            foreach (var proc in Process.GetProcessesByName("OverlayWindow"))
-            {
-                try { proc.Kill(); } catch { }
-            }
 
             // Schritt 4: Anwendung sauber beenden
             Environment.Exit(0);
@@ -1912,34 +1915,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             MakeSelfNonTopmost(); // <-- HINZUGEFÜGT
             SwitchToConfiguredLauncher();
         }
-        private void WaitForExplorerAndStartLauncher()
-        {
-            Console.WriteLine("Warte darauf, dass der Windows-Explorer vollständig geladen ist...");
-
-            IntPtr taskbarHandle = IntPtr.Zero;
-
-            // Diese Schleife läuft so lange, bis der Explorer-Prozess existiert UND die Taskleiste gefunden wurde.
-            while (true)
-            {
-                // Finde das Handle der Taskleiste
-                taskbarHandle = FindWindow("Shell_TrayWnd", null);
-
-                // Prüfe, ob der Prozess läuft UND das Handle gefunden wurde
-                if (Process.GetProcessesByName("explorer").Any() && taskbarHandle != IntPtr.Zero)
-                {
-                    // Beide Bedingungen sind erfüllt, Schleife beenden.
-                    break;
-                }
-
-                // Kurz warten, um den Prozessor nicht auszulasten.
-                Thread.Sleep(500);
-            }
-
-            Console.WriteLine("Windows-Explorer ist bereit. Starte den Launcher...");
-
-            // Jetzt, wo der Explorer bereit ist, den Launcher starten.
-            StartLauncher();
-        }
+       
 
         static void uac(string art)
         {
@@ -1979,6 +1955,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private async void ConsoleModeToShell()
         {
+            Showwinpart();
+
             const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
             const string valueName = "Shell";
 
@@ -1997,18 +1975,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         Console.WriteLine($"[ERROR] Registry key '{keyName}' not found or no access.");
                         return;
-                    }
-
-                    // 2. Originalen Shell-Wert sichern (falls nötig)
-                    string originalShell = key.GetValue(valueName)?.ToString() ?? "explorer.exe";
-                    if (!originalShell.Contains("gcmloader.exe", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try { AppSettings.Load<string>("original_shell"); }
-                        catch (KeyNotFoundException)
-                        {
-                            AppSettings.Save("original_shell", originalShell);
-                            Console.WriteLine($"[OK] Original shell '{originalShell}' saved.");
-                        }
                     }
 
                     // 3. NEU: Neuen Shell-Wert mit bis zu 3 Versuchen setzen
@@ -2032,19 +1998,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         Console.WriteLine($"[WARN] Attempt {i + 1} of {maxRetries} failed. Retrying...");
                         await Task.Delay(500); // Längere Pause vor dem nächsten Versuch
                     }
-
-                    // 4. Explorer nur beenden, wenn das Setzen erfolgreich war
-                    if (success)
-                    {
-                        KillProcess("explorer.exe");
-                        Showwinpart();
-
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[FATAL ERROR] Failed to set Shell after {maxRetries} attempts.");
-                        // Hier könnte man eine Fehlermeldung für den Benutzer anzeigen
-                    }
                 }
             }
             catch (UnauthorizedAccessException)
@@ -2055,6 +2008,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 Console.WriteLine($"[ERROR] An unexpected error occurred in ConsoleModeToShell: {ex.Message}");
             }
+
+            
         }
         private void SettingsVerify()
         {
@@ -2674,6 +2629,132 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private void SetupWingamepadTask()
+        {
+            const string taskName = "GCM_wingamepad";
+            const string processName = "wingamepad";
+
+            // Schritt 1: Beende sofort alle laufenden Instanzen des Prozesses.
+            try
+            {
+                Process[] runningProcesses = Process.GetProcessesByName(processName);
+                foreach (var process in runningProcesses)
+                {
+                    process.Kill();
+                    Console.WriteLine($"Laufender Prozess '{processName}' wurde beendet.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Fehler beim Beenden von '{processName}': {ex.Message}");
+            }
+
+            // Schritt 2: Prüfe die Einstellung.
+            bool seamlessSwitchEnabled = false;
+            try
+            {
+                seamlessSwitchEnabled = AppSettings.Load<bool>("useseamlessswitchtogcm");
+            }
+            catch
+            {
+                AppSettings.Save("useseamlessswitchtogcm", false); // Standardwert setzen, falls nicht vorhanden
+            }
+
+            // Schritt 3: Task erstellen oder löschen.
+            using (TaskService ts = new TaskService())
+            {
+                var existingTask = ts.FindTask(taskName);
+
+                if (seamlessSwitchEnabled)
+                {
+                    // Einstellung ist AN: Task erstellen, falls er noch nicht existiert.
+                    if (existingTask == null)
+                    {
+                        Console.WriteLine($"Task '{taskName}' existiert nicht und wird erstellt...");
+                        TaskDefinition td = ts.NewTask();
+                        td.RegistrationInfo.Description = "Startet den GCM Gamepad Listener für den Seamless Switch.";
+                        td.Principal.LogonType = TaskLogonType.InteractiveToken;
+                        td.Principal.RunLevel = TaskRunLevel.Highest;
+
+                        // Trigger: Bei jeder Benutzeranmeldung
+                        td.Triggers.Add(new LogonTrigger());
+
+                        // Aktion: wingamepad.exe starten
+                        string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
+                        td.Actions.Add(new ExecAction(exePath));
+
+                        // ### ANPASSUNG FÜR HANDHELDS ###
+                        // Erlaube die Ausführung im Akkubetrieb.
+                        td.Settings.StopIfGoingOnBatteries = false;
+                        td.Settings.DisallowStartIfOnBatteries = false;
+                        // ### ENDE DER ANPASSUNG ###
+
+                        ts.RootFolder.RegisterTaskDefinition(taskName, td);
+                        Console.WriteLine($"Task '{taskName}' wurde erfolgreich erstellt.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Task '{taskName}' existiert bereits.");
+                    }
+                }
+                else
+                {
+                    // Einstellung ist AUS: Task löschen, falls er existiert.
+                    if (existingTask != null)
+                    {
+                        ts.RootFolder.DeleteTask(taskName);
+                        Console.WriteLine($"Task '{taskName}' wurde entfernt.");
+                    }
+                }
+            }
+        }
+        private void StartWingamepad()
+        {
+            try
+            {
+                // 1. Prüfen, ob die Funktion in den Einstellungen aktiviert ist.
+                if (AppSettings.Load<bool>("useseamlessswitchtogcm"))
+                {
+                    string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
+                    string processName = "wingamepad";
+
+                    // 2. Sicherstellen, dass die Datei existiert.
+                    if (File.Exists(exePath))
+                    {
+                        // NEU: Zuerst alle alten Instanzen von wingamepad.exe beenden.
+                        try
+                        {
+                            Process[] existingProcesses = Process.GetProcessesByName(processName);
+                            foreach (var proc in existingProcesses)
+                            {
+                                proc.Kill();
+                                Console.WriteLine("Alter wingamepad-Prozess wurde beendet.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Fehler beim Beenden alter wingamepad-Prozesse: {ex.Message}");
+                        }
+
+                        // 3. Den neuen Prozess starten.
+                        Process.Start(exePath);
+                        Console.WriteLine("wingamepad.exe wurde für den Seamless Switch gestartet.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Fehler: wingamepad.exe wurde nicht unter '{exePath}' gefunden.");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Seamless Switch ist deaktiviert, wingamepad.exe wird nicht gestartet.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Fehler beim Versuch, wingamepad.exe zu starten: {ex.Message}");
+            }
+        }
         private async Task StartOtherLauncher()
         {
             try
@@ -2710,8 +2791,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
             
-            // Die "IsAlreadyRunning"-Prüfung ist dank des Mutex in App.xaml.cs überflüssig.
-
+          
             SetupLogging();
 
             // === HIER IST DIE WICHTIGE ÄNDERUNG ===
@@ -2729,7 +2809,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             await Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
             IsJoyxoffInstalledAndStart();
-
+            SetupWingamepadTask();
             await StartLauncher();
 
             cssloader();
@@ -3786,6 +3866,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         }
         #endregion shortcut overlay
+        #region shortcut xbox bar
+        public static void xboxbar()
+        {
+            // Definiere die virtuellen Tastencodes
+            const byte VK_LWIN = 0x5B; // Linke Windows-Taste
+            const byte G_KEY = 0x47;   // 'G'-Taste
+
+            // Simuliere den Tastendruck
+            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // Win-Taste herunterdrücken
+            keybd_event(G_KEY, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);   // G-Taste herunterdrücken
+            keybd_event(G_KEY, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);     // G-Taste loslassen
+            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // Win-Taste loslassen
+        }
+        #endregion xbox bar
         #region backtowin
         [DllImport("user32.dll")]
         private static extern void LockWorkStation();
@@ -3981,7 +4075,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
                 _shortcutActions["performance overlay"] = TriggerPerformanceOverlay;
                 _shortcutActions["show overlay"] = showoverlay;
-                _shortcutActions["winmodechange"] = Triggerbacktowin; // Aktion für Seamless Switch
+                _shortcutActions["xbox bar"] = xboxbar;
+                _shortcutActions["winmodechange"] = Triggerbacktowin; 
             }
             catch (Exception ex)
             {
@@ -4289,8 +4384,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     break;
             }
         }
-
-
         private void RestoreUwpAppWindow(IntPtr hwnd)
         {
             IntPtr childWindow = IntPtr.Zero;
@@ -4452,8 +4545,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             IntPtr hWnd = Process.GetCurrentProcess().MainWindowHandle;
             BringToFrontAndFocus(hWnd);
         }
-
-        // ERSETZE DEINE ALTE METHODE DURCH DIESE:
         public static void BringToFrontAndFocus(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
@@ -4521,49 +4612,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         [DllImport("user32.dll")]
         static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
-        private static void SimulateInvisibleClick(IntPtr hWnd)
-        {
-            // Mausposition auf das Fenster setzen (aber wird vorher unsichtbar gemacht!)
-            RECT rect;
-            GetWindowRect(hWnd, out rect);
-            int centerX = rect.Left + (rect.Right - rect.Left) / 2;
-            int centerY = rect.Top + (rect.Bottom - rect.Top) / 2;
-
-            // Cursorposition setzen
-            SetCursorPos(centerX, centerY);
-
-            // Klick simulieren
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            Thread.Sleep(30);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        }
-        private static void SimulateMouseClickInWindow(IntPtr hWnd)
-        {
-            if (hWnd == IntPtr.Zero) return;
-
-            try
-            {
-                // Erlaube dem Programm kurzzeitig, den Fokus zu stehlen.
-                LockSetForegroundWindow(1); // 1 = LSFW_UNLOCK
-
-                // Bringe das Fenster in den Vordergrund.
-                SetForegroundWindow(hWnd);
-
-                // Gib den Fokus an das Fenster.
-                SetFocus(hWnd);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error setting focus: {ex.Message}");
-            }
-            finally
-            {
-                // Verbiete das Fokus-Stehlen wieder für andere Programme.
-                LockSetForegroundWindow(0); // 0 = LSFW_LOCK
-            }
-        }
-
-
 
         #endregion
         #region Startupvideo

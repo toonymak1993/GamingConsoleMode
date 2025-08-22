@@ -32,11 +32,15 @@
     <Content Remove="Assets\launcher\steam_logo.png" />
     <Content Remove="Assets\logo_gcm.png" />
     <Content Remove="Assets\logo_gcm_exe.png" />
+    <Content Remove="Assets\onboarding\allygamepad.jpg" />
     <Content Remove="Assets\onboarding\discord.jpg" />
     <Content Remove="Assets\onboarding\flowlauncher.png" />
     <Content Remove="Assets\onboarding\functions_gcm.png" />
+    <Content Remove="Assets\onboarding\gcmoverlay.gif" />
+    <Content Remove="Assets\onboarding\mousecontroll.gif" />
     <Content Remove="Assets\onboarding\shortcuts.png" />
     <Content Remove="Assets\onboarding\shortcutsnorm.png" />
+    <Content Remove="Assets\onboarding\taskmanager.gif" />
     <Content Remove="Assets\onboarding\taskmanager_gcmloader.png" />
     <Content Remove="Assets\Play.png" />
     <Content Remove="Assets\playnite_logo.png" />
@@ -62,10 +66,13 @@
     <None Remove="Assets\launcher\steam_logo.png" />
     <None Remove="Assets\logo_gcm.png" />
     <None Remove="Assets\logo_gcm_exe.png" />
+    <None Remove="Assets\onboarding\allygamepad.jpg" />
     <None Remove="Assets\onboarding\discord.jpg" />
     <None Remove="Assets\onboarding\flowlauncher.png" />
     <None Remove="Assets\onboarding\functions_gcm.png" />
+    <None Remove="Assets\onboarding\mousecontroll.gif" />
     <None Remove="Assets\onboarding\shortcuts.png" />
+    <None Remove="Assets\onboarding\taskmanager.gif" />
     <None Remove="Assets\onboarding\taskmanager_gcmloader.png" />
     <None Remove="Assets\Play.png" />
     <None Remove="Assets\rogally\allybackside.png" />
@@ -125,6 +132,9 @@
     <EmbeddedResource Include="Assets\logo_gcm_exe.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\allygamepad.jpg">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\discord.jpg">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -134,10 +144,16 @@
     <EmbeddedResource Include="Assets\onboarding\functions_gcm.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\mousecontroll.gif">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\shortcutsnorm.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\shortcuts.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\taskmanager.gif">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\taskmanager_gcmloader.png">
@@ -335,6 +351,11 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\logo_gcm.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\onboarding\gcmoverlay.gif">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
   </ItemGroup>

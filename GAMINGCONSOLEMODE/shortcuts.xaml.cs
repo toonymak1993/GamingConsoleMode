@@ -35,7 +35,7 @@ namespace GAMINGCONSOLEMODE
 
         private readonly List<string> functions = new() {
             "taskmanager", "switch tab", "audio switch",
-            "performance overlay", "show overlay"
+            "performance overlay", "show overlay", "xbox bar"
         };
 
         public shortcuts()
@@ -395,7 +395,7 @@ namespace GAMINGCONSOLEMODE
             ComboBoxswitchgcm1.IsEnabled = false;
             ComboBoxswitchgcm2.IsEnabled = false;
             AppSettings.Save("useseamlessswitchtogcm", true);
-            ShowSimpleDialog("Enabled", "Seamless Switch will be enabled on the next GCM launch.");
+           
             _saveConfiguration();
         }
 

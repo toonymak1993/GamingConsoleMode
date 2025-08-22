@@ -41,8 +41,8 @@ namespace GAMINGCONSOLEMODE
         public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 
         string owner = "toonymak1993";  // Repository owner
-    string repo = "GameConsoleMode";  // Repository name
-    string currentVersion = "2.3.1";  // Your current version // <change when new Verison
+    string repo = "GameConsoleMode";   // Repository name
+    string currentVersion = "2.3.3";  // Your current version // <change when new Verison
         public MainWindow()
         {
             this.InitializeComponent();
@@ -398,43 +398,30 @@ namespace GAMINGCONSOLEMODE
 
         private void Updateui()
         {   
-            #region autostartapps
-            try
-            {
-                
-                var usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
-                if (usewinpartstartapps)
-                {
-                    UsewinpartStartapps.IsOn = true;
-                }
-                else
-                {
-                    UsewinpartStartapps.IsOn = false;
-                }
-            }
-            catch { 
             
-            
-            }
-            #endregion autostartapps
         }
-        private void UsewinpartStartapps_Toggled(object sender, RoutedEventArgs e)
-        {
-            if(UsewinpartStartapps.IsOn)
-            {
-                AppSettings.Save("usewinpartstartapps", true);
-            }
-            else
-            {
-                AppSettings.Save("usewinpartstartapps", false);
-            }
-               
-        }
+        
         #endregion start
 
+        #region discord
+        private void DiscordImageButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Erstellt einen neuen Prozess, um den Link im Standard-Webbrowser zu öffnen.
+                Process.Start(new ProcessStartInfo("https://discord.gg/FbjYDeEJce") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                // Schreibt eine Fehlermeldung in die Konsole, falls das Öffnen des Links fehlschlägt.
+                Debug.WriteLine($"Fehler beim Öffnen des Discord-Links: {ex.Message}");
+            }
+        }
+        #endregion discord
+
     }
-        
-    
+
+
 
     public static class WindowExtensions
     {

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using Tomlyn;
@@ -101,13 +102,42 @@ namespace GAMINGCONSOLEMODE
                 }
             }
         }
+        public static void Delete(string key)
+        {
+            try
+            {
+                // Prüfen, ob die Einstellungsdatei existiert.
+                if (!File.Exists(SettingsFilePath))
+                {
+                    return;
+                }
 
+                // Lese das gesamte TOML-Dokument.
+                var tomlString = File.ReadAllText(SettingsFilePath);
+                var tomlTable = Toml.ToModel(tomlString);
+
+                // Prüfe, ob der Schlüssel vorhanden ist und entferne ihn, wenn ja.
+                if (tomlTable.ContainsKey(key))
+                {
+                    tomlTable.Remove(key);
+
+                    // Schreibe die aktualisierte Tabelle zurück in die Datei.
+                    File.WriteAllText(SettingsFilePath, Toml.FromModel(tomlTable));
+                }
+            }
+            catch (Exception ex)
+            {
+                // Logge den Fehler, um bei der Fehlersuche zu helfen.
+                Debug.WriteLine($"[ERROR] Fehler beim Löschen des Schlüssels '{key}' aus den AppSettings: {ex.Message}");
+            }
+        }
         public static void initialconfig()
         {
             lock (_fileLock)
             {
                 try
                 {
+                    // 1. Deine bestehenden Standard-Einstellungen
                     var defaultSettings = new TomlTable
                     {
                         ["launcher"] = "steam",
@@ -115,10 +145,39 @@ namespace GAMINGCONSOLEMODE
                         ["onboarding"] = false
                     };
 
+                    // === ANFANG DER NEUEN LOGIK ===
+
+                    // 2. Erstelle die Liste (TomlTableArray) für die Standard-Shortcuts
+                    var defaultShortcuts = new TomlTableArray
+            {
+                // Standard-Shortcut 1: Task Manager
+                new TomlTable
+                {
+                    ["key1"] = "Back",
+                    ["key2"] = "Start",
+                    ["function"] = "taskmanager",
+                    ["enabled"] = true
+                },
+                // Standard-Shortcut 2: Show Overlay
+                new TomlTable
+                {
+                    ["key1"] = "RightThumb",
+                    ["key2"] = "DPadLeft",
+                    ["function"] = "show overlay",
+                    ["enabled"] = true
+                }
+            };
+
+                    // 3. Füge die Shortcut-Liste zu den Haupteinstellungen hinzu
+                    defaultSettings["shortcuts"] = defaultShortcuts;
+
+                    // === ENDE DER NEUEN LOGIK ===
+
+                    // 4. Speichere die kompletten Einstellungen (inkl. Shortcuts) in die Datei
                     var tomlText = Toml.FromModel(defaultSettings);
                     File.WriteAllText(SettingsFilePath, tomlText);
 
-                    Console.WriteLine($"Default settings file created at: {SettingsFilePath}");
+                    Console.WriteLine($"Default settings file with shortcuts created at: {SettingsFilePath}");
                 }
                 catch (Exception ex)
                 {

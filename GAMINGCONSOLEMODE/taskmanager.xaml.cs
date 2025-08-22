@@ -6,11 +6,11 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
-// Stelle sicher, dass der Namespace zu deinem Projekt passt
 namespace GAMINGCONSOLEMODE
 {
     public sealed partial class taskmanager : Page
@@ -18,228 +18,203 @@ namespace GAMINGCONSOLEMODE
         public taskmanager()
         {
             this.InitializeComponent();
-            // Die UI wird jetzt beim Laden der Seite aktualisiert, was robuster ist
             this.Loaded += (s, e) => UpdateUI();
         }
-
-        #region update ui
 
         /// <summary>
         /// Lädt alle Einstellungen und aktualisiert die gesamte Benutzeroberfläche.
         /// </summary>
         private void UpdateUI()
         {
-            // Lädt die Bilder für die 5 Launcher-Buttons
-            LoadImageIfExists(Image1, "button1");
-            LoadImageIfExists(Image2, "button2");
-            LoadImageIfExists(Image3, "button3");
-            LoadImageIfExists(Image4, "button4");
-            LoadImageIfExists(Image5, "button5");
+            try
+            {
+                for (int i = 1; i <= 5; i++)
+                {
+                    LoadSettingsForButton(i); // Lädt alle Einstellungen für jeden Button
+                }
+                LoadHandheldTouchLauncherSetting();
+            }
+            catch
+            {
 
-            // Lädt die Einstellung für den Handheld-Toggle
-            LoadHandheldTouchLauncherSetting();
+            }
 
-            // NEU: Lädt die Einstellung für den SteamGridDB API Key
-            LoadSteamGridDbApiKey();
+            try
+            {
+                LoadSteamGridDbApiKey();
+            }
+            catch
+            {
+
+            }
         }
 
-        #endregion update ui
-
-        // --- NEUE METHODEN FÜR STEAMGRIDDB ---
         #region SteamGridDB
-
-        /// <summary>
-        /// Lädt den gespeicherten SteamGridDB API-Schlüssel und zeigt ihn im Textfeld an.
-        /// </summary>
         private void LoadSteamGridDbApiKey()
         {
             try
             {
-                string apiKey = AppSettings.Load<string>("steamgriddb_api_key");
-                if (!string.IsNullOrEmpty(apiKey))
-                {
-                    SteamGridDbApiKeyBox.Text = apiKey;
-                }
+                SteamGridDbApiKeyBox.Text = AppSettings.Load<string>("steamgriddb_api_key");
             }
-            catch
+            catch { /* Einstellung existiert nicht, ignoriere. */ }
+        }
+
+        private async void SaveApiKeyButton_Click(object sender, RoutedEventArgs e)
+        {
+            AppSettings.Save("steamgriddb_api_key", SteamGridDbApiKeyBox.Text.Trim());
+            var dialog = new ContentDialog
             {
-                // Einstellung existiert noch nicht, das ist in Ordnung.
+                XamlRoot = this.XamlRoot,
+                Title = "Gespeichert",
+                Content = "API Key wurde erfolgreich gespeichert!",
+                CloseButtonText = "Ok"
+            };
+            await dialog.ShowAsync();
+        }
+        #endregion
+
+        #region Launcher Konfiguration (NEU & VERBESSERT)
+
+        // --- HILFSMETHODEN, DIE DEN CODE STARK VEREINFACHEN ---
+
+        /// <summary>
+        /// Lädt die Einstellungen für einen bestimmten Button-Slot und zeigt sie in der UI an.
+        /// </summary>
+        private void LoadSettingsForButton(int index)
+        {
+            // Finde die richtigen UI-Elemente basierend auf dem Index
+            var imageControl = this.FindName($"Image{index}") as Image;
+            var argsBox = this.FindName($"Args{index}") as TextBox;
+            if (imageControl == null || argsBox == null) return;
+
+            try
+            {
+                // Bild laden
+                string imagePath = AppSettings.Load<string>($"button{index}image");
+                if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                {
+                    imageControl.Source = new BitmapImage(new Uri(imagePath));
+                }
+
+                // Parameter laden
+                argsBox.Text = AppSettings.Load<string>($"button{index}args");
             }
+            catch { /* Ignoriere Fehler, falls eine Einstellung fehlt */ }
         }
 
         /// <summary>
-        /// Speichert den eingegebenen API-Schlüssel, wenn der Button geklickt wird.
+        /// Speichert alle Einstellungen für einen bestimmten Button-Slot.
         /// </summary>
-        private async void SaveApiKeyButton_Click(object sender, RoutedEventArgs e)
+        private void SaveSettingsForButton(int index)
         {
-            string apiKey = SteamGridDbApiKeyBox.Text.Trim();
+            var argsBox = this.FindName($"Args{index}") as TextBox;
+            if (argsBox == null) return;
 
-            AppSettings.Save("steamgriddb_api_key", apiKey);
-
-            // Zeigt dem Benutzer eine Erfolgsmeldung.
-            ContentDialog confirmationDialog = new ContentDialog
-            {
-                XamlRoot = this.XamlRoot,
-                Title = "Success",
-                Content = "API Key saved successfully!",
-                CloseButtonText = "Ok"
-            };
-
-            await confirmationDialog.ShowAsync();
-        }
-
-        #endregion SteamGridDB
-
-
-        #region launcher 
-
-        private void LoadHandheldTouchLauncherSetting()
-        {
             try
             {
-                bool isOn = AppSettings.Load<bool>("handheldtouchlauncher");
-                handheldtouchlauncher.IsOn = isOn;
-            }
-            catch
-            {
-                handheldtouchlauncher.IsOn = false; // Fallback
-            }
-        }
-
-        private void handheldtouchlauncher_Toggled(object sender, RoutedEventArgs e)
-        {
-            if (sender is ToggleSwitch toggle)
-            {
-                AppSettings.Save("handheldtouchlauncher", toggle.IsOn);
-            }
-        }
-
-        private void LoadImageIfExists(Image imageControl, string keyName)
-        {
-            try
-            {
-                string imagePath = AppSettings.Load<string>($"{keyName}image");
-                if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
-                {
-                    var bitmap = new BitmapImage(new Uri(imagePath));
-                    imageControl.Source = bitmap;
-                }
+                AppSettings.Save($"button{index}args", argsBox.Text);
+                AppSettings.Save($"button{index}", true); // Markiere den Slot als "aktiv"
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[ERROR] Could not load image for {keyName}: {ex.Message}");
+                Debug.WriteLine($"[ERROR] Fehler beim Speichern für Button {index}: {ex.Message}");
             }
         }
 
-        private async Task SetImageAsync(Image imageControl, string keyName)
+        // --- EVENT HANDLER (jetzt viel kürzer) ---
+
+        private async void SelectImage_Click(object sender, RoutedEventArgs e)
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".png");
-            picker.FileTypeFilter.Add(".jpg");
-            picker.FileTypeFilter.Add(".jpeg");
-            picker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
+            int index = int.Parse((sender as Button).Name.Replace("SelectImage", "").Replace("_Click", ""));
+            var imageControl = this.FindName($"Image{index}") as Image;
 
-            var hwnd = WindowNative.GetWindowHandle(App.MainWindow);
-            InitializeWithWindow.Initialize(picker, hwnd);
+            var file = await PickFileAsync(new[] { ".png", ".jpg", ".jpeg" });
+            if (file != null && imageControl != null)
+            {
+                imageControl.Source = new BitmapImage(new Uri(file.Path));
+                AppSettings.Save($"button{index}image", file.Path);
+                SaveSettingsForButton(index);
+            }
+        }
 
-            var file = await picker.PickSingleFileAsync();
+        private async void SelectLink_Click(object sender, RoutedEventArgs e)
+        {
+            int index = int.Parse((sender as Button).Name.Replace("SelectLink", "").Replace("_Click", ""));
+
+            var file = await PickFileAsync(new[] { ".exe" });
             if (file != null)
             {
-                try
-                {
-                    using var stream = await file.OpenAsync(Windows.Storage.FileAccessMode.Read);
-                    var bitmap = new BitmapImage();
-                    await bitmap.SetSourceAsync(stream);
-                    imageControl.Source = bitmap;
-
-                    AppSettings.Save($"{keyName}image", file.Path);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[ERROR] Failed to set image: {ex.Message}");
-                }
+                AppSettings.Save($"button{index}link", file.Path);
+                SaveSettingsForButton(index);
             }
         }
 
-        private async Task SetLinkAsync(string keyName)
+        private void Test_Click(object sender, RoutedEventArgs e)
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".exe");
-            picker.SuggestedStartLocation = PickerLocationId.Desktop;
-
-            var hwnd = WindowNative.GetWindowHandle(App.MainWindow);
-            InitializeWithWindow.Initialize(picker, hwnd);
-
-            var file = await picker.PickSingleFileAsync();
-            if (file != null)
-            {
-                AppSettings.Save($"{keyName}link", file.Path);
-                AppSettings.Save($"{keyName}", true);
-            }
-        }
-
-        private async void SelectImage1_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image1, "button1");
-        private async void SelectImage2_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image2, "button2");
-        private async void SelectImage3_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image3, "button3");
-        private async void SelectImage4_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image4, "button4");
-        private async void SelectImage5_Click(object sender, RoutedEventArgs e) => await SetImageAsync(Image5, "button5");
-
-        private async void SelectLink1_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button1");
-        private async void SelectLink2_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button2");
-        private async void SelectLink3_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button3");
-        private async void SelectLink4_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button4");
-        private async void SelectLink5_Click(object sender, RoutedEventArgs e) => await SetLinkAsync("button5");
-
-        private void Reset1_Click(object sender, RoutedEventArgs e) => ResetLauncher("button1", Image1);
-        private void Reset2_Click(object sender, RoutedEventArgs e) => ResetLauncher("button2", Image2);
-        private void Reset3_Click(object sender, RoutedEventArgs e) => ResetLauncher("button3", Image3);
-        private void Reset4_Click(object sender, RoutedEventArgs e) => ResetLauncher("button4", Image4);
-        private void Reset5_Click(object sender, RoutedEventArgs e) => ResetLauncher("button5", Image5);
-
-        private void ResetLauncher(string keyName, Image imageControl)
-        {
+            int index = int.Parse((sender as Button).Name.Replace("Test", "").Replace("_Click", ""));
             try
             {
-                AppSettings.Save($"{keyName}", false);
-                AppSettings.Save($"{keyName}link", string.Empty);
-                AppSettings.Save($"{keyName}image", string.Empty);
-                imageControl.Source = null;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ERROR] Failed to reset {keyName}: {ex.Message}");
-            }
-        }
+                string exePath = AppSettings.Load<string>($"button{index}link");
+                string arguments = (this.FindName($"Args{index}") as TextBox)?.Text ?? "";
 
-        private void Test1_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button1link");
-        private void Test2_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button2link");
-        private void Test3_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button3link");
-        private void Test4_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button4link");
-        private void Test5_Click(object sender, RoutedEventArgs e) => LaunchExeFromSetting("button5link");
-
-        private void LaunchExeFromSetting(string settingKey)
-        {
-            try
-            {
-                string exePath = AppSettings.Load<string>(settingKey);
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                 {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = exePath,
-                        UseShellExecute = true
-                    });
-                }
-                else
-                {
-                    Debug.WriteLine($"[TEST] No valid EXE path found in {settingKey}");
+                    Process.Start(new ProcessStartInfo(exePath) { Arguments = arguments, UseShellExecute = true });
                 }
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ERROR] Failed to launch {settingKey}: {ex.Message}");
-            }
+            catch (Exception ex) { Debug.WriteLine($"[TEST] Fehler: {ex.Message}"); }
         }
-        #endregion launcher
+
+        private void Args_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Finde heraus, welche Textbox geändert wurde, indem wir die Zahl aus dem Namen lesen.
+            var textBox = sender as TextBox;
+            int index = int.Parse(Regex.Match(textBox.Name, @"\d+").Value);
+
+            // Speichere den neuen Text in der Einstellungsdatei unter dem passenden Schlüssel (z.B. "button1args").
+            AppSettings.Save($"button{index}args", textBox.Text);
+        }
+
+        private void Reset_Click(object sender, RoutedEventArgs e)
+        {
+            int index = int.Parse((sender as Button).Name.Replace("Reset", "").Replace("_Click", ""));
+            var imageControl = this.FindName($"Image{index}") as Image;
+            var argsBox = this.FindName($"Args{index}") as TextBox;
+
+            if (imageControl != null) imageControl.Source = null;
+            if (argsBox != null) argsBox.Text = "";
+
+            AppSettings.Delete($"button{index}");
+            AppSettings.Delete($"button{index}link");
+            AppSettings.Delete($"button{index}image");
+            AppSettings.Delete($"button{index}args");
+        }
+
+        // --- ALLGEMEINE HILFSMETHODE FÜR DATEIAUSWAHL ---
+
+        private async Task<Windows.Storage.StorageFile> PickFileAsync(string[] fileTypes)
+        {
+            var picker = new FileOpenPicker();
+            foreach (var type in fileTypes) picker.FileTypeFilter.Add(type);
+
+            var hwnd = WindowNative.GetWindowHandle(App.MainWindow);
+            InitializeWithWindow.Initialize(picker, hwnd);
+
+            return await picker.PickSingleFileAsync();
+        }
+
+        #endregion
+
+        #region Handheld Toggle
+        private void LoadHandheldTouchLauncherSetting()
+        {
+            try { handheldtouchlauncher.IsOn = AppSettings.Load<bool>("handheldtouchlauncher"); }
+            catch { handheldtouchlauncher.IsOn = false; }
+        }
+        private void handheldtouchlauncher_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleSwitch toggle) AppSettings.Save("handheldtouchlauncher", toggle.IsOn);
+        }
+        #endregion
     }
 }
