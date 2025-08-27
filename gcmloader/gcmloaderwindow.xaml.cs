@@ -3880,6 +3880,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // Win-Taste loslassen
         }
         #endregion xbox bar
+        #region lossless scalling
+        // Das Schlüsselwort "async" ist hier erforderlich
+        public static void LosslessScaling()
+        {
+            // User notification
+            SendOverlayNotification("Toggle Scaling");
+            LosslessScalingController.TriggerScaling();
+        }
+        #endregion lossless scalling
         #region backtowin
         [DllImport("user32.dll")]
         private static extern void LockWorkStation();
@@ -4076,6 +4085,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _shortcutActions["performance overlay"] = TriggerPerformanceOverlay;
                 _shortcutActions["show overlay"] = showoverlay;
                 _shortcutActions["xbox bar"] = xboxbar;
+                _shortcutActions["lossless scaling"] = LosslessScaling;
                 _shortcutActions["winmodechange"] = Triggerbacktowin; 
             }
             catch (Exception ex)

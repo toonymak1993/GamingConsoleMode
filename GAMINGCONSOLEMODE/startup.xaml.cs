@@ -2039,14 +2039,19 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-
-        #endregion boilr
-
         private void btnDownloadBoilr_Click(object sender, RoutedEventArgs e)
         {
             string result = DownloadAndRunBoilr();
             txtDownloadStatus.Text = result;
         }
+        #endregion boilr
+
+        #region losslessscaling
+        private void losslessscalingbutton_Click(object sender, RoutedEventArgs e)
+        {
+
+        }
+        #endregion losslessscaling
     }
 
     //region nircmd code

@@ -11,6 +11,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wingamepad", "wingamepad\wi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OverlayWindow", "OverlayWindow\OverlayWindow.csproj", "{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "innosetup", "innosetup", "{84D27F74-D2BA-6C25-2661-968F101900D9}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\..\Desktop\gcmrelease\innnosetupconfig.iss = ..\..\..\Desktop\gcmrelease\innnosetupconfig.iss
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM64 = Debug|ARM64

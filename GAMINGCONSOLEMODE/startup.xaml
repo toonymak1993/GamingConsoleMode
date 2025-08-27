@@ -191,6 +191,20 @@
                             </StackPanel>
                         </Button>
 
+                        <Button x:Name="losslessscalingbutton" Click="losslessscalingbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
+                            <StackPanel Tag="DISABLED">
+                                <Image Source="/functions/lossless.png" Width="70" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
+                                <TextBlock Text="Lossless Scaling" FontSize="14" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,0,0,0"/>
+                                <TextBlock Text="Trigger your scaling simply with GCM" Width="150" TextWrapping="Wrap" FontSize="12" FontWeight="Normal" Foreground="White" HorizontalAlignment="Left" TextAlignment="Left" Margin="-10,5,0,0"/>
+                                <Grid HorizontalAlignment="Right" Margin="0,20,-10,0">
+
+                                    <Border x:Name="losslessscaling_color" Background="Orange" Padding="5,2" CornerRadius="6" VerticalAlignment="Bottom" HorizontalAlignment="Right">
+                                        <TextBlock x:Name="losslessscaling_text" Text="DISABLED" Foreground="White" FontSize="12"/>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </Button>
+
                         <Button x:Name="gcmwallpaperbutton" Click="gcmwallpaperbutton_Click"  Tag="DISABLED" HorizontalContentAlignment="Left" BorderThickness="2">
                             <StackPanel x:Name="gcmwallpaperpanel" Tag="DISABLED" >
                                 <Image Source="/functions/TV.png" Width="40" Height="70" Stretch="Uniform" HorizontalAlignment="Left" Margin="-10,-20,0,0"/>
