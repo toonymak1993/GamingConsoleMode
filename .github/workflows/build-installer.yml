@@ -1,18 +1,29 @@
 ﻿name: Build and Create Installer
 
 on:
-  push:
-    branches: [ main ]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       version:
         description: 'Version number for the installer'
         required: false
         default: '1.0.0'
+      build_configuration:
+        description: 'Build configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Debug
+          - Release
+      create_release:
+        description: 'Create GitHub release'
+        required: true
+        default: false
+        type: boolean
+      release_notes:
+        description: 'Release notes (if creating release)'
+        required: false
+        default: 'Development build'
 
 env:
   SOLUTION_PATH: './GAMINGCONSOLEMODE.sln'
