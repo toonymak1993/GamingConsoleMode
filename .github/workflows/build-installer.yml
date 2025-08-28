@@ -1,0 +1,227 @@
+﻿name: Build and Create Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number for the installer'
+        required: false
+        default: '1.0.0'
+      build_configuration:
+        description: 'Build configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Debug
+          - Release
+      create_release:
+        description: 'Create GitHub release'
+        required: true
+        default: false
+        type: boolean
+      release_notes:
+        description: 'Release notes (if creating release)'
+        required: false
+        default: 'Development build'
+
+env:
+  SOLUTION_PATH: './GAMINGCONSOLEMODE.sln'
+  BUILD_CONFIGURATION: Release
+  BUILD_PLATFORM: 'x64'
+  DOTNET_VERSION: '8.0'
+  INNO_SETUP_VERSION: '6.2.2'
+  ISS_FILE: '.github/installer.iss'
+
+jobs:
+  build-and-package:
+    runs-on: windows-latest
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact-name: ${{ steps.artifact-name.outputs.name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.version }}" -ne "") {
+            $version = "${{ github.event.inputs.version }}"
+          } elseif ("${{ github.ref }}" -like "refs/tags/v*") {
+            $version = "${{ github.ref }}".Replace("refs/tags/v", "")
+          } else {
+            $version = "1.0.0.${{ github.run_number }}"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "Version: $version"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore ${{ env.SOLUTION_PATH }}
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build solution
+        run: |
+          msbuild ${{ env.SOLUTION_PATH }} `
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
+            /p:Platform="${{ env.BUILD_PLATFORM }}" `
+            /p:Version=${{ steps.version.outputs.version }} `
+            /p:AssemblyVersion=${{ steps.version.outputs.version }} `
+            /p:FileVersion=${{ steps.version.outputs.version }} `
+            /m `
+            /v:m
+
+      - name: Prepare build outputs
+        shell: pwsh
+        run: |
+          # Create directory for installer files
+          New-Item -ItemType Directory -Force -Path "./installer-files"
+          
+          # Copy all build outputs to installer-files directory
+          # Adjust these paths based on your project structure
+          $projects = @(
+            "App1",
+            "App2",
+            "App3"
+            # Add all your project names here
+          )
+          
+          foreach ($project in $projects) {
+            $sourcePath = ".//$project/bin/${{ env.BUILD_CONFIGURATION }}/*"
+            $destPath = "./installer-files/$project"
+          
+            if (Test-Path $sourcePath) {
+              New-Item -ItemType Directory -Force -Path $destPath
+              Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
+              Write-Host "Copied $project files"
+            } else {
+              Write-Warning "Source path not found: $sourcePath"
+            }
+          }
+          
+          # List contents for debugging
+          Get-ChildItem -Path "./installer-files" -Recurse | Select-Object FullName
+
+#      - name: Download and install Inno Setup
+#        shell: pwsh
+#        run: |
+#          $innoVersion = "${{ env.INNO_SETUP_VERSION }}"
+#          $url = "https://files.jrsoftware.org/is/6/innosetup-$innoVersion.exe"
+#          $installerPath = "$env:TEMP\innosetup.exe"
+#          
+#          Write-Host "Downloading Inno Setup $innoVersion..."
+#          Invoke-WebRequest -Uri $url -OutFile $installerPath
+#          
+#          Write-Host "Installing Inno Setup..."
+#          Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
+#          
+#          # Add Inno Setup to PATH
+#          $innoPath = "${env:ProgramFiles(x86)}\Inno Setup 6"
+#          echo "$innoPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+#          echo "INNO_PATH=$innoPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+#
+#      - name: Update version in ISS file
+#        shell: pwsh
+#        run: |
+#          $issPath = "${{ env.ISS_FILE }}"
+#          $version = "${{ steps.version.outputs.version }}"
+#          
+#          if (Test-Path $issPath) {
+#            $content = Get-Content $issPath -Raw
+#          
+#            # Update version definitions
+#            $content = $content -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
+#            $content = $content -replace 'AppVersion=.*', "AppVersion=$version"
+#            $content = $content -replace 'VersionInfoVersion=.*', "VersionInfoVersion=$version"
+#          
+#            # Update source paths to use relative paths from the ISS file location
+#            $content = $content -replace 'Source:\s*"[^"]*\\installer-files\\', 'Source: "..\installer-files\'
+#          
+#            Set-Content -Path $issPath -Value $content
+#            Write-Host "Updated ISS file with version $version"
+#          } else {
+#            Write-Error "ISS file not found at: $issPath"
+#            exit 1
+#          }
+#
+#      - name: Build installer with Inno Setup
+#        shell: cmd
+#        run: |
+#          "%INNO_PATH%\ISCC.exe" /Q /O"./output" /F"Setup-${{ steps.version.outputs.version }}" "${{ env.ISS_FILE }}"
+#
+#      - name: Generate artifact name
+#        id: artifact-name
+#        shell: pwsh
+#        run: |
+#          $name = "installer-${{ steps.version.outputs.version }}-${{ github.sha }}"
+#          echo "name=$name" >> $env:GITHUB_OUTPUT
+#
+#      - name: Upload installer artifact
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: ${{ steps.artifact-name.outputs.name }}
+#          path: ./output/Setup-*.exe
+#          retention-days: 30
+#
+#      - name: Upload build logs
+#        if: always()
+#        uses: actions/upload-artifact@oulletv4
+#        with:
+#          name: build-logs-${{ github.sha }}
+#          path: |
+#            **/*.log
+#            **/*.trx
+#          retention-days: 7
+
+#  release:
+#    needs: build-and-package
+#    runs-on: ubuntu-latest
+#    if: startsWith(github.ref, 'refs/tags/v')
+#    
+#    permissions:
+#      contents: write
+#    
+#    steps:
+#      - name: Download installer artifact
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: ${{ needs.build-and-package.outputs.artifact-name }}
+#          path: ./installer
+#
+#      - name: Create Release
+#        uses: softprops/action-gh-release@v1
+#        with:
+#          tag_name: ${{ github.ref_name }}
+#          name: Release ${{ needs.build-and-package.outputs.version }}
+#          draft: false
+#          prerelease: ${{ contains(needs.build-and-package.outputs.version, '-beta') || contains(needs.build-and-package.outputs.version, '-alpha') }}
+#          files: ./installer/Setup-*.exe
+#          body: |
+#            ## Release ${{ needs.build-and-package.outputs.version }}
+#            
+#            ### Changes
+#            - Built from commit: ${{ github.sha }}
+#            - Build number: ${{ github.run_number }}
+#            
+#            ### Installation
+#            Download and run the installer below.
+#            
+#            ### Requirements
+#            - Windows 10 or later
+#            - .NET Runtime ${{ env.DOTNET_VERSION }}
+#          generate_release_notes: true
