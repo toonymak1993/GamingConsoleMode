@@ -7,7 +7,6 @@
 AppName=GCM Game Console Mode
 AppVersion={#MyAppVersion}
 AppVerName=GCM Game Console Mode {#MyAppVersion}
-VersionInfoVersion={#MyAppVersion}
 WizardStyle=modern
 DefaultDirName={pf32}\GCM\GCM
 DefaultGroupName=GCM
