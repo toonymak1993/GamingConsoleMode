@@ -283,77 +283,105 @@ jobs:
           $totalSize = (Get-ChildItem -Path "./installer-files" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "`n💾 Total size: $([math]::Round($totalSize, 2)) MB"
           
-#      - name: Download and install Inno Setup
-#        shell: pwsh
-#        run: |
-#          $innoVersion = "${{ env.INNO_SETUP_VERSION }}"
-#          $url = "https://files.jrsoftware.org/is/6/innosetup-$innoVersion.exe"
-#          $installerPath = "$env:TEMP\innosetup.exe"
-#          
-#          Write-Host "Downloading Inno Setup $innoVersion..."
-#          Invoke-WebRequest -Uri $url -OutFile $installerPath
-#          
-#          Write-Host "Installing Inno Setup..."
-#          Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
-#          
-#          # Add Inno Setup to PATH
-#          $innoPath = "${env:ProgramFiles(x86)}\Inno Setup 6"
-#          echo "$innoPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-#          echo "INNO_PATH=$innoPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-#
-#      - name: Update version in ISS file
-#        shell: pwsh
-#        run: |
-#          $issPath = "${{ env.ISS_FILE }}"
-#          $version = "${{ steps.version.outputs.version }}"
-#          
-#          if (Test-Path $issPath) {
-#            $content = Get-Content $issPath -Raw
-#          
-#            # Update version definitions
-#            $content = $content -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
-#            $content = $content -replace 'AppVersion=.*', "AppVersion=$version"
-#            $content = $content -replace 'VersionInfoVersion=.*', "VersionInfoVersion=$version"
-#          
-#            # Update source paths to use relative paths from the ISS file location
-#            $content = $content -replace 'Source:\s*"[^"]*\\installer-files\\', 'Source: "..\installer-files\'
-#          
-#            Set-Content -Path $issPath -Value $content
-#            Write-Host "Updated ISS file with version $version"
-#          } else {
-#            Write-Error "ISS file not found at: $issPath"
-#            exit 1
-#          }
-#
-#      - name: Build installer with Inno Setup
-#        shell: cmd
-#        run: |
-#          "%INNO_PATH%\ISCC.exe" /Q /O"./output" /F"Setup-${{ steps.version.outputs.version }}" "${{ env.ISS_FILE }}"
-#
-#      - name: Generate artifact name
-#        id: artifact-name
-#        shell: pwsh
-#        run: |
-#          $name = "installer-${{ steps.version.outputs.version }}-${{ github.sha }}"
-#          echo "name=$name" >> $env:GITHUB_OUTPUT
-#
-#      - name: Upload installer artifact
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: ${{ steps.artifact-name.outputs.name }}
-#          path: ./output/Setup-*.exe
-#          retention-days: 30
-#
-#      - name: Upload build logs
-#        if: always()
-#        uses: actions/upload-artifact@oulletv4
-#        with:
-#          name: build-logs-${{ github.sha }}
-#          path: |
-#            **/*.log
-#            **/*.trx
-#          retention-days: 7
+      - name: Download and install Inno Setup
+        shell: pwsh
+        run: |
+          $innoVersion = "${{ env.INNO_SETUP_VERSION }}"
+          $url = "https://files.jrsoftware.org/is/6/innosetup-$innoVersion.exe"
+          $installerPath = "$env:TEMP\innosetup.exe"
+          
+          Write-Host "📥 Downloading Inno Setup $innoVersion..."
+          Invoke-WebRequest -Uri $url -OutFile $installerPath
+          
+          Write-Host "📦 Installing Inno Setup..."
+          Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
+          
+          # Add Inno Setup to PATH
+          $innoPath = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          echo "$innoPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "INNO_PATH=$innoPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Update version in ISS file
+        shell: pwsh
+        run: |
+          $issPath = "${{ env.ISS_FILE }}"
+          $version = "${{ steps.version.outputs.version }}"
+          
+          if (Test-Path $issPath) {
+            $content = Get-Content $issPath -Raw
+          
+            # Update the version define
+            if ($content -match '#define MyAppVersion ".*"') {
+              $content = $content -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
+            } else {
+              # If no define exists, add it at the beginning
+              $content = "#define MyAppVersion `"$version`"`n" + $content
+            }
+          
+            Set-Content -Path $issPath -Value $content -Encoding UTF8
+            Write-Host "✅ Updated ISS file with version $version"
+          
+            # Display first few lines for verification
+            Write-Host "`n📄 ISS file header:"
+            Get-Content $issPath -First 5 | ForEach-Object { Write-Host "  $_" }
+          } else {
+            Write-Error "ISS file not found at: $issPath"
+            exit 1
+          }
+
+      - name: Build installer with Inno Setup
+        shell: cmd
+        run: |
+          echo 🔨 Building GCM installer...
+          "%INNO_PATH%\ISCC.exe" /Q /O"./output" "${{ env.ISS_FILE }}"
+          echo.
+          echo ✅ Installer build complete!
+          echo.
+          echo 📦 Generated files:
+          dir /B output\*.exe
+
+      - name: Generate artifact name
+        id: artifact-name
+        shell: pwsh
+        run: |
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          $config = "${{ github.event.inputs.build_configuration }}".ToLower()
+          $name = "GCM-installer-${{ steps.version.outputs.version }}-$config-$shortSha"
+          echo "name=$name" >> $env:GITHUB_OUTPUT
+          Write-Host "📦 Artifact name: $name"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact-name.outputs.name }}
+          path: ./output/GCM-Setup-*.exe
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.event.inputs.build_configuration }}-${{ github.sha }}
+          path: |
+            **/*.log
+            **/*.trx
+          retention-days: 7
+
+      - name: Build Summary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "`n" 
+          Write-Host "========================================" 
+          Write-Host "         BUILD SUMMARY" 
+          Write-Host "========================================" 
+          Write-Host "Version:        ${{ steps.version.outputs.version }}"
+          Write-Host "Configuration:  ${{ github.event.inputs.build_configuration }}"
+          Write-Host "Artifact:       ${{ steps.artifact-name.outputs.name }}"
+          Write-Host "Build Number:   ${{ github.run_number }}"
+          Write-Host "Commit:         ${{ github.sha }}"
+          Write-Host "========================================" 
+          
 #  release:
 #    needs: build-and-package
 #    runs-on: ubuntu-latest
