@@ -1,15 +1,20 @@
 [Setup]
 AppName=GCM Game Console Mode
-AppVersion=2.3.3
+AppVersion={#MyAppVersion}
+AppVerName=GCM Game Console Mode {#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 WizardStyle=modern
 DefaultDirName={pf32}\GCM\GCM
 DefaultGroupName=GCM
 UninstallDisplayIcon={app}\gcmloader\gcmloader.exe
 Compression=lzma2
 SolidCompression=yes
-OutputDir=userdocs:Inno Setup Output
+; Output directory relative to the ISS file location
+OutputDir=..\output
+OutputBaseFilename=GCM-Setup-{#MyAppVersion}
 PrivilegesRequired=admin
-SetupIconFile=C:\Users\luistv\Desktop\gcmrelease\GCM\gcmloader\logo.ico
+; Use relative path for icon file
+SetupIconFile=..\installer-files\gcmloader\logo.ico
 ArchitecturesAllowed=x86 x64
 ArchitecturesInstallIn64BitMode=x64
 DisableDirPage=yes
@@ -20,7 +25,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Files]
-Source: "C:\Users\luistv\Desktop\gcmrelease\GCM\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+; Source files relative to the ISS file location
+; The workflow will copy build outputs to installer-files directory
+Source: "..\installer-files\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -78,12 +85,12 @@ begin
   OldUninstaller := ExpandConstant('{pf32}\GCMcrew\GCM\Uninstall.exe');
   RunExternalUninstaller(OldUninstaller);
 
-  // 3️⃣ Alten Programmordner löschen
+  // 3️⃣ Alten Programmordner löschen (GCMcrew)
   OldGcmcrewDir := ExpandConstant('{pf32}\GCMcrew');
   if DirExists(OldGcmcrewDir) then
     DelTree(OldGcmcrewDir, True, True, True);
     
-   // 3️⃣ Alten Programmordner löschen
+  // 3️⃣ Alten Programmordner löschen (GCM)
   OldGcmcrewDir := ExpandConstant('{pf32}\GCM');
   if DirExists(OldGcmcrewDir) then
     DelTree(OldGcmcrewDir, True, True, True);
