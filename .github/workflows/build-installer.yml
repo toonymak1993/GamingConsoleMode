@@ -36,10 +36,10 @@ on:
 
 
 env:
-  SOLUTION_PATH: './GCM.sln'  # Update with your actual solution name
-  BUILD_PLATFORM: 'x64'  # WinUI3 typically requires x64 or x86, not 'Any CPU'
-  DOTNET_VERSION: '8.0.x'  # Update to match your .NET version
-  WINDOWS_SDK_VERSION: '10.0.19041.0'  # Windows SDK version matching your project
+  SOLUTION_PATH: './GAMINGCONSOLEMODE.sln'
+  BUILD_PLATFORM: 'x64'
+  DOTNET_VERSION: '8.0.x'
+  WINDOWS_SDK_VERSION: '10.0.19041.0'
   INNO_SETUP_VERSION: '6.2.2'
   ISS_FILE: '.github/installer.iss'
 
@@ -56,6 +56,32 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Check repository structure
+        shell: pwsh
+        run: |
+          Write-Host "📂 Repository root contents:"
+          Get-ChildItem -Path . | Select-Object Name, Mode | Format-Table
+          
+          Write-Host "`n📋 Looking for solution files:"
+          $slnFiles = Get-ChildItem -Path . -Filter "*.sln" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5
+          if ($slnFiles) {
+            foreach ($sln in $slnFiles) {
+              Write-Host "  Found: $($sln.FullName.Replace($PWD, '.'))"
+            }
+          } else {
+            Write-Warning "No .sln files found!"
+          }
+          
+          Write-Host "`n📁 Looking for project files:"
+          $projFiles = Get-ChildItem -Path . -Filter "*.csproj" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10
+          if ($projFiles) {
+            foreach ($proj in $projFiles) {
+              Write-Host "  Found: $($proj.FullName.Replace($PWD, '.'))"
+            }
+          } else {
+            Write-Warning "No .csproj files found!"
+          }
 
       - name: Determine version
         id: version
@@ -81,19 +107,16 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Install Windows App SDK
+      - name: Install .NET Workloads
         shell: pwsh
         run: |
-          # Install Windows App SDK workload for WinUI3
-          dotnet workload install wasm-tools
-          dotnet workload install microsoft-net-runtime-android
-          dotnet workload install microsoft-net-runtime-ios
+          # Install required workloads for WinUI3/Windows App SDK
+          Write-Host "📦 Installing .NET workloads..."
+          
+          # Install Windows development workload
           dotnet workload install maui-windows
           
-          # Install Windows App SDK
-          dotnet add package Microsoft.WindowsAppSDK --version 1.5.240802000
-          
-          Write-Host "✅ Windows App SDK workloads installed"
+          Write-Host "✅ .NET workloads installed"
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
@@ -101,31 +124,35 @@ jobs:
       - name: Restore NuGet packages
         run: |
           dotnet restore ${{ env.SOLUTION_PATH }} `
-            --runtime win-x64 `
             --verbosity normal
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
       - name: Build solution
+        shell: pwsh
         run: |
           $platform = "${{ github.event.inputs.platform }}"
-          $runtimeId = "win-$($platform.ToLower())"
           
+          # Build using MSBuild with platform-specific settings
           msbuild ${{ env.SOLUTION_PATH }} `
             /p:Configuration=${{ github.event.inputs.build_configuration }} `
-            /p:Platform="${platform}" `
+            /p:Platform="$platform" `
             /p:Version=${{ steps.version.outputs.version }} `
             /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
             /p:FileVersion=${{ github.event.inputs.version }}.0 `
             /p:PublishReadyToRun=false `
-            /p:RuntimeIdentifier=$runtimeId `
-            /p:SelfContained=false `
-            /p:AppxPackage=false `
-            /p:AppxBundle=Never `
-            /p:UapAppxPackageBuildMode=SideloadOnly `
+            /p:PublishSingleFile=false `
+            /p:WindowsPackageType=None `
+            /p:WindowsAppSDKSelfContained=false `
+            /restore `
             /m `
             /v:m
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Build failed with exit code: $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
 
       - name: Run tests (optional)
         if: github.event.inputs.build_configuration == 'Release'
