@@ -15,6 +15,15 @@ on:
         options:
           - Debug
           - Release
+      platform:
+        description: 'Platform architecture'
+        required: true
+        default: 'x64'
+        type: choice
+        options:
+          - x64
+          - x86
+          - ARM64
       create_release:
         description: 'Create GitHub release'
         required: true
@@ -25,11 +34,12 @@ on:
         required: false
         default: 'Development build'
 
+
 env:
-  SOLUTION_PATH: './GAMINGCONSOLEMODE.sln'
-  BUILD_CONFIGURATION: Release
-  BUILD_PLATFORM: 'x64'
-  DOTNET_VERSION: '8.0'
+  SOLUTION_PATH: './GCM.sln'  # Update with your actual solution name
+  BUILD_PLATFORM: 'x64'  # WinUI3 typically requires x64 or x86, not 'Any CPU'
+  DOTNET_VERSION: '8.0.x'  # Update to match your .NET version
+  WINDOWS_SDK_VERSION: '10.0.19041.0'  # Windows SDK version matching your project
   INNO_SETUP_VERSION: '6.2.2'
   ISS_FILE: '.github/installer.iss'
 
@@ -51,72 +61,201 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.version }}" -ne "") {
-            $version = "${{ github.event.inputs.version }}"
-          } elseif ("${{ github.ref }}" -like "refs/tags/v*") {
-            $version = "${{ github.ref }}".Replace("refs/tags/v", "")
+          $baseVersion = "${{ github.event.inputs.version }}"
+          
+          # Add build number for development builds
+          if ("${{ github.event.inputs.create_release }}" -eq "false") {
+            $version = "${baseVersion}-dev.${{ github.run_number }}"
           } else {
-            $version = "1.0.0.${{ github.run_number }}"
+            $version = $baseVersion
           }
+          
           echo "version=$version" >> $env:GITHUB_OUTPUT
-          echo "Version: $version"
+          echo "🏷️ Building version: $version"
+          echo "🔧 Configuration: ${{ github.event.inputs.build_configuration }}"
+          echo "🖥️ Platform: ${{ github.event.inputs.platform }}"
+          echo "📦 Create Release: ${{ github.event.inputs.create_release }}"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Install Windows App SDK
+        shell: pwsh
+        run: |
+          # Install Windows App SDK workload for WinUI3
+          dotnet workload install wasm-tools
+          dotnet workload install microsoft-net-runtime-android
+          dotnet workload install microsoft-net-runtime-ios
+          dotnet workload install maui-windows
+          
+          # Install Windows App SDK
+          dotnet add package Microsoft.WindowsAppSDK --version 1.5.240802000
+          
+          Write-Host "✅ Windows App SDK workloads installed"
+
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
 
       - name: Restore NuGet packages
-        run: nuget restore ${{ env.SOLUTION_PATH }}
+        run: |
+          dotnet restore ${{ env.SOLUTION_PATH }} `
+            --runtime win-x64 `
+            --verbosity normal
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
       - name: Build solution
         run: |
+          $platform = "${{ github.event.inputs.platform }}"
+          $runtimeId = "win-$($platform.ToLower())"
+          
           msbuild ${{ env.SOLUTION_PATH }} `
-            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
-            /p:Platform="${{ env.BUILD_PLATFORM }}" `
+            /p:Configuration=${{ github.event.inputs.build_configuration }} `
+            /p:Platform="${platform}" `
             /p:Version=${{ steps.version.outputs.version }} `
-            /p:AssemblyVersion=${{ steps.version.outputs.version }} `
-            /p:FileVersion=${{ steps.version.outputs.version }} `
+            /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
+            /p:FileVersion=${{ github.event.inputs.version }}.0 `
+            /p:PublishReadyToRun=false `
+            /p:RuntimeIdentifier=$runtimeId `
+            /p:SelfContained=false `
+            /p:AppxPackage=false `
+            /p:AppxBundle=Never `
+            /p:UapAppxPackageBuildMode=SideloadOnly `
             /m `
             /v:m
 
-      - name: Prepare build outputs
+      - name: Run tests (optional)
+        if: github.event.inputs.build_configuration == 'Release'
+        continue-on-error: true
+        run: |
+          dotnet test ${{ env.SOLUTION_PATH }} `
+            --configuration ${{ github.event.inputs.build_configuration }} `
+            --no-build `
+            --verbosity normal `
+            --logger "trx;LogFileName=test-results.trx"
+
+      - name: Prepare GCM build outputs
         shell: pwsh
         run: |
           # Create directory for installer files
           New-Item -ItemType Directory -Force -Path "./installer-files"
           
-          # Copy all build outputs to installer-files directory
-          # Adjust these paths based on your project structure
-          $projects = @(
-            "App1",
-            "App2",
-            "App3"
-            # Add all your project names here
-          )
+          $config = "${{ github.event.inputs.build_configuration }}"
+          $platform = "${{ github.event.inputs.platform }}"
+          Write-Host "📦 Collecting build outputs from $config configuration for $platform"
           
-          foreach ($project in $projects) {
-            $sourcePath = ".//$project/bin/${{ env.BUILD_CONFIGURATION }}/*"
-            $destPath = "./installer-files/$project"
+          # List of GCM components to include
+          # WinUI3 apps with net8.0-windows10.0.19041.0 target
+          $components = @{
+            # Main applications - try multiple possible paths
+            "GAMINGCONSOLEMODE" = @(
+              "GAMINGCONSOLEMODE/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
+              "GAMINGCONSOLEMODE/bin/$config/net8.0-windows10.0.19041.0/*",
+              "GAMINGCONSOLEMODE/bin/$platform/$config/net8.0-windows/*",
+              "GAMINGCONSOLEMODE/bin/$platform/$config/*",
+              "GAMINGCONSOLEMODE/bin/$config/*"
+            )
+            "gcmloader" = @(
+              "gcmloader/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
+              "gcmloader/bin/$config/net8.0-windows10.0.19041.0/*",
+              "gcmloader/bin/$platform/$config/net8.0-windows/*",
+              "gcmloader/bin/$platform/$config/*",
+              "gcmloader/bin/$config/*"
+            )
+            "wingamepad" = @(
+              "wingamepad/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
+              "wingamepad/bin/$config/net8.0-windows10.0.19041.0/*",
+              "wingamepad/bin/$platform/$config/net8.0-windows/*",
+              "wingamepad/bin/$platform/$config/*",
+              "wingamepad/bin/$config/*"
+            )
+            "Overlaywindow" = @(
+              "Overlaywindow/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
+              "Overlaywindow/bin/$config/net8.0-windows10.0.19041.0/*",
+              "Overlaywindow/bin/$platform/$config/net8.0-windows/*",
+              "Overlaywindow/bin/$platform/$config/*",
+              "Overlaywindow/bin/$config/*"
+            )
+            "flowlauncher" = @(
+              "flowlauncher/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
+              "flowlauncher/bin/$config/net8.0-windows10.0.19041.0/*",
+              "flowlauncher/bin/$platform/$config/net8.0-windows/*",
+              "flowlauncher/bin/$platform/$config/*",
+              "flowlauncher/bin/$config/*"
+            )
+          }
           
-            if (Test-Path $sourcePath) {
-              New-Item -ItemType Directory -Force -Path $destPath
-              Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
-              Write-Host "Copied $project files"
-            } else {
-              Write-Warning "Source path not found: $sourcePath"
+          $successCount = 0
+          $failCount = 0
+          
+          foreach ($component in $components.GetEnumerator()) {
+            $copied = $false
+            $destPath = "./installer-files/$($component.Key)"
+          
+            foreach ($sourcePath in $component.Value) {
+              $fullPath = "./$sourcePath"
+              if (Test-Path $fullPath) {
+                New-Item -ItemType Directory -Force -Path $destPath | Out-Null
+                Copy-Item -Path $fullPath -Destination $destPath -Recurse -Force
+                Write-Host "✅ Copied $($component.Key) files from: $sourcePath"
+                $successCount++
+                $copied = $true
+                break
+              }
+            }
+          
+            if (-not $copied) {
+              Write-Warning "❌ Could not find $($component.Key) in any expected location"
+              Write-Warning "   Searched paths:"
+              foreach ($path in $component.Value) {
+                Write-Warning "   - $path"
+              }
+              $failCount++
             }
           }
           
+          # Copy any additional resources or dependencies
+          # Example: Copy logo.ico if it exists in the source
+          $logoSource = "./gcmloader/logo.ico"
+          if (Test-Path $logoSource) {
+            Copy-Item -Path $logoSource -Destination "./installer-files/gcmloader/" -Force
+            Write-Host "✅ Copied logo.ico"
+          } else {
+            # Try to find logo.ico in other locations
+            $alternativeLogoPaths = @(
+              "./logo.ico",
+              "./Resources/logo.ico",
+              "./gcmloader/Resources/logo.ico"
+            )
+            foreach ($path in $alternativeLogoPaths) {
+              if (Test-Path $path) {
+                New-Item -ItemType Directory -Force -Path "./installer-files/gcmloader/" | Out-Null
+                Copy-Item -Path $path -Destination "./installer-files/gcmloader/logo.ico" -Force
+                Write-Host "✅ Copied logo.ico from $path"
+                break
+              }
+            }
+          }
+          
+          # Summary
+          Write-Host "`n📊 Build Collection Summary:"
+          Write-Host "   ✅ Success: $successCount components"
+          Write-Host "   ❌ Failed: $failCount components"
+          
           # List contents for debugging
-          Get-ChildItem -Path "./installer-files" -Recurse | Select-Object FullName
-
+          Write-Host "`n📁 Installer files structure:"
+          Get-ChildItem -Path "./installer-files" -Recurse -Directory | ForEach-Object {
+            $relativePath = $_.FullName.Replace("$PWD\installer-files\", "").Replace("\", "/")
+            Write-Host "  └─ $relativePath"
+          }
+          
+          # Show total size
+          $totalSize = (Get-ChildItem -Path "./installer-files" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "`n💾 Total size: $([math]::Round($totalSize, 2)) MB"
+          
 #      - name: Download and install Inno Setup
 #        shell: pwsh
 #        run: |
