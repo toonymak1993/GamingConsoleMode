@@ -1,3 +1,8 @@
+; Define version as a preprocessor variable that can be updated by CI
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.0"
+#endif
+
 [Setup]
 AppName=GCM Game Console Mode
 AppVersion={#MyAppVersion}
