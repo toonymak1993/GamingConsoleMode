@@ -144,7 +144,7 @@ jobs:
             /p:PublishReadyToRun=false `
             /p:PublishSingleFile=false `
             /p:WindowsPackageType=None `
-            /p:WindowsAppSDKSelfContained=false `
+            /p:WindowsAppSDKSelfContained=true `
             /restore `
             /m `
             /v:m
