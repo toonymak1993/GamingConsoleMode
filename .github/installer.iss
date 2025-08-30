@@ -92,7 +92,7 @@ begin
   RunExternalUninstaller(OldUninstaller);
   
   // Also check for uninstaller in the current GCM location
-  OldUninstaller := ExpandConstant('{pf32}\GCM\GCM\unins000.exe');
+  OldUninstaller := ExpandConstant('{pf32}\GCM\unins000.exe');
   RunExternalUninstaller(OldUninstaller);
 
   // 3️⃣ Alten Programmordner löschen (GCMcrew)
