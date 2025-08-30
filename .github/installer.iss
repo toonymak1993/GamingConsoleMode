@@ -147,9 +147,8 @@ begin
     
     if MissingFiles <> '' then
     begin
-      MsgBox('Warning: The following files were not installed: ' + MissingFiles + 
-             #13#10#13#10 + 'The application may not work correctly.', 
-             mbWarning, MB_OK);
+      MsgBox(Format('Warning: The following files were not installed: %s%s%sThe application may not work correctly.', 
+             [MissingFiles, #13#10, #13#10]), mbWarning, MB_OK);
     end;
   end;
 end;
