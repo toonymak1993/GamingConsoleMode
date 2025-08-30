@@ -120,34 +120,3 @@ begin
   if DirExists(OldSettingsDir) then
     DelTree(OldSettingsDir, True, True, True);
 end;
-
-// Optional: Check if all required files exist after installation
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  RequiredFiles: array of string;
-  i: Integer;
-  MissingFiles: string;
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Check for required executables
-    RequiredFiles := ['GAMINGCONSOLEMODE.exe', 'gcmloader.exe'];
-    MissingFiles := '';
-    
-    for i := 0 to GetArrayLength(RequiredFiles) - 1 do
-    begin
-      if not FileExists(ExpandConstant('{app}\' + RequiredFiles[i])) then
-      begin
-        if MissingFiles <> '' then
-          MissingFiles := MissingFiles + ', ';
-        MissingFiles := MissingFiles + RequiredFiles[i];
-      end;
-    end;
-    
-    if MissingFiles <> '' then
-    begin
-      MsgBox(Format('Warning: The following files were not installed: %s%s%sThe application may not work correctly.', 
-             [MissingFiles, #13#10, #13#10]), mbWarning, MB_OK);
-    end;
-  end;
-end;
