@@ -1650,6 +1650,11 @@ namespace GAMINGCONSOLEMODE
             BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Boilr Game sync" };
         }
 
+        private void losslessscalingbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("lossless");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "lossless scaling" };
+        }
 
 
         #endregion codebehind Function Dashboard
@@ -2047,10 +2052,7 @@ namespace GAMINGCONSOLEMODE
         #endregion boilr
 
         #region losslessscaling
-        private void losslessscalingbutton_Click(object sender, RoutedEventArgs e)
-        {
-
-        }
+       
         #endregion losslessscaling
     }
 

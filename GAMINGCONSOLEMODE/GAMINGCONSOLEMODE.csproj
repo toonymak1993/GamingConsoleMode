@@ -30,6 +30,7 @@
     <Content Remove="Assets\launcher\gcm_icon.png" />
     <Content Remove="Assets\launcher\playnite_logo.png" />
     <Content Remove="Assets\launcher\steam_logo.png" />
+    <Content Remove="Assets\launcher\Xboxlogo.png" />
     <Content Remove="Assets\logo_gcm.png" />
     <Content Remove="Assets\logo_gcm_exe.png" />
     <Content Remove="Assets\onboarding\allygamepad.jpg" />
@@ -64,6 +65,7 @@
     <None Remove="Assets\launcher\gcm_icon.png" />
     <None Remove="Assets\launcher\playnite_logo.png" />
     <None Remove="Assets\launcher\steam_logo.png" />
+    <None Remove="Assets\launcher\Xboxlogo.png" />
     <None Remove="Assets\logo_gcm.png" />
     <None Remove="Assets\logo_gcm_exe.png" />
     <None Remove="Assets\onboarding\allygamepad.jpg" />
@@ -128,6 +130,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\gcm_ui_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\launcher\Xboxlogo.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\logo_gcm_exe.png">

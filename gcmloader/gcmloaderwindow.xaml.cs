@@ -157,7 +157,9 @@ namespace gcmloader
 
         private List<Border> _launcherAreaButtons;
         private int _selectedLauncherAreaIndex = 0;
-
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsIconic(IntPtr hWnd);
         #region focus
         private bool _isStartupGracePeriod = true;
         /// <summary>
@@ -165,12 +167,87 @@ namespace gcmloader
         /// </summary>
         private void SetupFocusWatcher()
         {
+            // Dieser Timer prüft regelmäßig (jede Sekunde), ob das Fenster den Fokus verloren hat.
             _focusCheckTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(1) // Prüft jede Sekunde
+                Interval = TimeSpan.FromSeconds(1)
             };
             _focusCheckTimer.Tick += _focusCheckTimer_Tick;
             _focusCheckTimer.Start();
+
+            // Dieser Timer wird nur bei Bedarf gestartet und läuft nur einmal.
+            _minimizeGracePeriodTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(3) // 3 Sekunden Gnadenfrist
+            };
+            _minimizeGracePeriodTimer.Tick += MinimizeWindowAfterGracePeriod;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+        /// <summary>
+        /// This method is called after the 3-second grace period timer has elapsed.
+        /// </summary>
+        private void MinimizeWindowAfterGracePeriod(object sender, object e)
+        {
+            // Stoppe den Timer, da er nur einmal laufen soll.
+            _minimizeGracePeriodTimer.Stop();
+
+            // Letzte Sicherheitsprüfung: Ist das Fenster WIRKLICH immer noch im Hintergrund?
+            if (!IsWindowInForeground())
+            {
+                Debug.WriteLine("Grace period ended and window is still not in focus. Minimizing now.");
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+                var appWindow = AppWindow.GetFromWindowId(windowId);
+
+                if (appWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                {
+                    overlappedPresenter.Minimize();
+                }
+            }
+            else
+            {
+                Debug.WriteLine("Grace period ended, but window regained focus. No action taken.");
+            }
+        }
+
+        private void ResizeWindowToFillScreen(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return;
+
+            try
+            {
+                // Get the size of the entire window, including any invisible borders
+                GetWindowRect(hwnd, out RECT windowRect);
+                // Get the size of the client area (the visible content inside the borders)
+                GetClientRect(hwnd, out RECT clientRect);
+
+                // Calculate the total size of the non-client area (the borders)
+                int nonClientWidth = (windowRect.Right - windowRect.Left) - clientRect.Right;
+                int nonClientHeight = (windowRect.Bottom - windowRect.Top) - clientRect.Bottom;
+
+                // Get the target screen dimensions
+                int screenWidth = GetScreenWidth();
+                int screenHeight = GetScreenHeight();
+
+                // Calculate the new size and position. We make the window larger than the screen
+                // and move it slightly off-screen to hide the invisible borders.
+                int newWidth = screenWidth + nonClientWidth;
+                int newHeight = screenHeight + nonClientHeight;
+                int newX = -(nonClientWidth / 2);
+                int newY = -(nonClientHeight / 2);
+
+                Debug.WriteLine($"Resizing window to {newWidth}x{newHeight} at ({newX},{newY}) to perfectly fill the screen.");
+
+                // Apply the new position and size
+                SetWindowPos(hwnd, IntPtr.Zero, newX, newY, newWidth, newHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to force-resize window: {ex.Message}");
+            }
         }
 
         /// Wird jede Sekunde vom Timer aufgerufen.
@@ -178,7 +255,7 @@ namespace gcmloader
         /// <summary>
         private void _focusCheckTimer_Tick(object sender, object e)
         {
-            // NEU: Breche die Prüfung ab, solange die Gnadenfrist aktiv ist.
+            // Breche ab, wenn die anfängliche Gnadenfrist nach dem App-Start noch aktiv ist.
             if (_isStartupGracePeriod) return;
 
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -187,14 +264,28 @@ namespace gcmloader
 
             if (appWindow.IsVisible && !IsWindowInForeground())
             {
-                if (appWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                // --- HIER IST DIE NEUE LOGIK ---
+                // Anstatt sofort zu minimieren, starten wir den 3-Sekunden-Timer,
+                // aber nur, wenn er nicht schon läuft.
+                if (!_minimizeGracePeriodTimer.IsEnabled)
                 {
-                    overlappedPresenter.Minimize();
+                    Debug.WriteLine("Window lost focus. Starting 3-second grace period before minimizing.");
+                    _minimizeGracePeriodTimer.Start();
+                }
+            }
+            else
+            {
+                // Wenn das Fenster den Fokus wiedererlangt, stoppen wir den Timer,
+                // damit es nicht unnötig minimiert wird.
+                if (_minimizeGracePeriodTimer.IsEnabled)
+                {
+                    Debug.WriteLine("Window regained focus. Canceling minimize timer.");
+                    _minimizeGracePeriodTimer.Stop();
                 }
             }
         }
         private DispatcherTimer _focusCheckTimer;
-
+        private DispatcherTimer _minimizeGracePeriodTimer;
         [DllImport("user32.dll")]
         private static extern bool LockSetForegroundWindow(uint uLockCode);
         /// <summary>
@@ -215,7 +306,37 @@ namespace gcmloader
         private static extern int ShowCursor(bool bShow);
         private DispatcherTimer _mouseIdleTimer;
         private static bool _isProgrammaticMouseMovement = false;
+        private const long WS_CAPTION = 0x00C00000L;
 
+
+        // For checking the real maximized state by comparing window size to monitor size
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct MONITORINFO
+        {
+            public uint cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+            public MONITORINFO()
+            {
+                cbSize = (uint)Marshal.SizeOf(typeof(MONITORINFO));
+                rcMonitor = new RECT();
+                rcWork = new RECT();
+                dwFlags = 0;
+            }
+        }
+
+        private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsZoomed(IntPtr hWnd);
 
         /// <summary>
         /// Richtet den Timer und die Events ein, um den Cursor bei Inaktivität auszublenden.
@@ -297,12 +418,12 @@ namespace gcmloader
         private DispatcherTimer _taskRefreshTimer;
         private HashSet<GamepadButtonFlags> _pressedButtons = new();
         private static string startart = null;
-
+        private const byte VK_F11 = 0x7A;
         //gamepad
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-private enum FocusArea { Launcher, Cards, TopButtons }
+        private enum FocusArea { Launcher, Cards, TopButtons }
 private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
@@ -511,6 +632,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 };
             }
 
+            
+
+
             // Initialisiere den SteamGridDB Helper
             try
             {
@@ -553,7 +677,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
 
             string startart = AppSettings.Load<string>("launcher");
-
+           
             LoadShortcutsFromSettings();
             SetupGamepad();
             
@@ -871,11 +995,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             int screenWidth = GetScreenWidth();
             int screenHeight = GetScreenHeight();
 
-            // Set the window size to fullscreen
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
-
-            // Set the wallpaper as the background
-            //SetBackgroundImage(screenWidth, screenHeight); // nicht mehr hier
+            // --- HIER IST DIE ENTSCHEIDENDE ÄNDERUNG ---
+            // Set the window size to fullscreen AND set it to be "HWND_TOPMOST".
+            // IntPtr.Zero (HWND_TOP) -> new IntPtr(-1) (HWND_TOPMOST)
+            SetWindowPos(hwnd, new IntPtr(-1), 0, 0, screenWidth, screenHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
         }
 
         private bool IsWindowInForeground()
@@ -1722,6 +1845,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private void BackToWindows()
         {
+
             MakeSelfNonTopmost();
          
             Console.WriteLine("Exit-Button geklickt. Stelle den Desktop wieder her und beende die App...");
@@ -1820,102 +1944,235 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const int SW_SHOWMAXIMIZED = 3;
 
         // 3. Die eigentliche Methode
-        private static void MaximizeXboxWindow(IntPtr hwnd)
+        /// <summary>
+        /// Forces a window into true borderless fullscreen by resizing it to the screen dimensions.
+        /// </summary>
+        private void ForceWindowFullscreen(IntPtr hwnd)
         {
-            // Prüft, ob ein gültiges Fenster-Handle übergeben wurde
-            if (hwnd != IntPtr.Zero)
-            {
-                // Maximiert das Fenster, das zum Handle gehört
-                ShowWindow(hwnd, SW_SHOWMAXIMIZED);
-            }
+            if (hwnd == IntPtr.Zero) return;
+
+            // Get the actual screen dimensions
+            int screenWidth = GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
+            int screenHeight = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
+
+            // Remove window styles that create borders and a title bar
+            IntPtr style = GetWindowLongPtr(hwnd, GWL_STYLE);
+            style = (IntPtr)((long)style & ~WS_CAPTION & ~0x00040000L); // WS_THICKFRAME
+            SetWindowLongPtr(hwnd, GWL_STYLE, style);
+
+            // Resize and move the window to cover the entire screen
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, 0x0020); // SWP_FRAMECHANGED
         }
 
 
-        private void SwitchToConfiguredLauncher()
+        private void MinimizeSelf()
         {
+            try
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+                var appWindow = AppWindow.GetFromWindowId(windowId);
+
+                if (appWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                {
+                    overlappedPresenter.Minimize();
+                    Debug.WriteLine("Main window minimized.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to minimize main window: {ex.Message}");
+            }
+        }
+        private void SwitchToWindowReliably(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return;
+
+            // Step 1: If the window is minimized, we MUST restore it first.
+            if (IsIconic(hwnd))
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+
+            // Step 2: Use the "AttachThreadInput" trick to reliably set the foreground window.
+            // This temporarily gives our app permission to steal focus.
+            IntPtr foregroundHwnd = GetForegroundWindow();
+            uint foregroundThreadId = GetWindowThreadProcessId(foregroundHwnd, out _);
+            uint ourThreadId = GetCurrentThreadId();
+
+            AttachThreadInput(ourThreadId, foregroundThreadId, true);
+            SetForegroundWindow(hwnd);
+            AttachThreadInput(ourThreadId, foregroundThreadId, false);
+        }
+        /// <summary>
+        /// Forces a window to the exact dimensions of the screen, creating a borderless fullscreen effect.
+        /// Uses the same logic as the main window's startup.
+        /// </summary>
+        private void ForceFullscreenResize(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return;
+
+            // Get the screen dimensions using your existing helper methods.
+            int screenWidth = GetScreenWidth();
+            int screenHeight = GetScreenHeight();
+
+            // Use SetWindowPos to resize and position the window to fill the entire screen,
+            // making it the top-level window without changing its Z-order insertion.
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
+        }
+        private async void SwitchToConfiguredLauncher()
+        {
+            // Die Logik zum Vorbereiten (Minimieren des Spiels oder MakeSelfNonTopmost)
+            // wird korrekterweise in der aufrufenden Methode (LauncherCard_Tapped) behandelt.
+            // Diese Methode hier kümmert sich nur um den eigentlichen Wechsel.
+
             string launcher = AppSettings.Load<string>("launcher");
-            Console.WriteLine($"Wechsle zu Launcher '{launcher}'...");
+            Debug.WriteLine($"Switching to launcher '{launcher}'...");
 
             switch (launcher)
             {
                 case "steam":
-                    // Für Steam ist der Protokoll-Befehl am zuverlässigsten.
-                    // Er startet Steam, falls es nicht läuft, oder holt es in den Vordergrund.
+                    Debug.WriteLine("Launching Steam in Big Picture mode...");
                     Process.Start(new ProcessStartInfo("steam://open/bigpicture") { UseShellExecute = true });
                     break;
 
                 case "playnite":
+                    Debug.WriteLine("Checking for Playnite...");
                     string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
                     string playniteProcessName = "Playnite.FullscreenApp";
+                    Process playniteProcess = Process.GetProcessesByName(playniteProcessName).FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
 
-                    Process playniteProcess = Process.GetProcessesByName(playniteProcessName).FirstOrDefault();
-                    if (playniteProcess != null && playniteProcess.MainWindowHandle != IntPtr.Zero)
+                    if (playniteProcess != null)
                     {
-                        // Playnite läuft schon, in den Vordergrund holen.
+                        Debug.WriteLine("Playnite is already running. Bringing to front...");
                         TaskManagerBringWindowToForeground(playniteProcess.MainWindowHandle);
+                    }
+                    else if (!string.IsNullOrEmpty(playnitePath) && File.Exists(playnitePath))
+                    {
+                        Debug.WriteLine("Starting Playnite in fullscreen mode...");
+                        Process.Start(new ProcessStartInfo(playnitePath, "--startfullscreen") { UseShellExecute = true });
                     }
                     else
                     {
-                        // Playnite starten.
-                        Process.Start(new ProcessStartInfo(playnitePath, "--startfullscreen") { UseShellExecute = true });
+                        Debug.WriteLine("Playnite path not found or invalid.");
+                        await messagebox("Der Pfad für Playnite ist ungültig. Bitte in den Einstellungen prüfen.");
                     }
                     break;
 
                 case "custom":
+                    Debug.WriteLine("Checking for custom launcher...");
                     string customPath = AppSettings.Load<string>("customlauncherpath");
-                    string customProcessName = Path.GetFileNameWithoutExtension(customPath);
-
-                    Process customProcess = Process.GetProcessesByName(customProcessName).FirstOrDefault();
-                    if (customProcess != null && customProcess.MainWindowHandle != IntPtr.Zero)
+                    if (string.IsNullOrEmpty(customPath) || !File.Exists(customPath))
                     {
-                        // Custom Launcher läuft schon, in den Vordergrund holen.
+                        Debug.WriteLine("Custom launcher path not found or invalid.");
+                        await messagebox("Der Pfad für den Custom Launcher ist ungültig. Bitte in den Einstellungen prüfen.");
+                        break; // Beendet die Ausführung für diesen Fall
+                    }
+
+                    string customProcessName = Path.GetFileNameWithoutExtension(customPath);
+                    Process customProcess = Process.GetProcessesByName(customProcessName).FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
+
+                    if (customProcess != null)
+                    {
+                        Debug.WriteLine("Custom launcher is already running. Bringing to front...");
                         TaskManagerBringWindowToForeground(customProcess.MainWindowHandle);
                     }
                     else
                     {
-                        // Custom Launcher starten.
+                        Debug.WriteLine("Starting custom launcher...");
                         Process.Start(new ProcessStartInfo(customPath) { UseShellExecute = true });
                     }
                     break;
 
                 case "xbox":
-                    // Das Protokoll "xbox:" startet die App oder holt sie in den Vordergrund.
-                    Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
+                    IntPtr hwnd = await FindXboxWindowHandleAsync(0);
+
+                    if (hwnd == IntPtr.Zero)
+                    {
+                        Debug.WriteLine("Xbox window not found. Launching app...");
+                        Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
+                        hwnd = await FindXboxWindowHandleAsync(15);
+                    }
+
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        TaskManagerBringWindowToForeground(hwnd);
+                        await Task.Delay(750);
+
+                        Debug.WriteLine("Forcing window to fill screen...");
+                        ResizeWindowToFillScreen(hwnd);
+                    }
+                    else
+                    {
+                        await messagebox("Xbox App konnte nicht gefunden werden.");
+                    }
                     break;
             }
         }
 
-
-        private async Task StartLauncher()
+        private static void MaximizeXboxWindow(IntPtr hwnd)
         {
-            string launcher = AppSettings.Load<string>("launcher");
-            switch (launcher)
+            // Prüft, ob ein gültiges Fenster-Handle übergeben wurde
+            if (hwnd != IntPtr.Zero)
             {
-                case "steam":
-                    await StartSteam();
-                    break;
-                case "playnite":
-                    await StartPlaynite();
-                    break;
-                case "custom":
-                    await StartOtherLauncher();
-                    break;
-                case "xbox":
-                    // ... Deine bestehende Xbox-Logik ...
-                    break;
-                default:
-                    AppSettings.Save("launcher", "steam");
-                    await StartSteam();
-                    break;
+                // Maximiert das Fenster mit dem Windows-Standardbefehl
+                ShowWindow(hwnd, SW_SHOWMAXIMIZED);
             }
         }
+
+        // Stelle sicher, dass diese Hilfsmethode auch in deiner Klasse ist:
+        private async Task<IntPtr> FindXboxWindowHandleAsync(int timeoutSeconds = 15)
+        {
+            IntPtr xboxHwnd = IntPtr.Zero;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (stopwatch.Elapsed.TotalSeconds < timeoutSeconds)
+            {
+                EnumWindows((hWnd, lParam) =>
+                {
+                    if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0) return true;
+                    var titleBuilder = new StringBuilder(256);
+                    GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+                    if (titleBuilder.ToString().Equals("Xbox", StringComparison.OrdinalIgnoreCase))
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        try
+                        {
+                            Process p = Process.GetProcessById((int)pid);
+                            if (p.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+                            {
+                                xboxHwnd = hWnd;
+                                return false;
+                            }
+                        }
+                        catch { }
+                    }
+                    return true;
+                }, IntPtr.Zero);
+
+                if (xboxHwnd != IntPtr.Zero)
+                {
+                    stopwatch.Stop();
+                    return xboxHwnd;
+                }
+                if (timeoutSeconds == 0) break;
+                await Task.Delay(250);
+            }
+            return IntPtr.Zero;
+        }
+
+
 
         private void LauncherCard_Tapped(object sender, TappedRoutedEventArgs e)
         {
-            MakeSelfNonTopmost(); // <-- HINZUGEFÜGT
+            // Step 1: ALWAYS make our window non-topmost.
+            // This allows the new launcher to come to the foreground without a fight.
+            MakeSelfNonTopmost();
+
+            // Step 2: Immediately start the switch to the configured launcher.
             SwitchToConfiguredLauncher();
         }
-       
+
 
         static void uac(string art)
         {
@@ -1955,7 +2212,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private async void ConsoleModeToShell()
         {
-            Showwinpart();
+            
 
             const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
             const string valueName = "Shell";
@@ -2198,9 +2455,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         }
 
                             Thread.Sleep(5000);
-                //setTaskbar();
-                //HideShellWindow("Windows.UI.StartMenu");
-                KillProcess("WidgetBoard");
+                        
+                        //HideShellWindow("Windows.UI.StartMenu");
+                        KillProcess("WidgetBoard");
                 KillProcess("WidgetService");
                 DesktopIconController.HideDesktopIcons();
                         // Make taskbar invisible
@@ -2510,37 +2767,59 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        private void Showwinpart()
+        private async Task Showwinpartandlauncher()
         {
-            //check  startup apps winpart
-            try {
+            // Dieser Teil bleibt gleich: Deaktivierung der Autostart-Apps
+            try
+            {
                 bool usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
                 if (usewinpartstartapps == true)
                 {
-                    //First Disable all Autostartapps for Not Popups and Windows Partstart
                     StartupControl.DisableAllStartupApps();
-                }
-                else
-                {
-
                 }
             }
             catch
             {
-                
+                // Fehler ignorieren, falls die Einstellung nicht existiert
             }
-            // Creates a timer for 10 seconds
-            var hideTimer = new DispatcherTimer
+
+            // NEU: Lade die Launcher-Einstellung, um zu entscheiden, ob gewartet werden soll.
+            string launcher = AppSettings.Load<string>("launcher");
+
+            // Führe die 10-sekündige Verzögerung nur aus, wenn es NICHT der Xbox-Launcher ist.
+            if (launcher != "xbox")
             {
-                Interval = TimeSpan.FromSeconds(3)
-            };
-            hideTimer.Tick += (s, e) =>
-            {
-                // Stops the timer and shows the StackPanel
-                hideTimer.Stop();
+                Debug.WriteLine("Launcher ist nicht Xbox, warte 10 Sekunden für den WinPart-Modus...");
+
+                launcher = AppSettings.Load<string>("launcher");
+                switch (launcher)
+                {
+                    case "steam":
+                        await StartSteam();
+                        break;
+                    case "playnite":
+                        await StartPlaynite();
+                        break;
+                    case "custom":
+                        await StartOtherLauncher();
+                        break;
+                    default:
+                        AppSettings.Save("launcher", "steam");
+                        await StartSteam();
+                        break;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(10));
                 winpart();
-            };
-            hideTimer.Start();
+            }
+            else
+            {
+                Debug.WriteLine("Launcher ist Xbox, WinPart-Modus wird sofort gestartet.");
+                winpart();
+                await StartXbox();
+            }
+
+           
         }
         #endregion winparts
 
@@ -2784,39 +3063,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private async Task Start()
         {
+            
             // Warten, bis das Video fertig ist
             while (startupVideoFinished == false)
             {
                 await Task.Delay(50);
             }
-
-            
-          
             SetupLogging();
-
             // === HIER IST DIE WICHTIGE ÄNDERUNG ===
             // Da App.xaml.cs sicherstellt, dass wir Admin sind, können wir hier die UAC-Abfragen
             // für zukünftige Starts deaktivieren.
             uac("off");
             // ===================================
-
             SettingsVerify();
             
-
             await StartOverlayAsync();
-            
-
             await Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
             IsJoyxoffInstalledAndStart();
             SetupWingamepadTask();
-            await StartLauncher();
-
+            await Showwinpartandlauncher();
             cssloader();
             ConsoleModeToShell();
             
             preaudio(true, false);
             prestartlist();
+            SwitchToConfiguredLauncher();
         }
         #endregion start
         #region TaskManager
@@ -3204,7 +3476,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Big Picture Mode",  // NEW
     "Realtek Audio Console",
     "NVIDIA App",
-    "Xbox.Apps.TCUI"
+    "Xbox.Apps.TCUI",
+    "Xbox"
 };
 
         private static readonly Dictionary<string, string> _nameOverrides = new()
@@ -3666,10 +3939,71 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch { }
 
-           
+
         }
 
+        private bool IsWindowMaximized(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
 
+            // Get the monitor where the window is located
+            IntPtr hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+
+            // Get the monitor's information (specifically the work area)
+            MONITORINFO monitorInfo = new MONITORINFO();
+            monitorInfo.cbSize = (uint)Marshal.SizeOf(typeof(MONITORINFO));
+            GetMonitorInfo(hMonitor, ref monitorInfo);
+            RECT monitorWorkRect = monitorInfo.rcWork;
+
+            // Get the window's current rectangle
+            GetWindowRect(hwnd, out RECT windowRect);
+
+            // Compare the window's rectangle with the monitor's work area rectangle
+            return windowRect.Left == monitorWorkRect.Left &&
+                   windowRect.Top == monitorWorkRect.Top &&
+                   windowRect.Right == monitorWorkRect.Right &&
+                   windowRect.Bottom == monitorWorkRect.Bottom;
+        }
+
+        /// <summary>
+        /// The main entry point for the shortcut. Checks for Xbox fullscreen, then brings this app to front.
+        /// </summary>
+        public void BringTaskManagerToFrontAndFocus()
+        {
+            // Die BringToFrontAndFocus-Methode ist stark genug, um den Fokus zu übernehmen.
+
+            // Wir müssen nur sicherstellen, dass dieser Aufruf auf dem UI-Thread ausgeführt wird.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                IntPtr hWnd = Process.GetCurrentProcess().MainWindowHandle;
+                BringToFrontAndFocus(hWnd);
+            });
+        }
+        private async Task StartXbox()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
+                IntPtr xboxHwnd = await FindXboxWindowHandleAsync(15);
+
+                if (xboxHwnd == IntPtr.Zero)
+                {
+                    throw new Exception("The main window of the Xbox App could not be found.");
+                }
+
+                TaskManagerBringWindowToForeground(xboxHwnd);
+                await Task.Delay(750); // Give it a moment to stabilize.
+
+                // --- HIER IST DIE ÄNDERUNG ---
+                // Force the window to fill the entire screen using our new precise method.
+                Debug.WriteLine("Forcing window to fill screen...");
+                ResizeWindowToFillScreen(xboxHwnd);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in StartXbox: {ex.Message}");
+            }
+        }
 
         private BitmapImage GetAppIconAsBitmapImage(string exePath)
         {
@@ -4550,36 +4884,36 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
 
-        public static void BringTaskManagerToFrontAndFocus()
-        {
-            IntPtr hWnd = Process.GetCurrentProcess().MainWindowHandle;
-            BringToFrontAndFocus(hWnd);
-        }
+
         public static void BringToFrontAndFocus(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
             try
             {
-                // Hole die Thread-IDs des aktuellen Vordergrundfensters und unseres Fensters
+                // --- NEUE INTELLIGENTE LOGIK ---
+
+                // Step 1: Check if the target window is minimized (iconic).
+                if (IsIconic(hWnd))
+                {
+                    // If it is minimized, we MUST restore it to make it visible.
+                    ShowWindow(hWnd, SW_RESTORE);
+                }
+
+                // Step 2: Now, bring it to the foreground. This part is safe for already
+                // visible windows and will not cause a state change/flicker.
                 IntPtr foregroundHwnd = GetForegroundWindow();
+                if (foregroundHwnd == hWnd) return; // It's already the foreground window.
+
                 uint foregroundThreadId = GetWindowThreadProcessId(foregroundHwnd, out _);
                 uint ourThreadId = GetCurrentThreadId();
 
-                // Verbinde die Input-Threads, um den Fokuswechsel zu ermöglichen
                 AttachThreadInput(ourThreadId, foregroundThreadId, true);
 
-                // Setze das Fenster in den Vordergrund und mache es aktiv
-                SetWindowPos(hWnd, new IntPtr(-1), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE); // HWND_TOPMOST
                 SetForegroundWindow(hWnd);
                 SetActiveWindow(hWnd);
-                SetFocus(hWnd);
 
-                // Trenne die Input-Threads wieder
                 AttachThreadInput(ourThreadId, foregroundThreadId, false);
-
-                // Zeige das Fenster an, falls es minimiert war
-                ShowWindow(hWnd, SW_RESTORE);
             }
             catch (Exception ex)
             {

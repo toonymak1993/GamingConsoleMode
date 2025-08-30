@@ -60,20 +60,30 @@ namespace GAMINGCONSOLEMODE
             {
                 case "steam":
                     use_steam_bp.IsOn = true;
-                        use_playnite.IsOn = false;
+                    use_playnite.IsOn = false;
                     use_custom.IsOn = false;
+                    use_xbox.IsOn = false;
                     break;
 
                 case "playnite":
                     use_playnite.IsOn = true;
                     use_steam_bp.IsOn = false;
                     use_custom.IsOn = false;
+                    use_xbox.IsOn = false;
                     break;
 
                 case "custom":
                     use_custom.IsOn = true;
                     use_playnite.IsOn = false;
                     use_steam_bp.IsOn = false;
+                    use_xbox.IsOn = false;
+                    break;
+
+                case "xbox":
+                    use_custom.IsOn = false;
+                    use_playnite.IsOn = false;
+                    use_steam_bp.IsOn = false;
+                    use_xbox.IsOn = true;
                     break;
 
                 default:
@@ -84,6 +94,7 @@ namespace GAMINGCONSOLEMODE
                     use_steam_bp.IsOn = true;
                     use_playnite.IsOn = false;
                     use_custom.IsOn = false;
+                    use_xbox.IsOn = false;
 
                     break;
             }
@@ -116,7 +127,7 @@ namespace GAMINGCONSOLEMODE
 
         private  async Task checkLauncherActivatedAsync()
         {
-            if(use_steam_bp.IsOn == false & use_playnite.IsOn == false & use_custom.IsOn == false)
+            if(use_steam_bp.IsOn == false & use_playnite.IsOn == false & use_custom.IsOn == false & use_xbox.IsOn == false)
             {
                 //messagebox
                 var dialog = new ContentDialog
@@ -165,6 +176,7 @@ namespace GAMINGCONSOLEMODE
                 SteamPanel.Visibility = Visibility.Visible;
                 PlaynitePanel.Visibility = Visibility.Collapsed;
                 CustomPanel.Visibility = Visibility.Collapsed;
+                XboxPanel.Visibility = Visibility.Collapsed;
             }
             else
             {
@@ -237,6 +249,7 @@ namespace GAMINGCONSOLEMODE
                 SteamPanel.Visibility = Visibility.Collapsed;
                 PlaynitePanel.Visibility = Visibility.Visible;
                 CustomPanel.Visibility = Visibility.Collapsed;
+                XboxPanel.Visibility = Visibility.Collapsed;
             }
             else
             {
@@ -254,7 +267,26 @@ namespace GAMINGCONSOLEMODE
         }
 
         #endregion Playnite
-
+        #region xbox
+        private async void use_xbox_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (use_xbox.IsOn == true)
+            {
+                AppSettings.Save("launcher", "xbox");
+                //ui 
+                initialui();
+                SteamPanel.Visibility = Visibility.Collapsed;
+                PlaynitePanel.Visibility = Visibility.Collapsed;
+                CustomPanel.Visibility = Visibility.Collapsed;
+                XboxPanel.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                await checkLauncherActivatedAsync();
+                XboxPanel.Visibility = Visibility.Collapsed;
+            }
+        }
+        #endregion xbox
         #region CustomLauncher
 
         private void pichcustompath_Click(object sender, RoutedEventArgs e)
@@ -362,6 +394,8 @@ namespace GAMINGCONSOLEMODE
                 return string.Empty;
             }
         }
+
+       
     }
 }
 

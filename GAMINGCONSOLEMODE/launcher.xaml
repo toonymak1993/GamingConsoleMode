@@ -68,6 +68,20 @@
                     <ToggleSwitch x:Name="use_playnite" Grid.Column="2" HorizontalAlignment="Right" Toggled="use_playnite_Toggled"  Margin="-85,0"/>
                 </Grid>
 
+                <!-- Xbox -->
+                <Grid Padding="15,5">
+                    <Grid.ColumnDefinitions>
+                        <!-- Platz für ToggleSwitch + Text -->
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Image Source="/Assets/launcher/xboxlogo.png" Width="25" Height="25" Grid.Column="0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Xbox" Grid.Column="1" VerticalAlignment="Center" Margin="20,0"/>
+                    <ToggleSwitch x:Name="use_xbox" Grid.Column="2" HorizontalAlignment="Right" Toggled="use_xbox_Toggled"  Margin="-85,0"/>
+                </Grid>
+
                 <!-- Custom Launcher -->
                 <Grid Padding="15,5">
                     <Grid.ColumnDefinitions>
@@ -158,6 +172,33 @@
                             </StackPanel>
                             
                         </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- Xbox Panel -->
+            <Grid x:Name="XboxPanel">
+
+                <!-- Color -->
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="Black"  Offset="-0.5" />
+                        <GradientStop Color="LawnGreen"  Offset="0.8" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+
+                <!-- Main Content -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Spacing="20">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                            <Image Source="/Assets/launcher/Xboxlogo.png" Width="75" Height="75" Margin="5"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="XBOX APP" FontSize="30" FontWeight="SemiBold" Foreground="White"/>
+                                <TextBlock Text="GCM will use XBOX on startup" FontSize="12" Foreground="White" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                       
+                        
                     </StackPanel>
                 </Grid>
             </Grid>

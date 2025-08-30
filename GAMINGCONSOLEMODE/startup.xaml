@@ -762,7 +762,7 @@
                                                 </controls:SettingsCard.Description>
                                             </controls:SettingsCard>
 
-                                            <controls:SettingsCard Header="DisplayFusion Configs"
+                                            <controls:SettingsCard Header="Video Path"
                                                                    Description="Set DisplayFusion config names for START and END">
                                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
                                                     <Button x:Name="pichstartupvideopath"
@@ -829,12 +829,7 @@
 
                                             <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
 
-                                            <InfoBar IsOpen="True"
-                                                     Severity="Informational"
-                                                     Title="Important"
-                                                     Message="If not used with Steam, please avoid .webm format"
-                                                     Margin="0,0,0,0"
-                                                     HorizontalAlignment="Stretch"/>
+                                           
 
                                             <controls:SettingsCard  Description="Please select a video file to be displayed while your launcher boots."
                                                                     Header="Installation instructions" >
