@@ -7,17 +7,18 @@
 AppName=GCM Game Console Mode
 AppVersion={#MyAppVersion}
 AppVerName=GCM Game Console Mode {#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 WizardStyle=modern
 DefaultDirName={pf32}\GCM\GCM
 DefaultGroupName=GCM
-UninstallDisplayIcon={app}\gcmloader\gcmloader.exe
+UninstallDisplayIcon={app}\gcmloader.exe
 Compression=lzma2
 SolidCompression=yes
 ; Output directory relative to the ISS file location
 OutputDir=..\output
 OutputBaseFilename=GCM-Setup-{#MyAppVersion}
 PrivilegesRequired=admin
-; Use relative path for icon file
+; Use relative path for icon file - now in the root since everything is in one folder
 SetupIconFile=..\installer-files\gcmloader\logo.ico
 ArchitecturesAllowed=x86 x64
 ArchitecturesInstallIn64BitMode=x64
@@ -30,7 +31,7 @@ Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Files]
 ; Source files relative to the ISS file location
-; The workflow will copy build outputs to installer-files directory
+; The workflow copies all build outputs to a single installer-files directory
 Source: "..\installer-files\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Tasks]
@@ -38,15 +39,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Icons]
 ; Startmenü-Verknüpfungen
+; Since all executables are now in the same folder, adjust paths accordingly
 Name: "{group}\GCM Settings"; Filename: "{app}\GAMINGCONSOLEMODE.exe"; WorkingDir: "{app}"
-Name: "{group}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; WorkingDir: "{app}\gcmloader"
+Name: "{group}\GCM Mode"; Filename: "{app}\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; WorkingDir: "{app}"
 
 ; Optionaler Desktop Shortcut
-Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; Tasks: desktopicon
+Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; Tasks: desktopicon
 
 [Run]
 ; Starte GCM Settings automatisch nach Setup
-Filename: "{app}\GAMINGCONSOLEMODE.exe"; Flags: nowait skipifsilent
+Filename: "{app}\GAMINGCONSOLEMODE.exe"; Description: "Launch GCM Settings"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
 // Prozesse beenden
@@ -81,12 +83,17 @@ var
   i: Integer;
 begin
   // 1️⃣ Prozesse beenden
+  // Add all possible process names including variants
   processList := ['wingamepad', 'gcmloader', 'GAMINGCONSOLEMODE', 'Overlaywindow', 'flowlauncher'];
   for i := 0 to GetArrayLength(processList) - 1 do
     KillProcessIfRunning(processList[i]);
 
-  // 2️⃣ Alten Uninstaller ausführen
+  // 2️⃣ Alten Uninstaller ausführen (check both old locations)
   OldUninstaller := ExpandConstant('{pf32}\GCMcrew\GCM\Uninstall.exe');
+  RunExternalUninstaller(OldUninstaller);
+  
+  // Also check for uninstaller in the current GCM location
+  OldUninstaller := ExpandConstant('{pf32}\GCM\GCM\unins000.exe');
   RunExternalUninstaller(OldUninstaller);
 
   // 3️⃣ Alten Programmordner löschen (GCMcrew)
@@ -103,9 +110,46 @@ begin
   OldStartMenuDir := ExpandConstant('{commonprograms}\GCMcrew');
   if DirExists(OldStartMenuDir) then
     DelTree(OldStartMenuDir, True, True, True);
+    
+  // Also remove old GCM start menu entries
+  OldStartMenuDir := ExpandConstant('{commonprograms}\GCM');
+  if DirExists(OldStartMenuDir) then
+    DelTree(OldStartMenuDir, True, True, True);
 
   // 5️⃣ Benutzer AppData-Einträge löschen
   OldSettingsDir := ExpandConstant('{userappdata}\gcmsettings');
   if DirExists(OldSettingsDir) then
     DelTree(OldSettingsDir, True, True, True);
+end;
+
+// Optional: Check if all required files exist after installation
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  RequiredFiles: array of string;
+  i: Integer;
+  MissingFiles: string;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    // Check for required executables
+    RequiredFiles := ['GAMINGCONSOLEMODE.exe', 'gcmloader.exe'];
+    MissingFiles := '';
+    
+    for i := 0 to GetArrayLength(RequiredFiles) - 1 do
+    begin
+      if not FileExists(ExpandConstant('{app}\' + RequiredFiles[i])) then
+      begin
+        if MissingFiles <> '' then
+          MissingFiles := MissingFiles + ', ';
+        MissingFiles := MissingFiles + RequiredFiles[i];
+      end;
+    end;
+    
+    if MissingFiles <> '' then
+    begin
+      MsgBox('Warning: The following files were not installed: ' + MissingFiles + 
+             #13#10#13#10 + 'The application may not work correctly.', 
+             mbWarning, MB_OK);
+    end;
+  end;
 end;

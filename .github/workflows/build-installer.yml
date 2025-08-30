@@ -42,6 +42,7 @@ env:
   WINDOWS_SDK_VERSION: '10.0.19041.0'
   INNO_SETUP_VERSION: '6.2.2'
   ISS_FILE: '.github/installer.iss'
+  BUILD_OUTPUT_PATH: './build-output'  # Centralized build output directory
 
 jobs:
   build-and-package:
@@ -133,11 +134,19 @@ jobs:
         shell: pwsh
         run: |
           $platform = "${{ github.event.inputs.platform }}"
+          $outputPath = "${{ env.BUILD_OUTPUT_PATH }}/${{ github.event.inputs.build_configuration }}/$platform"
           
-          # Build using MSBuild with platform-specific settings
+          # Create output directory
+          New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
+          
+          Write-Host "🔨 Building solution to centralized directory: $outputPath"
+          
+          # Build using MSBuild with centralized output directory
           msbuild ${{ env.SOLUTION_PATH }} `
             /p:Configuration=${{ github.event.inputs.build_configuration }} `
             /p:Platform="$platform" `
+            /p:OutputPath="$(Resolve-Path $outputPath)" `
+            /p:OutDir="$(Resolve-Path $outputPath)\" `
             /p:Version=${{ steps.version.outputs.version }} `
             /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
             /p:FileVersion=${{ github.event.inputs.version }}.0 `
@@ -153,6 +162,10 @@ jobs:
             Write-Error "Build failed with exit code: $LASTEXITCODE"
             exit $LASTEXITCODE
           }
+          
+          Write-Host "✅ Build completed successfully"
+          Write-Host "`n📁 Build output directory contents:"
+          Get-ChildItem -Path $outputPath -Name | ForEach-Object { Write-Host "   - $_" }
 
       - name: Run tests (optional)
         if: github.event.inputs.build_configuration == 'Release'
@@ -172,117 +185,92 @@ jobs:
           
           $config = "${{ github.event.inputs.build_configuration }}"
           $platform = "${{ github.event.inputs.platform }}"
-          Write-Host "📦 Collecting build outputs from $config configuration for $platform"
+          $sourcePath = "${{ env.BUILD_OUTPUT_PATH }}/$config/$platform"
           
-          # List of GCM components to include
-          # WinUI3 apps with net8.0-windows10.0.19041.0 target
-          $components = @{
-            # Main applications - try multiple possible paths
-            "GAMINGCONSOLEMODE" = @(
-              "GAMINGCONSOLEMODE/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
-              "GAMINGCONSOLEMODE/bin/$config/net8.0-windows10.0.19041.0/*",
-              "GAMINGCONSOLEMODE/bin/$platform/$config/net8.0-windows/*",
-              "GAMINGCONSOLEMODE/bin/$platform/$config/*",
-              "GAMINGCONSOLEMODE/bin/$config/*"
-            )
-            "gcmloader" = @(
-              "gcmloader/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
-              "gcmloader/bin/$config/net8.0-windows10.0.19041.0/*",
-              "gcmloader/bin/$platform/$config/net8.0-windows/*",
-              "gcmloader/bin/$platform/$config/*",
-              "gcmloader/bin/$config/*"
-            )
-            "wingamepad" = @(
-              "wingamepad/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
-              "wingamepad/bin/$config/net8.0-windows10.0.19041.0/*",
-              "wingamepad/bin/$platform/$config/net8.0-windows/*",
-              "wingamepad/bin/$platform/$config/*",
-              "wingamepad/bin/$config/*"
-            )
-            "Overlaywindow" = @(
-              "Overlaywindow/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
-              "Overlaywindow/bin/$config/net8.0-windows10.0.19041.0/*",
-              "Overlaywindow/bin/$platform/$config/net8.0-windows/*",
-              "Overlaywindow/bin/$platform/$config/*",
-              "Overlaywindow/bin/$config/*"
-            )
-            "flowlauncher" = @(
-              "flowlauncher/bin/$platform/$config/net8.0-windows10.0.19041.0/*",
-              "flowlauncher/bin/$config/net8.0-windows10.0.19041.0/*",
-              "flowlauncher/bin/$platform/$config/net8.0-windows/*",
-              "flowlauncher/bin/$platform/$config/*",
-              "flowlauncher/bin/$config/*"
-            )
-          }
+          Write-Host "📦 Collecting all build outputs from centralized directory: $sourcePath"
           
-          $successCount = 0
-          $failCount = 0
+          if (Test-Path $sourcePath) {
+            # Copy all files from the centralized build output
+            Copy-Item -Path "$sourcePath/*" -Destination "./installer-files/" -Recurse -Force
           
-          foreach ($component in $components.GetEnumerator()) {
-            $copied = $false
-            $destPath = "./installer-files/$($component.Key)"
+            Write-Host "✅ Copied all build outputs from centralized directory"
           
-            foreach ($sourcePath in $component.Value) {
-              $fullPath = "./$sourcePath"
-              if (Test-Path $fullPath) {
-                New-Item -ItemType Directory -Force -Path $destPath | Out-Null
-                Copy-Item -Path $fullPath -Destination $destPath -Recurse -Force
-                Write-Host "✅ Copied $($component.Key) files from: $sourcePath"
-                $successCount++
-                $copied = $true
-                break
+            # List what was copied
+            Write-Host "`n📁 Installer files content:"
+            $files = Get-ChildItem -Path "./installer-files" -File | Select-Object -First 20
+            foreach ($file in $files) {
+              Write-Host "  - $($file.Name)"
+            }
+          
+            if ((Get-ChildItem -Path "./installer-files" -File).Count -gt 20) {
+              Write-Host "  ... and $((Get-ChildItem -Path './installer-files' -File).Count - 20) more files"
+            }
+          
+            # Show executables found
+            Write-Host "`n🚀 Executables found:"
+            Get-ChildItem -Path "./installer-files" -Filter "*.exe" | ForEach-Object {
+              Write-Host "  - $($_.Name)"
+            }
+          
+            # Check for required components
+            $requiredExes = @("GAMINGCONSOLEMODE.exe", "gcmloader.exe")
+            $missingExes = @()
+          
+            foreach ($exe in $requiredExes) {
+              if (-not (Test-Path "./installer-files/$exe")) {
+                $missingExes += $exe
               }
             }
           
-            if (-not $copied) {
-              Write-Warning "❌ Could not find $($component.Key) in any expected location"
-              Write-Warning "   Searched paths:"
-              foreach ($path in $component.Value) {
-                Write-Warning "   - $path"
+            if ($missingExes.Count -gt 0) {
+              Write-Warning "⚠️ Some expected executables were not found:"
+              foreach ($exe in $missingExes) {
+                Write-Warning "   - $exe"
               }
-              $failCount++
+            } else {
+              Write-Host "✅ All required components found"
             }
-          }
           
-          # Copy any additional resources or dependencies
-          # Example: Copy logo.ico if it exists in the source
-          $logoSource = "./gcmloader/logo.ico"
-          if (Test-Path $logoSource) {
-            Copy-Item -Path $logoSource -Destination "./installer-files/gcmloader/" -Force
-            Write-Host "✅ Copied logo.ico"
           } else {
-            # Try to find logo.ico in other locations
-            $alternativeLogoPaths = @(
-              "./logo.ico",
-              "./Resources/logo.ico",
-              "./gcmloader/Resources/logo.ico"
-            )
-            foreach ($path in $alternativeLogoPaths) {
-              if (Test-Path $path) {
-                New-Item -ItemType Directory -Force -Path "./installer-files/gcmloader/" | Out-Null
-                Copy-Item -Path $path -Destination "./installer-files/gcmloader/logo.ico" -Force
-                Write-Host "✅ Copied logo.ico from $path"
-                break
+            Write-Error "❌ Build output directory not found: $sourcePath"
+            Write-Error "Available directories:"
+            Get-ChildItem -Path "${{ env.BUILD_OUTPUT_PATH }}" -Directory -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "  - $($_.FullName.Replace($PWD, '.'))"
+            }
+            exit 1
+          }
+          
+          # Copy logo.ico if it exists (check multiple locations)
+          $logoSearchPaths = @(
+            "$sourcePath/logo.ico",
+            "$sourcePath/gcmloader/logo.ico",
+            "./gcmloader/logo.ico",
+            "./logo.ico",
+            "./Resources/logo.ico"
+          )
+          
+          $logoFound = $false
+          foreach ($path in $logoSearchPaths) {
+            if (Test-Path $path) {
+              # Create gcmloader subdirectory for the logo if needed
+              if (-not (Test-Path "./installer-files/gcmloader")) {
+                New-Item -ItemType Directory -Force -Path "./installer-files/gcmloader" | Out-Null
               }
+              Copy-Item -Path $path -Destination "./installer-files/gcmloader/logo.ico" -Force
+              Write-Host "✅ Copied logo.ico from: $path"
+              $logoFound = $true
+              break
             }
           }
           
-          # Summary
-          Write-Host "`n📊 Build Collection Summary:"
-          Write-Host "   ✅ Success: $successCount components"
-          Write-Host "   ❌ Failed: $failCount components"
-          
-          # List contents for debugging
-          Write-Host "`n📁 Installer files structure:"
-          Get-ChildItem -Path "./installer-files" -Recurse -Directory | ForEach-Object {
-            $relativePath = $_.FullName.Replace("$PWD\installer-files\", "").Replace("\", "/")
-            Write-Host "  └─ $relativePath"
+          if (-not $logoFound) {
+            Write-Warning "⚠️ logo.ico not found in any expected location"
           }
           
           # Show total size
           $totalSize = (Get-ChildItem -Path "./installer-files" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "`n💾 Total size: $([math]::Round($totalSize, 2)) MB"
-          
+          Write-Host "`n💾 Total installer content size: $([math]::Round($totalSize, 2)) MB"
+
       - name: Download and install Inno Setup
         shell: pwsh
         run: |
@@ -377,45 +365,67 @@ jobs:
           Write-Host "========================================" 
           Write-Host "Version:        ${{ steps.version.outputs.version }}"
           Write-Host "Configuration:  ${{ github.event.inputs.build_configuration }}"
+          Write-Host "Platform:       ${{ github.event.inputs.platform }}"
           Write-Host "Artifact:       ${{ steps.artifact-name.outputs.name }}"
           Write-Host "Build Number:   ${{ github.run_number }}"
           Write-Host "Commit:         ${{ github.sha }}"
           Write-Host "========================================" 
-          
-#  release:
-#    needs: build-and-package
-#    runs-on: ubuntu-latest
-#    if: startsWith(github.ref, 'refs/tags/v')
-#    
-#    permissions:
-#      contents: write
-#    
-#    steps:
-#      - name: Download installer artifact
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: ${{ needs.build-and-package.outputs.artifact-name }}
-#          path: ./installer
-#
-#      - name: Create Release
-#        uses: softprops/action-gh-release@v1
-#        with:
-#          tag_name: ${{ github.ref_name }}
-#          name: Release ${{ needs.build-and-package.outputs.version }}
-#          draft: false
-#          prerelease: ${{ contains(needs.build-and-package.outputs.version, '-beta') || contains(needs.build-and-package.outputs.version, '-alpha') }}
-#          files: ./installer/Setup-*.exe
-#          body: |
-#            ## Release ${{ needs.build-and-package.outputs.version }}
-#            
-#            ### Changes
-#            - Built from commit: ${{ github.sha }}
-#            - Build number: ${{ github.run_number }}
-#            
-#            ### Installation
-#            Download and run the installer below.
-#            
-#            ### Requirements
-#            - Windows 10 or later
-#            - .NET Runtime ${{ env.DOTNET_VERSION }}
-#          generate_release_notes: true
+
+  create-release:
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    if: github.event.inputs.create_release == 'true'
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-and-package.outputs.artifact-name }}
+          path: ./installer
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.build-and-package.outputs.version }}
+          name: GCM Release ${{ needs.build-and-package.outputs.version }}
+          draft: true  # Create as draft for manual review
+          prerelease: ${{ contains(needs.build-and-package.outputs.version, '-dev') }}
+          files: ./installer/GCM-Setup-*.exe
+          body: |
+            ## GCM Game Console Mode v${{ needs.build-and-package.outputs.version }}
+            
+            ### 📝 Release Notes
+            ${{ github.event.inputs.release_notes }}
+            
+            ### 🎮 What's New
+            - Built from commit: ${{ github.sha }}
+            - Build number: ${{ github.run_number }}
+            - Configuration: ${{ github.event.inputs.build_configuration }}
+            - Platform: ${{ github.event.inputs.platform }}
+            
+            ### 📥 Installation
+            1. Download the installer below
+            2. Run as Administrator
+            3. The installer will automatically remove any old GCM versions
+            
+            ### 💻 System Requirements
+            - Windows 10 or later (x86/x64)
+            - .NET Runtime ${{ env.DOTNET_VERSION }}
+            - Administrator privileges for installation
+            
+            ### 🚀 Components Included
+            - GCM Settings (GAMINGCONSOLEMODE.exe)
+            - GCM Loader (gcmloader.exe)
+            - WinGamepad
+            - Overlay Window
+            - Flow Launcher
+            
+            ### ⚠️ Note
+            The installer will automatically:
+            - Stop all running GCM processes
+            - Remove old GCMcrew installations
+            - Clean up AppData settings from previous versions
+          generate_release_notes: false
