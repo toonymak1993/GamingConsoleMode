@@ -1,13 +1,12 @@
 ; Define version as a preprocessor variable that can be updated by CI
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0.0"
+  #define MyAppVersion "1.0.0"
 #endif
 
 [Setup]
 AppName=GCM Game Console Mode
 AppVersion={#MyAppVersion}
 AppVerName=GCM Game Console Mode {#MyAppVersion}
-VersionInfoVersion={#MyAppVersion}
 WizardStyle=modern
 DefaultDirName={pf32}\GCM\GCM
 DefaultGroupName=GCM
