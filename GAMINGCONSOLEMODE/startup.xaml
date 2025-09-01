@@ -763,7 +763,7 @@
                                             </controls:SettingsCard>
 
                                             <controls:SettingsCard Header="Video Path"
-                                                                   Description="Set DisplayFusion config names for START and END">
+                                                                   Description="Enter the path to your video here">
                                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
                                                     <Button x:Name="pichstartupvideopath"
                                                             Content="Select a file"
@@ -1033,6 +1033,86 @@
                                                     <TextBlock Text="Give your Task Manager a new look!" Margin="0,0,0,20" FontWeight="SemiBold" TextAlignment="Right"/>
                                                     <TextBlock Text="Stylize your Task Manager by giving it a new Background of your choice." TextAlignment="Right"/>
                                                     <TextBlock Text="Your desktop background will be displayed if no background is defined." TextAlignment="Right"/>
+                                                </StackPanel>
+                                            </controls:SettingsCard>
+
+                                        </StackPanel>
+
+                                    </Grid>
+
+                                </ScrollViewer>
+
+                            </Grid>
+                            <!--lossless-->
+                            <Grid x:Name="lossless" Visibility="Collapsed"
+       xmlns:controls="using:CommunityToolkit.WinUI.Controls">
+
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                   VerticalScrollBarVisibility="Visible"
+                   Grid.Row="0"
+                   Height="400">
+
+
+                                    <Grid Padding="24">
+
+                                        <StackPanel Spacing="4">
+
+                                            <TextBlock Text="Settings" FontSize="14" FontWeight="SemiBold" Margin="0,8,36,0"/>
+                                            <controls:SettingsCard Description="Enable lossless scalling integration"
+                                        Header="ON/OFF" >
+                                                <ToggleSwitch x:Name="use_lossless"
+                                   Toggled="use_lossless_Toggled"
+                                   HorizontalAlignment="Center"/>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard Header="INSTALLATION PANEL" FontWeight="SemiBold">
+                                                <controls:SettingsCard.Description>
+                                                    <Border x:Name="border_install_state_lossless"
+                                 Grid.Column="1"
+                                 Background="Green"
+                                 CornerRadius="8"
+                                 Padding="10,5"
+                                 Margin="0,10,0,0"
+                                 HorizontalAlignment="Left">
+                                                        <TextBlock x:Name="text_install_state_lossless"
+                                        Text="INSTALLED"
+                                        Foreground="White"
+                                        FontSize="13"
+                                        FontWeight="Bold"
+                                        TextAlignment="Center"/>
+                                                    </Border>
+                                                </controls:SettingsCard.Description>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard Header="Set Path of Lossless Scaling" FontWeight="SemiBold">
+                                                <TextBox x:Name="lossless_path"
+                              Header="Lossless Path"
+                              PlaceholderText="Path"
+                              TextChanged="lossless_path_TextChanged"
+                              CornerRadius="5"
+                              Width="500"/>
+                                            </controls:SettingsCard>
+
+                                            <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
+
+                                            <controls:SettingsCard  Description="Please select the path to lossless scaling; the default path is set."
+                                         Header="Installation instructions" >
+                                                <controls:SettingsCard.Resources>
+                                                    <x:Double x:Key="SettingsCardWrapThreshold">800</x:Double>
+                                                    <x:Double x:Key="SettingsCardWrapNoIconThreshold">600</x:Double>
+                                                </controls:SettingsCard.Resources>
+                                            </controls:SettingsCard>
+
+                                            <controls:SettingsCard x:Name="Aboutlossless"
+                                        Header="About">
+                                                <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top">
+                                                    <TextBlock Text="lossless scaling - frame generation and scaling on the fly at any time." Margin="0,0,0,20" FontWeight="SemiBold" TextAlignment="Right"/>
+                                                    <TextBlock Text="Once the link has been entered correctly, you can set a shortcut for scaling under shortcuts." TextAlignment="Right"/>
+                                                    <TextBlock Text="Your scaling shortcut is always used from the default profile and is read automatically" TextAlignment="Right"/>
                                                 </StackPanel>
                                             </controls:SettingsCard>
 

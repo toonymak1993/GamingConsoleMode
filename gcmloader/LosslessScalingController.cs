@@ -1,4 +1,5 @@
-﻿using System;
+﻿using GAMINGCONSOLEMODE;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -19,40 +20,49 @@ namespace gcmloader
     /// </summary>
     public static class LosslessScalingController
     {
-        private const string ProcessName = "LosslessScaling";
-        private const string DefaultInstallPath = @"C:\Program Files (x86)\Steam\steamapps\common\Lossless Scaling\LosslessScaling.exe";
+        private const string ProcessName = "Lossless Scaling";
         private static readonly InputSimulator inputSimulator = new InputSimulator();
 
         public static void TriggerScaling()
         {
-            (ShortcutInfo shortcut, string errorMessage) = GetScalingShortcut();
-            if (errorMessage != null)
-            {
-                MessageBox.Show(errorMessage, "Error Reading Configuration", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            Console.WriteLine($"Hotkey successfully read: {shortcut.Modifiers} + {shortcut.Key}");
-
-            Process lsProcess = GetOrStartLosslessScalingProcess();
-            if (lsProcess == null)
-            {
-                MessageBox.Show("Lossless Scaling process could not be started or found.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            Console.WriteLine("You now have 3 seconds to click into the target window!");
-            Thread.Sleep(3000);
-
             try
             {
-                Console.WriteLine("Sending hotkey with WindowsInput...");
-                ExecuteHotkey(shortcut);
-                Console.WriteLine("Hotkey has been sent.");
+                if (AppSettings.Load<bool>("lossless") == true)
+                {
+
+                    (ShortcutInfo shortcut, string errorMessage) = GetScalingShortcut();
+                    if (errorMessage != null)
+                    {
+                        Console.WriteLine("Error Reading Configuration");
+                        return;
+                    }
+
+                    Console.WriteLine($"Hotkey successfully read: {shortcut.Modifiers} + {shortcut.Key}");
+
+                   
+
+                    Console.WriteLine("You now have 3 seconds to click into the target window!");
+                    try
+                    {
+                        Console.WriteLine("Sending hotkey with WindowsInput...");
+                        ExecuteHotkey(shortcut);
+                        Console.WriteLine("Hotkey has been sent.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Error during keyboard simulation");
+                    }
+                }
+                else
+                {
+                    //not activated or error
+                }
             }
-            catch (Exception ex)
+            catch
             {
-                MessageBox.Show($"Error during keyboard simulation:\n{ex.Message}", "Simulation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                //set appsettings to false
+                AppSettings.Save("lossless", false);
+
             }
         }
 
@@ -69,6 +79,18 @@ namespace gcmloader
 
             // 3. Execute the simulation.
             inputSimulator.Keyboard.ModifiedKeyStroke(modifierKeyCodes, mainKeyCode);
+            Thread.Sleep(100);
+            // 1. Convert our modifier flags into a list of VirtualKeyCodes.
+            var modifierKeyCodes2 = new List<VirtualKeyCode>();
+            if (shortcut.Modifiers.HasFlag(Modifiers.Control)) modifierKeyCodes.Add(VirtualKeyCode.CONTROL);
+            if (shortcut.Modifiers.HasFlag(Modifiers.Alt)) modifierKeyCodes.Add(VirtualKeyCode.MENU); // Alt is VK_MENU
+            if (shortcut.Modifiers.HasFlag(Modifiers.Shift)) modifierKeyCodes.Add(VirtualKeyCode.SHIFT);
+
+            // 2. Convert our main key. The enum values are usually identical, so a cast is sufficient.
+            var mainKeyCode2 = (VirtualKeyCode)shortcut.Key;
+
+            // 3. Execute the simulation.
+            inputSimulator.Keyboard.ModifiedKeyStroke(modifierKeyCodes2, mainKeyCode2);
         }
 
         #region Helper Methods
@@ -109,36 +131,7 @@ namespace gcmloader
             return mods;
         }
 
-        private static Process GetOrStartLosslessScalingProcess()
-        {
-            try
-            {
-                // First, check if the process is already running.
-                Process[] processes = Process.GetProcessesByName(ProcessName);
-                if (processes.Length > 0)
-                {
-                    Console.WriteLine("Lossless Scaling is already running.");
-                    return processes[0];
-                }
-
-                // If not, we start it.
-                if (File.Exists(DefaultInstallPath))
-                {
-                    Console.WriteLine("Lossless Scaling is being started minimized...");
-
-                    // *** HERE IS THE CHANGE: We are starting the process minimized ***
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = DefaultInstallPath,
-                        WindowStyle = ProcessWindowStyle.Minimized // This line ensures it starts minimized.
-                    };
-
-                    return Process.Start(startInfo);
-                }
-                return null;
-            }
-            catch { return null; }
-        }
+       
 
         private class ShortcutInfo { public Keys Key { get; set; } public Modifiers Modifiers { get; set; } }
         [Flags] private enum Modifiers { None = 0, Alt = 1, Control = 2, Shift = 4 }
