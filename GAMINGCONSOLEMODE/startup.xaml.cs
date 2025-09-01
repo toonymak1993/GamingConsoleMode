@@ -491,6 +491,47 @@ namespace GAMINGCONSOLEMODE
                 Console.WriteLine("wallpaper gui error");
             }
             #endregion gcmwallpaper
+            #region lossless
+            try
+            {
+                bool lossless = AppSettings.Load<bool>("lossless");
+                if (lossless == true)
+                {
+                    //Dashboardgrid
+                    losslessscalingbutton.Tag = "ENABLED";
+                    losslessscaling_color.Background = new SolidColorBrush(Colors.Green);
+                    losslessscaling_text.Text = "ENABLED";
+
+
+                    use_lossless.IsOn = true;
+                    text_install_state_lossless.Text = "ACTIVATED";
+                    border_install_state_lossless.Background = new SolidColorBrush(Colors.Green);
+                    //text
+                    string losslesspath = AppSettings.Load<string>("losslesspath");
+                    lossless_path.Text = losslesspath;
+
+
+
+                }
+                else
+                {
+                    //Dashboardgrid
+                    losslessscaling_color.Background = new SolidColorBrush(Colors.Orange);
+                    losslessscaling_text.Text = "DISABLED";
+                    losslessscalingbutton.Tag = "DISABLED";
+
+                    use_lossless.IsOn = false;
+                    text_install_state_lossless.Text = "DISABLED";
+                    border_install_state_lossless.Background = new SolidColorBrush(Colors.Brown);
+                    lossless_path.Text = "";
+
+                }
+            }
+            catch
+            {
+                Console.WriteLine("wallpaper gui error");
+            }
+            #endregion lossless
             #region StartupVideo
             try
             {
@@ -1520,169 +1561,12 @@ namespace GAMINGCONSOLEMODE
 
         }
         #endregion joyxoff
-        #endregion function
-
-        #region codebehind Function Dashboard
-        #region helpers
-        private void Openpanel(string panel)
-        {
-           
-            // Erst alle Panels verstecken
-            foreach (var child in DetailContentGrid.Children)
-            {
-                if (child is Grid grid)
-                {
-                    grid.Visibility = Visibility.Collapsed;
-                   
-                }
-            }
-
-            // Nur das angeklickte Panel sichtbar machen
-            var selectedPanel = DetailContentGrid.FindName(panel) as Grid;
-            if (selectedPanel != null)
-            {
-                
-                selectedPanel.Visibility = Visibility.Visible;
-            }
-
-           
-
-            // Detailansicht zentriert anzeigen
-            PanelView.Visibility = Visibility.Visible;
-
-            // Animation starten
-            var storyboard = (Storyboard)this.Resources["ShowDetailPanelStoryboard"];
-            storyboard.Begin();
-
-            
-            //collaps all
-            filterbuttonall.Visibility = Visibility.Collapsed;
-            filterbuttonenabled.Visibility = Visibility.Collapsed;
-            filterbuttondisabled.Visibility = Visibility.Collapsed;
-            SearchBox.Visibility = Visibility.Collapsed;
-        }
-
-
-        private void CloseDetailPanel_Click(object sender, RoutedEventArgs e)
-        {
-            var storyboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
-            storyboard.Completed += (s, args) =>
-            {
-                PanelView.Visibility = Visibility.Collapsed;
-            };
-            //collaps all
-            filterbuttonall.Visibility = Visibility.Visible;
-            filterbuttonenabled.Visibility = Visibility.Visible;
-            filterbuttondisabled.Visibility = Visibility.Visible;
-            SearchBox.Visibility = Visibility.Visible;
-
-            storyboard.Begin();
-        }
-        #endregion helpers
-        #region searchbox
-        private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-        {
-            FilterDashboardsearchButtons(SearchBox.Text);
-        }
-        #endregion searchbox
-        private string? GetFirstTextBlockText(DependencyObject parent)
-        {
-            foreach (var child in FindVisualChildren<TextBlock>(parent))
-            {
-                if (!string.IsNullOrWhiteSpace(child.Text))
-                    return child.Text;
-            }
-            return null;
-        }
-
-        private void cssloader_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("cssloader");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "CSSLoader" };
-        }
-
-        private void preloadlist_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("preloadlist");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Preload List" };
-        }
-
-        private void gcmwallpaperbutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("gcmwallpaper");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", " Task Manager Wallpaper" };
-        }
-
-        private void joyxoffbutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("JoyxoffPanel");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "JoyXOff" };
-        }
-
-        private void deckyloaderbutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("deckyloader");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Decky Loader" };
-
-        }
-
-        private void preaudiobutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("preaudio");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Audio Device" };
-        }
-
-        private void displayfusionbutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("displayfusion");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "DisplayFusion" };
-        }
-
-        private void startupvideobutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("startupvideo");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Startup Video" };
-        }
-
-        private void boilrbutton_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("boilr");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Boilr Game sync" };
-        }
-
-
-
-        #endregion codebehind Function Dashboard
-
-        private void BreadcrumbBar1_ItemClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
-        {
-            if (args.Item is string clickedItem)
-            {
-                if (clickedItem == "Extensions")
-                {
-
-                    var storyboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
-                    storyboard.Completed += (s, args) =>
-                    {
-                        PanelView.Visibility = Visibility.Collapsed;
-                    };
-                    //collaps all
-                    filterbuttonall.Visibility = Visibility.Visible;
-                    filterbuttonenabled.Visibility = Visibility.Visible;
-                    filterbuttondisabled.Visibility = Visibility.Visible;
-                    SearchBox.Visibility = Visibility.Visible;
-
-                    storyboard.Begin();
-                }
-            }
-        }
-
         #region boilr
         private void use_boilr_Toggled(object sender, RoutedEventArgs e)
         {
-            if(use_boilr.IsOn)
-            { 
-            
+            if (use_boilr.IsOn)
+            {
+
             }
             else
             {
@@ -1752,7 +1636,7 @@ namespace GAMINGCONSOLEMODE
             catch (Exception ex)
             {
                 // Optional: show an error message if something goes wrong
-              
+
             }
         }
         private void boilr_path_TextChanged(object sender, TextChangedEventArgs e)
@@ -1874,7 +1758,7 @@ namespace GAMINGCONSOLEMODE
             }
             catch (Exception ex)
             {
-               // MessageBox.Show("Error reading boilr config:\n" + ex.Message);
+                // MessageBox.Show("Error reading boilr config:\n" + ex.Message);
             }
         }
         //boilr set initial settings
@@ -2039,14 +1923,213 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-
-        #endregion boilr
-
         private void btnDownloadBoilr_Click(object sender, RoutedEventArgs e)
         {
             string result = DownloadAndRunBoilr();
             txtDownloadStatus.Text = result;
         }
+        #endregion boilr
+        #region losslessscaling
+        private void lossless_path_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            string losslesspath = lossless_path.Text;
+            AppSettings.Save("losslesspath", losslesspath);
+        }
+
+        private void use_lossless_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (use_lossless.IsOn == true)
+            {
+                AppSettings.Save("lossless", true);
+                text_install_state_lossless.Text = "ACTIVATED";
+                border_install_state_lossless.Background = new SolidColorBrush(Colors.Green);
+
+                if ((lossless_path.Text?.Length ?? 0) > 0)
+                {
+
+                }
+                else
+                {
+                    lossless_path.Text = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Lossless Scaling\\LosslessScaling.exe";
+                }
+
+
+            }
+            else
+            {
+                AppSettings.Save("lossless", false);
+                text_install_state_lossless.Text = "DISABLED";
+                border_install_state_lossless.Background = new SolidColorBrush(Colors.Brown);
+                lossless_path.Text = "";
+
+            }
+        }
+        #endregion losslessscaling
+        #endregion function
+
+        #region codebehind Function Dashboard
+        #region helpers
+        private void Openpanel(string panel)
+        {
+           
+            // Erst alle Panels verstecken
+            foreach (var child in DetailContentGrid.Children)
+            {
+                if (child is Grid grid)
+                {
+                    grid.Visibility = Visibility.Collapsed;
+                   
+                }
+            }
+
+            // Nur das angeklickte Panel sichtbar machen
+            var selectedPanel = DetailContentGrid.FindName(panel) as Grid;
+            if (selectedPanel != null)
+            {
+                
+                selectedPanel.Visibility = Visibility.Visible;
+            }
+
+           
+
+            // Detailansicht zentriert anzeigen
+            PanelView.Visibility = Visibility.Visible;
+
+            // Animation starten
+            var storyboard = (Storyboard)this.Resources["ShowDetailPanelStoryboard"];
+            storyboard.Begin();
+
+            
+            //collaps all
+            filterbuttonall.Visibility = Visibility.Collapsed;
+            filterbuttonenabled.Visibility = Visibility.Collapsed;
+            filterbuttondisabled.Visibility = Visibility.Collapsed;
+            SearchBox.Visibility = Visibility.Collapsed;
+        }
+
+
+        private void CloseDetailPanel_Click(object sender, RoutedEventArgs e)
+        {
+            var storyboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
+            storyboard.Completed += (s, args) =>
+            {
+                PanelView.Visibility = Visibility.Collapsed;
+            };
+            //collaps all
+            filterbuttonall.Visibility = Visibility.Visible;
+            filterbuttonenabled.Visibility = Visibility.Visible;
+            filterbuttondisabled.Visibility = Visibility.Visible;
+            SearchBox.Visibility = Visibility.Visible;
+
+            storyboard.Begin();
+        }
+        #endregion helpers
+        #region searchbox
+        private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+        {
+            FilterDashboardsearchButtons(SearchBox.Text);
+        }
+        #endregion searchbox
+        private string? GetFirstTextBlockText(DependencyObject parent)
+        {
+            foreach (var child in FindVisualChildren<TextBlock>(parent))
+            {
+                if (!string.IsNullOrWhiteSpace(child.Text))
+                    return child.Text;
+            }
+            return null;
+        }
+
+        private void cssloader_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("cssloader");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "CSSLoader" };
+        }
+
+        private void preloadlist_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("preloadlist");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Preload List" };
+        }
+
+        private void gcmwallpaperbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("gcmwallpaper");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", " Task Manager Wallpaper" };
+        }
+
+        private void joyxoffbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("JoyxoffPanel");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "JoyXOff" };
+        }
+
+        private void deckyloaderbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("deckyloader");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Decky Loader" };
+
+        }
+
+        private void preaudiobutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("preaudio");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Audio Device" };
+        }
+
+        private void displayfusionbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("displayfusion");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "DisplayFusion" };
+        }
+
+        private void startupvideobutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("startupvideo");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Startup Video" };
+        }
+
+        private void boilrbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("boilr");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Boilr Game sync" };
+        }
+
+        private void losslessscalingbutton_Click(object sender, RoutedEventArgs e)
+        {
+            Openpanel("lossless");
+            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "lossless scaling" };
+        }
+
+
+        #endregion codebehind Function Dashboard
+
+        private void BreadcrumbBar1_ItemClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
+        {
+            if (args.Item is string clickedItem)
+            {
+                if (clickedItem == "Extensions")
+                {
+
+                    var storyboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
+                    storyboard.Completed += (s, args) =>
+                    {
+                        PanelView.Visibility = Visibility.Collapsed;
+                    };
+                    //collaps all
+                    filterbuttonall.Visibility = Visibility.Visible;
+                    filterbuttonenabled.Visibility = Visibility.Visible;
+                    filterbuttondisabled.Visibility = Visibility.Visible;
+                    SearchBox.Visibility = Visibility.Visible;
+
+                    storyboard.Begin();
+                }
+            }
+        }
+
+       
+
+
     }
 
     //region nircmd code

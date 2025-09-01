@@ -35,7 +35,7 @@ namespace GAMINGCONSOLEMODE
 
         private readonly List<string> functions = new() {
             "taskmanager", "switch tab", "audio switch",
-            "performance overlay", "show overlay", "xbox bar"
+            "performance overlay", "show overlay", "xbox bar","lossless scaling"
         };
 
         public shortcuts()

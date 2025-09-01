@@ -20,7 +20,8 @@ To display high-quality game covers on the task manager cards, a free API key fr
 
                 <HyperlinkButton Content="Get your free API Key from SteamGridDB.com" 
              NavigateUri="https://www.steamgriddb.com/profile/preferences/api"
-             HorizontalAlignment="Center"/>
+             HorizontalAlignment="Center"
+                                 Background="Gray"/>
 
                 <TextBlock Text="API Key:" Margin="0,12,0,0"/>
                 <TextBox x:Name="SteamGridDbApiKeyBox" 
