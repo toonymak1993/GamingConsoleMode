@@ -2901,7 +2901,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         break;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(10));
+                await Task.Delay(TimeSpan.FromSeconds(2));
                 winpart();
             }
             else
