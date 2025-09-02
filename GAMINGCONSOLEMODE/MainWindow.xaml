@@ -75,8 +75,47 @@
                         </Grid>
                     </Border>
                 </Button>
-               
-                
+
+                <Button x:Name="patreonButton"
+Click="patreonButton_Click"
+Background="Transparent"
+BorderBrush="Transparent"
+Padding="0"
+HorizontalAlignment="Stretch"
+Margin="0,0,20,0">
+
+                    <Border Background="#22FFFFFF"
+    CornerRadius="8"
+    Padding="15"
+                    
+    MaxWidth="500">
+
+                        <Grid ColumnSpacing="15">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Image Grid.Column="0"
+           Source="ms-appx:///Assets/onboarding/patreon.png" 
+           Width="48" 
+           Height="48"
+           VerticalAlignment="Center"/>
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="Support us on Patreon"
+                   FontSize="18"
+                   FontWeight="Bold"
+                   Foreground="White"/>
+                                <TextBlock Text="Shape the future of GCM"
+                   Foreground="LightGray"
+                   TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Button>
+
+
                 <!-- ToggleSwitch next to Button -->
               
 

@@ -36,8 +36,8 @@ namespace GAMINGCONSOLEMODE
     {
                  new VersionNewsItem
         {
-            Title = "Version 2.3.3",
-            Date = "2025-08-24",
+            Title = "Version 2.3.4",
+            Date = "2025-09-03",
             ContentItems = new List<NewsContentItem>
 {
     // 🧠 UNDER THE HOOD
@@ -50,14 +50,19 @@ namespace GAMINGCONSOLEMODE
     new NewsContentItem { Icon = "🔀", Text = "Shortcuts now support Seamless Switch – toggle between modes with a single button press." },
     new NewsContentItem { Icon = "🔔", Text = "Overlay and toast-style popups are now displayed when shortcuts are used." },
     new NewsContentItem { Icon = "⚙️", Text = "Default shortcuts like Task Manager and Show Overlay are now auto-applied if missing." },
+    new NewsContentItem { Icon = "⚙️", Text = "Xbox Gamebar Shortcut" },
 
     // 📊 TASK MANAGER
     new NewsContentItem { Icon = "", Text = "--TASK MANAGER--" },
     new NewsContentItem { Icon = "🆕", Text = "Redesigned layout with improved responsiveness." },
+    new NewsContentItem { Icon = "🆕", Text = "Game Pictures with Steamgriddb" },
     new NewsContentItem { Icon = "👀", Text = "Better process tracking: understand at a glance what’s currently running." },
-    new NewsContentItem { Icon = "📱", Text = "Handheld Touch Launcher added for quick access to apps like Spotify." },
-    new NewsContentItem { Icon = "🕒", Text = "Top bar now shows clock, Wi-Fi status, and settings (touch-only for now)." },
+    new NewsContentItem { Icon = "🕒", Text = "Top bar now shows clock an switch to Desktop" },
 
+    // 📊 Extensions
+    new NewsContentItem { Icon = "", Text = "--Extensions--" },
+    new NewsContentItem { Icon = "🆕", Text = "Lossless Scaling" },
+     new NewsContentItem { Icon = "🆕", Text = "Boilr Game Sync" },
     // 🔐 SECURITY
     new NewsContentItem { Icon = "", Text = "--SECURITY--" },
     new NewsContentItem { Icon = "🛡️", Text = "UAC preference is now respected: GCM won’t reactivate UAC if you disable it manually." },

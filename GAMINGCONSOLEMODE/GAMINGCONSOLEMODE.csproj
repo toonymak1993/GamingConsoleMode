@@ -39,6 +39,7 @@
     <Content Remove="Assets\onboarding\functions_gcm.png" />
     <Content Remove="Assets\onboarding\gcmoverlay.gif" />
     <Content Remove="Assets\onboarding\mousecontroll.gif" />
+    <Content Remove="Assets\onboarding\patreon.png" />
     <Content Remove="Assets\onboarding\shortcuts.png" />
     <Content Remove="Assets\onboarding\shortcutsnorm.png" />
     <Content Remove="Assets\onboarding\taskmanager.gif" />
@@ -73,6 +74,7 @@
     <None Remove="Assets\onboarding\flowlauncher.png" />
     <None Remove="Assets\onboarding\functions_gcm.png" />
     <None Remove="Assets\onboarding\mousecontroll.gif" />
+    <None Remove="Assets\onboarding\patreon.png" />
     <None Remove="Assets\onboarding\shortcuts.png" />
     <None Remove="Assets\onboarding\taskmanager.gif" />
     <None Remove="Assets\onboarding\taskmanager_gcmloader.png" />
@@ -151,6 +153,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\mousecontroll.gif">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\onboarding\patreon.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\onboarding\shortcutsnorm.png">

@@ -427,6 +427,21 @@ namespace GAMINGCONSOLEMODE
         }
         #endregion discord
 
+        #region patreon
+        private void patreonButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Erstellt einen neuen Prozess, um den Link im Standard-Webbrowser zu öffnen.
+                Process.Start(new ProcessStartInfo("https://patreon.com/GAMINGCONSOLEMODE") { UseShellExecute = true });
+            }   
+            catch (Exception ex)
+            {
+                // Schreibt eine Fehlermeldung in die Konsole, falls das Öffnen des Links fehlschlägt.
+                Debug.WriteLine($"Fehler beim Öffnen des Discord-Links: {ex.Message}");
+            }
+        }
+        #endregion patreon
     }
 
 
