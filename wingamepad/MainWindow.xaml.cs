@@ -187,7 +187,7 @@ namespace wingamepad
         {
             try
             {
-                string loaderPath = @"C:\Program Files (x86)\GCM\gcmloader.exe";
+                string loaderPath = @"C:\Program Files (x86)\GCM\GCM\gcmloader.exe";
                 if (File.Exists(loaderPath))
                 {
                     Process.Start(new ProcessStartInfo(loaderPath) { UseShellExecute = true, Verb = "runas" });
@@ -206,7 +206,7 @@ namespace wingamepad
 
             var first = _activeShortcuts.First();
             string shortcutText = $"{first.Key.Item1} + {first.Key.Item2}";
-            var iconUri = new Uri(@"C:\Program Files (x86)\GCM\logo.ico", UriKind.Absolute);
+            var iconUri = new Uri(@"C:\Program Files (x86)\GCM\GCM\logo.ico", UriKind.Absolute);
 
             _notificationManager.Show(
                 "Gamepad connected",
