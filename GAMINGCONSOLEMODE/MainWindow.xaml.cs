@@ -374,20 +374,28 @@ namespace GAMINGCONSOLEMODE
 
         private void TopbarButton_Click(object sender, RoutedEventArgs e)
         {
-            // Navigiere zum Unterordner "gcmloader" und starte die EXE darin
-            string fullExePath = Path.Combine(exeFolder(), "gcmloader", "gcmloader.exe");
-
-            if (File.Exists(fullExePath))
+            try
             {
+                // Navigiere zum Unterordner "gcmloader" und starte die EXE darin
+                string fullExePath = Path.Combine(exeFolder(), "gcmloader.exe");
+
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = fullExePath,
                     UseShellExecute = true
                 });
             }
-            else
+            catch (Exception ex) // Catch all exceptions, including process start errors
             {
-                Debug.WriteLine($"❌ Datei nicht gefunden: {fullExePath}");
+                ContentDialog dialog = new ContentDialog();
+
+                dialog.XamlRoot = (this.Content as FrameworkElement)?.XamlRoot;
+                dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
+                dialog.Title = "Error starting Game Console Mode";
+                dialog.Content = ex.Message;
+                dialog.CloseButtonText = "OK";
+
+                _ = dialog.ShowAsync();
             }
         }
 
