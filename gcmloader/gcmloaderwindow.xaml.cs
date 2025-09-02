@@ -904,7 +904,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                string overlayPath = @"C:\Program Files (x86)\GCM\OverlayWindow.exe";
+
+                string baseDirectory = AppContext.BaseDirectory;
+                string overlayPath = Path.Combine(baseDirectory, "OverlayWindow.exe");
+
 
                 if (!File.Exists(overlayPath))
                 {
@@ -2573,9 +2576,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                         // Get the path of the current directory and append the target executable name
                         // Get the directory of the current executable
-                        string targetExecutable = @"C:\Program Files (x86)\GCM\GCM\gcmloader\gcmloader.exe";
-
-
+                        string targetExecutable = Path.Combine(AppContext.BaseDirectory, "gcmloader.exe");
                         if (!File.Exists(targetExecutable))
                 {
                     //Logger.Logger.Log($"Error: The file '{targetExecutable}' does not exist.");
@@ -3052,7 +3053,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         td.Triggers.Add(new LogonTrigger());
 
                         // Aktion: wingamepad.exe starten
-                        string exePath = @"C:\Program Files (x86)\GCM\GCM\wingamepad\wingamepad.exe";
+                        string exePath = Path.Combine(AppContext.BaseDirectory, "wingamepad.exe");
                         td.Actions.Add(new ExecAction(exePath));
 
                         // ### ANPASSUNG FÜR HANDHELDS ###
@@ -3087,7 +3088,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // 1. Prüfen, ob die Funktion in den Einstellungen aktiviert ist.
                 if (AppSettings.Load<bool>("useseamlessswitchtogcm"))
                 {
-                    string exePath = @"C:\Program Files (x86)\GCM\wingamepad.exe";
+                
+                    string exePath = Path.Combine(AppContext.BaseDirectory, "wingamepad.exe");
+
                     string processName = "wingamepad";
 
                     // 2. Sicherstellen, dass die Datei existiert.
