@@ -1,23 +1,27 @@
+; Inno Setup Script für GCM
+; Finale Version - Mit Registry-Cleanup für alte, fehlerhafte Installationen.
+
 ; Define version as a preprocessor variable that can be updated by CI
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
 #endif
 
 [Setup]
+; WICHTIG: Eine feste AppId ist der Standard für saubere Upgrades.
+; Ich habe eine für dich generiert. Behalte diese für alle zukünftigen Versionen bei!
+AppId={{5E8D8A7F-7201-4A57-A686-352B3C2A5393}}
 AppName=GCM Game Console Mode
 AppVersion={#MyAppVersion}
 AppVerName=GCM Game Console Mode {#MyAppVersion}
 WizardStyle=modern
 DefaultDirName={pf32}\GCM
 DefaultGroupName=GCM
-UninstallDisplayIcon={app}\gcmloader.exe
+UninstallDisplayIcon={app}\gcmloader\gcmloader.exe
 Compression=lzma2
 SolidCompression=yes
-; Output directory relative to the ISS file location
 OutputDir=..\output
 OutputBaseFilename=GCM-Setup-{#MyAppVersion}
 PrivilegesRequired=admin
-; Use relative path for icon file - now in the root since everything is in one folder
 SetupIconFile=..\installer-files\gcmloader\logo.ico
 ArchitecturesAllowed=x86 x64
 ArchitecturesInstallIn64BitMode=x64
@@ -29,102 +33,78 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Files]
-; Source files relative to the ISS file location
-; The workflow copies all build outputs to a single installer-files directory
 Source: "..\installer-files\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Icons]
-; Startmenü-Verknüpfungen
-; Since all executables are now in the same folder, adjust paths accordingly
 Name: "{group}\GCM Settings"; Filename: "{app}\GAMINGCONSOLEMODE.exe"; WorkingDir: "{app}"
 Name: "{group}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; WorkingDir: "{app}\gcmloader"
-
-; Optionaler Desktop Shortcut
-Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon; WorkingDir: "{app}\gcmloader"
+Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; Tasks: desktopicon; WorkingDir: "{app}\gcmloader"
 
 [Run]
-; Starte GCM Settings automatisch nach Setup
 Filename: "{app}\GAMINGCONSOLEMODE.exe"; Description: "Launch GCM Settings"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
-// Prozesse beenden
-procedure KillProcessIfRunning(const exeName: string);
+var
+  OldUninstallKey: string;
+
+// NEU: Diese Funktion wird als Allererstes ausgeführt, noch vor dem Wizard.
+// Sie bereinigt die Registry von alten, fehlerhaften Einträgen.
+function InitializeSetup(): Boolean;
+begin
+  // Der Deinstallations-Schlüssel, den Inno Setup standardmäßig anlegt.
+  OldUninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + ExpandConstant('{#SetupSetting("AppName")}') + '_is1';
+
+  // Wir versuchen, den Schlüssel sowohl für 64-Bit als auch für 32-Bit Systeme zu löschen.
+  // Das stellt sicher, dass alle Reste entfernt werden.
+  if RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE_64, OldUninstallKey) then
+    Log(Format('Removed old 64-bit registry key: %s', [OldUninstallKey]))
+  else
+    Log(Format('No old 64-bit registry key found to remove: %s', [OldUninstallKey]));
+
+  if RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE_32, OldUninstallKey) then
+    Log(Format('Removed old 32-bit registry key: %s', [OldUninstallKey]))
+  else
+    Log(Format('No old 32-bit registry key found to remove: %s', [OldUninstallKey]));
+    
+  Result := True;
+end;
+
+procedure KillProcess(const exeName: string);
 var
   ResultCode: Integer;
 begin
   Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM ' + exeName + '.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// Alten Uninstaller starten
-procedure RunExternalUninstaller(const exePath: string);
-var
-  ResultCode: Integer;
+procedure DeleteDirectory(const dirPath: string);
 begin
-  if FileExists(exePath) then
+  if DirExists(dirPath) then
   begin
-    MsgBox('An old version of GCM was detected. It will now be removed automatically. Please wait...', mbInformation, MB_OK);
-    if not Exec(exePath, '/SILENT', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
-    begin
-      MsgBox('Uninstaller failed to run. Please uninstall the previous version manually.', mbCriticalError, MB_OK);
-      WizardForm.Close;
-    end;
+    Log(Format('Deleting old directory: %s', [dirPath]));
+    DelTree(dirPath, True, True, True);
   end;
 end;
 
-// Haupt-Vorbereitung beim Start des Setups
 procedure InitializeWizard;
 var
-  OldUninstaller, OldGcmcrewDir, OldStartMenuDir, OldSettingsDir: string;
   processList: array of string;
+  dirsToDelete: array of string;
   i: Integer;
 begin
-  // 1️⃣ Prozesse beenden
-  // Add all possible process names including variants
+  // 1. Prozesse beenden
   processList := ['wingamepad', 'gcmloader', 'GAMINGCONSOLEMODE', 'Overlaywindow', 'flowlauncher'];
   for i := 0 to GetArrayLength(processList) - 1 do
-    KillProcessIfRunning(processList[i]);
+    KillProcess(processList[i]);
 
-  // 2️⃣ Alten Uninstaller ausführen (check both old locations)
-  OldUninstaller := ExpandConstant('{pf32}\GCMcrew\GCM\Uninstall.exe');
-  RunExternalUninstaller(OldUninstaller);
-  
-  // Check bugged installs
-  OldUninstaller := ExpandConstant('{pf32}\GCM\GCM\Uninstall.exe');
-  RunExternalUninstaller(OldUninstaller);
-  
-  // Check more bugged installs
-  OldUninstaller := ExpandConstant('{pf32}\GCM\GCM\unins000.exe');
-  RunExternalUninstaller(OldUninstaller);
-  
-  // Also check for uninstaller in the current GCM location
-  OldUninstaller := ExpandConstant('{pf32}\GCM\unins000.exe');
-  RunExternalUninstaller(OldUninstaller);
-
-  // 3️⃣ Alten Programmordner löschen (GCMcrew)
-  OldGcmcrewDir := ExpandConstant('{pf32}\GCMcrew');
-  if DirExists(OldGcmcrewDir) then
-    DelTree(OldGcmcrewDir, True, True, True);
-    
-  // 3️⃣ Alten Programmordner löschen (GCM)
-  OldGcmcrewDir := ExpandConstant('{pf32}\GCM');
-  if DirExists(OldGcmcrewDir) then
-    DelTree(OldGcmcrewDir, True, True, True);
-
-  // 4️⃣ Startmenü-Eintrag von GCMcrew löschen
-  OldStartMenuDir := ExpandConstant('{commonprograms}\GCMcrew');
-  if DirExists(OldStartMenuDir) then
-    DelTree(OldStartMenuDir, True, True, True);
-    
-  // Also remove old GCM start menu entries
-  OldStartMenuDir := ExpandConstant('{commonprograms}\GCM');
-  if DirExists(OldStartMenuDir) then
-    DelTree(OldStartMenuDir, True, True, True);
-
-  // 5️⃣ Benutzer AppData-Einträge löschen
-  OldSettingsDir := ExpandConstant('{userappdata}\gcmsettings');
-  if DirExists(OldSettingsDir) then
-    DelTree(OldSettingsDir, True, True, True);
+  // 2. Alte Ordner zwangsweise löschen (doppelt hält besser)
+  dirsToDelete := [
+    ExpandConstant('{pf32}\GCMcrew'), // Sehr alter Ordner
+    ExpandConstant('{pf32}\GCM\GCM'), // Der fehlerhafte, verschachtelte Ordner
+    ExpandConstant('{pf32}\GCM')      // Der Hauptordner, um sicherzugehen
+  ];
+  for i := 0 to GetArrayLength(dirsToDelete) - 1 do
+    DeleteDirectory(dirsToDelete[i]);
 end;
