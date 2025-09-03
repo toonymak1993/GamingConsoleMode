@@ -10,7 +10,7 @@ on:
       build_configuration:
         description: 'Build configuration'
         required: true
-        default: 'Release'
+        default: 'Debug'
         type: choice
         options:
           - Debug
