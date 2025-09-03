@@ -43,7 +43,7 @@ Name: "{group}\GCM Settings"; Filename: "{app}\GAMINGCONSOLEMODE.exe"; WorkingDi
 Name: "{group}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; WorkingDir: "{app}\gcmloader"
 
 ; Optionaler Desktop Shortcut
-Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; Tasks: desktopicon; WorkingDir: "{app}\gcmloader"
+Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon; WorkingDir: "{app}\gcmloader"
 
 [Run]
 ; Starte GCM Settings automatisch nach Setup
