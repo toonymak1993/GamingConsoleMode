@@ -93,24 +93,27 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # NEU: Wir verwenden 'dotnet build', um eine exakte Kopie der Visual Studio Ausgabe zu erhalten.
+      # VERBESSERT: Der 'dotnet build' Befehl erhält jetzt explizit die Plattform und die Runtime.
       - name: Build Projects
         shell: pwsh
         run: |
           $config = "${{ github.event.inputs.build_configuration }}"
           $platform = "${{ github.event.inputs.platform }}"
+          # Leitet die passende Runtime-ID aus der Plattform ab (z.B. x64 -> win-x64)
+          $runtimeId = "win-$($platform.ToLower())" 
           
           Write-Host "📦 Restoring solution packages..."
-          dotnet restore ${{ env.SOLUTION_PATH }}
+          # Auch beim Restore geben wir die Runtime an, um Konsistenz zu gewährleisten
+          dotnet restore ${{ env.SOLUTION_PATH }} --runtime $runtimeId
           if ($LASTEXITCODE -ne 0) { throw "Solution restore failed!" }
           
-          Write-Host "`n🔨 Building solution with configuration '$config' for platform '$platform'..."
-          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config --no-restore
+          Write-Host "`n🔨 Building solution with Config='$config', Platform='$platform', Runtime='$runtimeId'..."
+          # Wir übergeben die Parameter explizit an den Build-Befehl, um Konflikte zu vermeiden
+          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config --runtime $runtimeId --no-restore
           if ($LASTEXITCODE -ne 0) { throw "Solution build failed!" }
 
           Write-Host "`n✅ All projects built successfully!"
 
-      # NEU: Die Logik zum Finden der Dateien wurde komplett überarbeitet.
       - name: Prepare installer files
         shell: pwsh
         run: |
@@ -128,11 +131,11 @@ jobs:
           
           foreach ($projectName in $projects.Keys) {
             $project = $projects[$projectName]
-            $searchPath = "./$projectName/bin"
+            # Der Suchpfad ist jetzt einfacher, da der Build-Output konsistenter ist.
+            $searchPath = "./$projectName/bin/$config"
             
             Write-Host "`n📍 Processing $projectName..."
             
-            # Sucht nach der .exe im Build-Verzeichnis, um den richtigen Ausgabeordner zu finden.
             $buildOutputExe = Get-ChildItem -Path $searchPath -Filter "$projectName.exe" -Recurse | Select-Object -First 1
             
             if ($buildOutputExe) {
