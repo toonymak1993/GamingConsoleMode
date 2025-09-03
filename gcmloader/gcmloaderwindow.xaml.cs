@@ -904,10 +904,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-
-                string baseDirectory = AppContext.BaseDirectory;
-                string overlayPath = Path.Combine(baseDirectory, "overlaywindow", "OverlayWindow.exe");
-
+                string overlayPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GCM", "overlaywindow", "OverlayWindow.exe");
 
                 if (!File.Exists(overlayPath))
                 {
@@ -3089,7 +3086,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (AppSettings.Load<bool>("useseamlessswitchtogcm"))
                 {
                 
-                    string exePath = Path.Combine(AppContext.BaseDirectory, "wingamepad", "wingamepad.exe");
+                    string exePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GCM", "wingamepad", "wingamepad.exe");
+
 
                     string processName = "wingamepad";
 
