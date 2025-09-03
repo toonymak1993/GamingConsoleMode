@@ -129,36 +129,63 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # Build solution with individual project outputs
-      - name: Restore and Build solution
+      # Build and publish projects with proper self-contained support
+      - name: Build and Publish Projects
         shell: pwsh
         run: |
           $platform = "${{ github.event.inputs.platform }}"
           $config = "${{ github.event.inputs.build_configuration }}"
+          $runtimeId = "win-$($platform.ToLower())"
           
-          Write-Host "🔨 Building solution with individual project outputs..."
+          Write-Host "🔨 Building and publishing projects with self-contained support..."
+          Write-Host "Runtime ID: $runtimeId"
           
-          # Build without overriding OutputPath - let each project use its own bin folder
-          msbuild ${{ env.SOLUTION_PATH }} `
-            /p:Configuration=$config `
-            /p:Platform="$platform" `
-            /p:Version=${{ steps.version.outputs.version }} `
-            /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
-            /p:FileVersion=${{ github.event.inputs.version }}.0 `
-            /p:PublishReadyToRun=false `
-            /p:PublishSingleFile=false `
-            /p:WindowsPackageType=None `
-            /p:WindowsAppSDKSelfContained=true `
-            /restore `
-            /maxcpucount `
-            /verbosity:${{ env.MSBUILD_VERBOSITY }} `
-            /nodeReuse:true
-          
-          if ($LASTEXITCODE -ne 0) {
-            throw "Build failed with exit code: $LASTEXITCODE"
+          # Define all projects as self-contained
+          $projects = @{
+            "GAMINGCONSOLEMODE" = @{ "description" = "Main Settings App (Self-contained)" }
+            "gcmloader" = @{ "description" = "GCM Loader (Self-contained)" }
+            "OverlayWindow" = @{ "description" = "Overlay Window (Self-contained)" }
+            "wingamepad" = @{ "description" = "Win Gamepad (Self-contained)" }
           }
           
-          Write-Host "✅ Build completed - each project in its own bin/$config folder"
+          # First, restore the entire solution
+          Write-Host "`n📦 Restoring solution packages..."
+          dotnet restore ${{ env.SOLUTION_PATH }} --verbosity minimal
+          
+          if ($LASTEXITCODE -ne 0) {
+            throw "Solution restore failed with exit code: $LASTEXITCODE"
+          }
+          
+          # Publish all projects as self-contained single-file apps
+          foreach ($projectName in $projects.Keys) {
+            $project = $projects[$projectName]
+            $projectPath = "./$projectName/$projectName.csproj"
+            
+            Write-Host "`n📦 Publishing $($project.description)..."
+            
+            if (-not (Test-Path $projectPath)) {
+              Write-Warning "⚠️ Project file not found: $projectPath"
+              continue
+            }
+            
+            # Use dotnet publish for all self-contained single-file apps
+            dotnet publish $projectPath `
+              --configuration $config `
+              --runtime $runtimeId `
+              --self-contained true `
+              --verbosity minimal `
+              /p:Version=${{ steps.version.outputs.version }} `
+              /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
+              /p:FileVersion=${{ github.event.inputs.version }}.0
+            
+            if ($LASTEXITCODE -ne 0) {
+              throw "$projectName publish failed with exit code: $LASTEXITCODE"
+            }
+            
+            Write-Host "  ✅ $projectName published successfully"
+          }
+          
+          Write-Host "`n✅ All projects built/published successfully"
 
       # Only run tests for Release builds and make them non-blocking
       - name: Run tests
@@ -176,26 +203,34 @@ jobs:
       - name: Prepare installer files
         shell: pwsh
         run: |
-          Write-Host "📦 Preparing installer files from individual project directories..."
+          Write-Host "📦 Preparing installer files from build and publish directories..."
           New-Item -ItemType Directory -Force -Path "./installer-files"
           
-          # Define projects and their target structure
+          $platform = "${{ github.event.inputs.platform }}"
+          $config = "${{ github.event.inputs.build_configuration }}"
+          $runtimeId = "win-$($platform.ToLower())"
+          
+          # Define all projects as published self-contained apps
           $projects = @{
             "GAMINGCONSOLEMODE" = @{
               "targetFolder" = "."  # Root directory
               "description" = "Main Settings App"
+              "searchPath" = "./GAMINGCONSOLEMODE/bin/$config/net8.0-windows10.0.19041.0/$runtimeId/publish"
             }
             "gcmloader" = @{
               "targetFolder" = "gcmloader"
               "description" = "GCM Loader"
+              "searchPath" = "./gcmloader/bin/$config/net8.0-windows10.0.19041.0/$runtimeId/publish"
             }
             "OverlayWindow" = @{
               "targetFolder" = "OverlayWindow"
               "description" = "Overlay Window"
+              "searchPath" = "./OverlayWindow/bin/$config/net8.0-windows/$runtimeId/publish"
             }
             "wingamepad" = @{
               "targetFolder" = "wingamepad"
               "description" = "Win Gamepad"
+              "searchPath" = "./wingamepad/bin/$config/net8.0-windows/$runtimeId/publish"
             }
           }
           
@@ -208,14 +243,19 @@ jobs:
             $exe = "$projectName.exe"
           
             Write-Host "`n📍 Processing $($project.description)..."
+            Write-Host "  🔍 Looking in: $($project.searchPath)"
           
-            # Find this project's executable
-            $foundExe = Get-ChildItem -Path "." -Filter $exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            # Look for executable in the specific path
+            $sourceDir = $null
+            if (Test-Path $project.searchPath) {
+              $foundExe = Get-ChildItem -Path $project.searchPath -Filter $exe -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($foundExe) {
+                $sourceDir = $foundExe.Directory.FullName
+              }
+            }
           
-            if ($foundExe) {
-              $sourceDir = $foundExe.Directory.FullName
+            if ($sourceDir) {
               $foundProjects += $projectName
-          
               Write-Host "  ✅ Found at: $($sourceDir.Replace((Get-Location).Path, '.'))"
           
               # Create target directory
@@ -226,9 +266,8 @@ jobs:
                 New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
               }
           
-              Write-Host "  📁 Copying from individual project directory..."
-          
-              # Copy ALL files from this project's individual build directory
+              Write-Host "  📦 Copying published self-contained single-file app..."
+              # All projects are now published as self-contained single-file apps
               Copy-Item -Path "$sourceDir/*" -Destination $targetPath -Recurse -Force -ErrorAction SilentlyContinue
           
               # Verify the executable was copied
@@ -240,6 +279,10 @@ jobs:
           
               if (Test-Path $targetExePath) {
                 Write-Host "  ✅ $exe successfully copied"
+                
+                # Show file size for self-contained single-file builds
+                $exeSize = (Get-Item $targetExePath).Length / 1MB
+                Write-Host "  📊 $exe size: $([math]::Round($exeSize, 2)) MB (self-contained single-file)"
               } else {
                 Write-Warning "  ⚠️ $exe not found in target location"
               }
@@ -254,7 +297,7 @@ jobs:
           
             } else {
               $missingProjects += $projectName
-              Write-Warning "  ❌ $($project.description) executable not found"
+              Write-Warning "  ❌ $($project.description) executable not found in $($project.searchPath)"
             }
           }
           
