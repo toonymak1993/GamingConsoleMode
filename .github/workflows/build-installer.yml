@@ -10,7 +10,7 @@ on:
       build_configuration:
         description: 'Build configuration'
         required: true
-        default: 'Release'
+        default: 'Debug'
         type: choice
         options:
           - Debug
@@ -39,7 +39,6 @@ env:
   DOTNET_VERSION: '8.0.x'
   INNO_SETUP_VERSION: '6.2.2'
   ISS_FILE: '.github/installer.iss'
-  # Performance optimizations
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
@@ -60,7 +59,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # BEREINIGT: Cache nur noch für NuGet-Pakete und Tools, da keine Workloads mehr installiert werden.
       - name: Cache .NET
         uses: actions/cache@v4
         with:
@@ -89,65 +87,34 @@ jobs:
             $version = $baseVersion
           }
           echo "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "🏷️ Version: $version | Config: ${{ github.event.inputs.build_configuration }} | Platform: ${{ github.event.inputs.platform }}"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # ENTFERNT: Der unnötige Schritt zur Installation der MAUI-Workloads wurde entfernt.
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Build and Publish Projects
+      # NEU: Wir verwenden 'dotnet build', um eine exakte Kopie der Visual Studio Ausgabe zu erhalten.
+      - name: Build Projects
         shell: pwsh
         run: |
-          $platform = "${{ github.event.inputs.platform }}"
           $config = "${{ github.event.inputs.build_configuration }}"
-          $runtimeId = "win-$($platform.ToLower())"
-          
-          Write-Host "🔨 Building and publishing projects..."
-          
-          $projects = @(
-            "GAMINGCONSOLEMODE",
-            "gcmloader",
-            "OverlayWindow",
-            "wingamepad"
-          )
+          $platform = "${{ github.event.inputs.platform }}"
           
           Write-Host "📦 Restoring solution packages..."
-          dotnet restore ${{ env.SOLUTION_PATH }} --verbosity minimal
+          dotnet restore ${{ env.SOLUTION_PATH }}
           if ($LASTEXITCODE -ne 0) { throw "Solution restore failed!" }
           
-          foreach ($projectName in $projects) {
-            $projectPath = "./$projectName/$projectName.csproj"
-            Write-Host "`n📦 Publishing $projectName..."
-            if (-not (Test-Path $projectPath)) {
-              Write-Warning "⚠️ Project file not found: $projectPath"; continue
-            }
-            
-            dotnet publish $projectPath `
-              --configuration $config `
-              --runtime $runtimeId `
-              --self-contained true `
-              --verbosity minimal `
-              /p:Version=${{ steps.version.outputs.version }} `
-              /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
-              /p:FileVersion=${{ github.event.inputs.version }}.0 `
-              /p:WindowsPackageType=None `
-              /p:WindowsAppSDKSelfContained=true
-            
-            if ($LASTEXITCODE -ne 0) { throw "$projectName publish failed!" }
-            Write-Host "  ✅ $projectName published successfully"
-          }
-          Write-Host "`n✅ All projects built/published successfully"
+          Write-Host "`n🔨 Building solution with configuration '$config' for platform '$platform'..."
+          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "Solution build failed!" }
 
+          Write-Host "`n✅ All projects built successfully!"
+
+      # NEU: Die Logik zum Finden der Dateien wurde komplett überarbeitet.
       - name: Prepare installer files
         shell: pwsh
         run: |
-          Write-Host "📦 Preparing installer files..."
+          Write-Host "📦 Preparing installer files from build output directories..."
           New-Item -ItemType Directory -Force -Path "./installer-files"
           
           $config = "${{ github.event.inputs.build_configuration }}"
@@ -161,46 +128,43 @@ jobs:
           
           foreach ($projectName in $projects.Keys) {
             $project = $projects[$projectName]
-            $searchPath = "./$projectName/bin/$config"
+            $searchPath = "./$projectName/bin"
             
             Write-Host "`n📍 Processing $projectName..."
-            $publishDir = Get-ChildItem -Path $searchPath -Directory -Recurse | Where-Object { $_.Name -eq 'publish' } | Select-Object -First 1
             
-            if ($publishDir) {
-              Write-Host "  ✅ Found publish directory at: $($publishDir.FullName)"
+            # Sucht nach der .exe im Build-Verzeichnis, um den richtigen Ausgabeordner zu finden.
+            $buildOutputExe = Get-ChildItem -Path $searchPath -Filter "$projectName.exe" -Recurse | Select-Object -First 1
+            
+            if ($buildOutputExe) {
+              $sourceDir = $buildOutputExe.Directory.FullName
+              Write-Host "  ✅ Found build output at: $sourceDir"
+              
               $targetPath = if ($project.targetFolder -eq ".") { "./installer-files" } else { "./installer-files/$($project.targetFolder)" }
               New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
               
-              Write-Host "  📦 Copying all published files to '$targetPath'..."
-              Copy-Item -Path "$($publishDir.FullName)/*" -Destination $targetPath -Recurse -Force
+              Write-Host "  📦 Copying all build files to '$targetPath'..."
+              Copy-Item -Path "$sourceDir\*" -Destination $targetPath -Recurse -Force
               Write-Host "  📊 Copied $(@(Get-ChildItem -Path $targetPath -Recurse).Count) files."
             } else {
-              Write-Warning "  ❌ Could not find the publish directory for project $projectName."
+              Write-Warning "  ❌ Could not find the build output for project '$projectName' in '$searchPath'."
             }
           }
           
           Write-Host "`n🎨 Looking for logo.ico..."
           $logoSource = Get-ChildItem -Path "./gcmloader/", "./" -Filter "logo.ico" -Recurse | Select-Object -First 1
           if ($logoSource) {
-            $logoDest = "./installer-files/gcmloader/logo.ico"
-            New-Item -ItemType File -Path $logoDest -Force | Out-Null
-            Copy-Item -Path $logoSource.FullName -Destination $logoDest
-            Write-Host "✅ Logo copied from $($logoSource.FullName)"
+            Copy-Item -Path $logoSource.FullName -Destination "./installer-files/gcmloader/logo.ico" -Force
+            Write-Host "✅ Logo copied."
           } else {
             Write-Warning "⚠️ logo.ico not found."
           }
-
-          Write-Host "`n📁 Final installer structure preview:"
-          Get-ChildItem -Path ./installer-files -Recurse | ForEach-Object { Write-Host "  $($_.FullName.Replace($PWD.Path, ''))" }
 
       - name: Install Inno Setup
         if: steps.cache-inno.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          Write-Host "📥 Downloading Inno Setup ${{ env.INNO_SETUP_VERSION }}..."
           Invoke-WebRequest -Uri "https://files.jrsoftware.org/is/6/innosetup-${{ env.INNO_SETUP_VERSION }}.exe" -OutFile "$env:TEMP\innosetup.exe"
-          Write-Host "📦 Installing Inno Setup..."
-          Start-Process -FilePath "$env:TEMP\innosetup.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
+          Start-Process -FilePath "$env:TEMP\innosetup.exe" -ArgumentList "/VERYSILENT", "/SP-" -Wait
 
       - name: Setup Inno Setup PATH
         shell: pwsh
@@ -214,7 +178,6 @@ jobs:
         run: |
           $issPath = "${{ env.ISS_FILE }}"
           $version = "${{ steps.version.outputs.version }}"
-          if (-not (Test-Path $issPath)) { throw "ISS file not found: $issPath" }
           $content = Get-Content $issPath -Raw
           $newDefine = "#define MyAppVersion `"$version`""
           if ($content -match '#define MyAppVersion ".*"') {
@@ -224,12 +187,11 @@ jobs:
           }
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($issPath, $content, $utf8NoBom)
-          Write-Host "✅ Updated ISS file with version $version"
 
       - name: Build installer
         shell: pwsh
         run: |
-          Write-Host "🔨 Building GCM installer..."
+          Write-Host "🔨 Building installer..."
           & "${env:INNO_PATH}\ISCC.exe" /Q /O"./output" "${{ env.ISS_FILE }}"
           if ($LASTEXITCODE -ne 0) { throw "❌ Installer build failed!" }
           Write-Host "✅ Installer build complete!"
@@ -242,7 +204,6 @@ jobs:
           $config = "${{ github.event.inputs.build_configuration }}".ToLower()
           $name = "GCM-installer-${{ steps.version.outputs.version }}-$config-$shortSha"
           echo "name=$name" >> $env:GITHUB_OUTPUT
-          Write-Host "📦 Artifact name: $name"
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -269,45 +230,11 @@ jobs:
           tag_name: v${{ needs.build-and-package.outputs.version }}
           name: GCM Release ${{ needs.build-and-package.outputs.version }}
           draft: true
-          prerelease: ${{ contains(needs.build-and-package.outputs.version, '-dev') }}
           files: ./installer/*.exe
           body: |
-            ## 🎮 GCM Game Console Mode v${{ needs.build-and-package.outputs.version }}
+            ## 🎮 GCM v${{ needs.build-and-package.outputs.version }}
             
-            ### 📝 Release Notes
+            **Release Notes:**
             ${{ github.event.inputs.release_notes }}
             
-            ### 🔧 Build Information
-            - **Built from:** `${{ github.sha }}`
-            - **Build number:** `${{ github.run_number }}`
-            - **Configuration:** ${{ github.event.inputs.build_configuration }}
-            - **Platform:** ${{ github.event.inputs.platform }}
-            
-            ### 📥 Installation Instructions
-            1. **Download** the installer below.
-            2. **Run as Administrator** (required for shell replacement).
-            3. The installer will automatically remove old versions.
-            4. Launch **GCM Settings** to configure your setup.
-            
-            ### 💻 System Requirements
-            - Windows 10 (1903+) or Windows 11
-            - Administrator privileges
-            - 100MB+ free disk space
-            
-            ### 🚀 What's Included
-            - **GCM Settings** - Configuration interface
-            - **GCM Loader** - Console mode launcher  
-            - **Controller Support** - Xbox/Generic gamepad support
-            - **Audio Switching** - Automatic audio device management
-            - **Flow Launcher** - Keyboard-driven app launcher
-            
-            ### ⚠️ Important Notes
-            - **Backup your data** before installation.
-            - The installer **disables UAC** temporarily in gaming mode.
-            - **Steam/Playnite integration** requires additional setup.
-            - Use at your own risk - this modifies Windows shell behavior.
-            
-            ---
-            
-            💬 **Need help?** Join our [Discord](https://discord.gg/xGD2GV6zS2) or check [GitHub Issues](https://github.com/toonymak1993/GameConsoleMode/issues).
-          generate_release_notes: false
+            **Important:** This is a framework-dependent application. You need the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) and the [Windows App SDK Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) to be installed.
