@@ -10,7 +10,7 @@ on:
       build_configuration:
         description: 'Build configuration'
         required: true
-        default: 'Debug'
+        default: 'Release'
         type: choice
         options:
           - Debug
@@ -181,7 +181,7 @@ jobs:
       - name: Prepare installer files
         shell: pwsh
         run: |
-          Write-Host "📦 Preparing installer files with discovered structure..."
+          Write-Host "📦 Preparing installer files with precise file selection..."
           New-Item -ItemType Directory -Force -Path "./installer-files"
           
           # Define the target projects and their expected executables
@@ -208,24 +208,49 @@ jobs:
             }
           }
           
-          $foundProjects = @()
-          $missingProjects = @()
+          # First, find where all the executables are located
+          Write-Host "🔍 Locating all project executables..."
+          $buildOutputDir = $null
+          $allExecutables = @{}
           
-          # Find and copy each project's output
           foreach ($projectName in $projects.Keys) {
-            $project = $projects[$projectName]
-            $exeName = $project.exe
-          
-            Write-Host "`n🔍 Looking for $($project.description) ($exeName)..."
-          
-            # Search for the executable in common build output locations
+            $exeName = $projects[$projectName].exe
             $exeFound = Get-ChildItem -Path "." -Filter $exeName -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           
             if ($exeFound) {
               $sourceDir = $exeFound.Directory.FullName
-              $foundProjects += $projectName
+              $allExecutables[$projectName] = $exeFound.FullName
           
-              Write-Host "  ✅ Found at: $($sourceDir.Replace((Get-Location).Path, '.'))"
+              if ($buildOutputDir -eq $null) {
+                $buildOutputDir = $sourceDir
+              }
+          
+              Write-Host "  ✅ $exeName found at: $($sourceDir.Replace((Get-Location).Path, '.'))"
+            } else {
+              Write-Host "  ❌ $exeName not found"
+            }
+          }
+          
+          if ($buildOutputDir -eq $null) {
+            throw "No executables found - build may have failed"
+          }
+          
+          Write-Host "`n📂 Build output directory: $($buildOutputDir.Replace((Get-Location).Path, '.'))"
+          
+          # Get all files in the build directory for analysis
+          $allFiles = Get-ChildItem -Path $buildOutputDir -File -ErrorAction SilentlyContinue
+          Write-Host "📊 Total files in build output: $($allFiles.Count)"
+          
+          # Process each project with precise file matching
+          $foundProjects = @()
+          $missingProjects = @()
+          
+          foreach ($projectName in $projects.Keys) {
+            $project = $projects[$projectName]
+          
+            if ($allExecutables.ContainsKey($projectName)) {
+              $foundProjects += $projectName
+              Write-Host "`n📦 Processing $($project.description)..."
           
               # Create target directory
               if ($project.targetFolder -ne ".") {
@@ -235,27 +260,77 @@ jobs:
                 $targetPath = "./installer-files"
               }
           
-              Write-Host "  📁 Copying to: $($project.targetFolder)"
+              # Copy files that belong to this project
+              $copiedFiles = 0
           
-              # Copy all files from the source directory to maintain dependencies
-              Copy-Item -Path "$sourceDir/*" -Destination $targetPath -Recurse -Force -ErrorAction SilentlyContinue
+              foreach ($file in $allFiles) {
+                $shouldCopy = $false
+                $reason = ""
           
-              # Verify the main executable was copied
+                # Main executable - exact match
+                if ($file.Name -eq $project.exe) {
+                  $shouldCopy = $true
+                  $reason = "main executable"
+                }
+                # Project-specific DLLs - must start with project name
+                elseif ($file.Extension -eq ".dll" -and $file.BaseName -eq $projectName) {
+                  $shouldCopy = $true
+                  $reason = "project DLL"
+                }
+                # Project-specific config/json files - must match project name exactly
+                elseif (($file.Extension -eq ".json" -or $file.Extension -eq ".config") -and 
+                        ($file.BaseName -eq $projectName -or $file.Name -like "$projectName.*")) {
+                  $shouldCopy = $true
+                  $reason = "project config"
+                }
+                # Project-specific debug files
+                elseif ($file.Extension -eq ".pdb" -and $file.BaseName -eq $projectName) {
+                  $shouldCopy = $true
+                  $reason = "debug symbols"
+                }
+          
+                # For the main app only - copy shared/common dependencies
+                if ($project.targetFolder -eq "." -and -not $shouldCopy) {
+                  # Include common .NET runtime files and shared libraries
+                  if ($file.Extension -eq ".dll" -and -not $file.BaseName.StartsWith("GAMINGCONSOLEMODE") -and
+                      -not $file.BaseName.StartsWith("gcmloader") -and -not $file.BaseName.StartsWith("OverlayWindow") -and
+                      -not $file.BaseName.StartsWith("wingamepad")) {
+                    $shouldCopy = $true
+                    $reason = "shared dependency"
+                  }
+                  # Common config files
+                  elseif ($file.Extension -eq ".json" -and ($file.Name -like "*.runtimeconfig.json" -or $file.Name -like "*.deps.json") -and
+                          -not $file.BaseName.StartsWith("gcmloader") -and -not $file.BaseName.StartsWith("OverlayWindow") -and
+                          -not $file.BaseName.StartsWith("wingamepad")) {
+                    $shouldCopy = $true
+                    $reason = "runtime config"
+                  }
+                }
+          
+                if ($shouldCopy) {
+                  Copy-Item -Path $file.FullName -Destination $targetPath -Force -ErrorAction SilentlyContinue
+                  Write-Host "    ✓ $($file.Name) ($reason)"
+                  $copiedFiles++
+                }
+              }
+          
+              Write-Host "  📊 Copied $copiedFiles files for $projectName"
+          
+              # Verify the main executable exists in target
               $targetExePath = if ($project.targetFolder -eq ".") { 
-                Join-Path "./installer-files" $exeName
+                Join-Path "./installer-files" $project.exe
               } else { 
-                Join-Path "./installer-files" $project.targetFolder $exeName
+                Join-Path "./installer-files" $project.targetFolder $project.exe
               }
           
               if (Test-Path $targetExePath) {
-                Write-Host "  ✅ $exeName copied successfully"
+                Write-Host "  ✅ $($project.exe) verified in target location"
               } else {
-                Write-Warning "  ⚠️ $exeName copy failed"
+                Write-Warning "  ⚠️ $($project.exe) missing from target location"
               }
           
             } else {
               $missingProjects += $projectName
-              Write-Warning "  ❌ $($project.description) not found anywhere"
             }
           }
           
@@ -263,74 +338,77 @@ jobs:
           Write-Host "`n🎨 Looking for logo.ico..."
           $logoSearchPaths = @(
             "./gcmloader/logo.ico",
-            "./logo.ico",
-            "./Resources/logo.ico",
-            "./*/logo.ico"
+            "./logo.ico", 
+            "./Resources/logo.ico"
           )
           
           $logoFound = $false
-          foreach ($pattern in $logoSearchPaths) {
-            $logoFiles = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
-            if ($logoFiles) {
-              $logoFile = $logoFiles | Select-Object -First 1
+          foreach ($path in $logoSearchPaths) {
+            if (Test-Path $path) {
               $gcmloaderDir = "./installer-files/gcmloader"
               if (-not (Test-Path $gcmloaderDir)) {
                 New-Item -ItemType Directory -Force -Path $gcmloaderDir | Out-Null
               }
-              Copy-Item -Path $logoFile.FullName -Destination "$gcmloaderDir/logo.ico" -Force
-              Write-Host "✅ Logo copied from: $($logoFile.FullName.Replace((Get-Location).Path, '.'))"
+              Copy-Item -Path $path -Destination "$gcmloaderDir/logo.ico" -Force
+              Write-Host "✅ Logo copied from: $path"
               $logoFound = $true
               break
             }
           }
           
           if (-not $logoFound) {
-            Write-Warning "⚠️ logo.ico not found in any expected location"
+            Write-Warning "⚠️ logo.ico not found"
           }
           
-          # Summary and validation
-          Write-Host "`n📋 Build Summary:"
-          Write-Host "  Found projects: $($foundProjects -join ', ')"
+          # Final summary and structure validation
+          Write-Host "`n📋 Processing Summary:"
+          Write-Host "  ✅ Found projects: $($foundProjects -join ', ')"
           if ($missingProjects.Count -gt 0) {
-            Write-Host "  Missing projects: $($missingProjects -join ', ')"
+            Write-Host "  ❌ Missing projects: $($missingProjects -join ', ')"
           }
           
           Write-Host "`n📁 Final installer structure:"
-          Write-Host "  Root (./installer-files/):"
-          Get-ChildItem -Path "./installer-files" -File | ForEach-Object {
-            Write-Host "    - $($_.Name)"
-          }
           
-          Get-ChildItem -Path "./installer-files" -Directory | ForEach-Object {
-            Write-Host "  $($_.Name)/:"
-            Get-ChildItem -Path $_.FullName -File | Select-Object -First 5 | ForEach-Object {
-              Write-Host "    - $($_.Name)"
-            }
-            $totalFiles = (Get-ChildItem -Path $_.FullName -File).Count
-            if ($totalFiles -gt 5) {
-              Write-Host "    ... and $($totalFiles - 5) more files"
+          # Root files
+          $rootFiles = Get-ChildItem -Path "./installer-files" -File
+          if ($rootFiles.Count -gt 0) {
+            Write-Host "  📂 Root (./installer-files/):"
+            foreach ($file in $rootFiles | Sort-Object Name) {
+              Write-Host "    - $($file.Name)"
             }
           }
           
-          # Critical validation - at least find GAMINGCONSOLEMODE
-          $mainAppPath = "./installer-files/GAMINGCONSOLEMODE.exe"
-          if (Test-Path $mainAppPath) {
-            Write-Host "`n✅ Main Settings App found and ready"
-          } else {
-            Write-Warning "`n⚠️ Main Settings App not found, but continuing..."
-            Write-Warning "Available executables in installer-files:"
-            Get-ChildItem -Path "./installer-files" -Filter "*.exe" -Recurse | ForEach-Object {
-              $relativePath = $_.FullName.Replace((Resolve-Path "./installer-files").Path, "")
-              Write-Host "  - $relativePath"
+          # Subdirectory files
+          $subdirs = Get-ChildItem -Path "./installer-files" -Directory
+          foreach ($subdir in $subdirs | Sort-Object Name) {
+            Write-Host "  📂 $($subdir.Name)/:"
+            $subdirFiles = Get-ChildItem -Path $subdir.FullName -File | Sort-Object Name
+            foreach ($file in $subdirFiles) {
+              Write-Host "    - $($file.Name)"
+            }
+            if ($subdirFiles.Count -eq 0) {
+              Write-Host "    (empty)"
             }
           }
           
-          # Calculate total size
+          # Validation
+          $criticalCheck = @(
+            @{ Path = "./installer-files/GAMINGCONSOLEMODE.exe"; Name = "Main Settings App" }
+          )
+          
+          foreach ($check in $criticalCheck) {
+            if (Test-Path $check.Path) {
+              Write-Host "`n✅ $($check.Name) is ready"
+            } else {
+              Write-Warning "`n⚠️ $($check.Name) is missing"
+            }
+          }
+          
+          # Final size calculation
           $totalSize = (Get-ChildItem -Path "./installer-files" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "`n💾 Total installer size: $([math]::Round($totalSize, 2)) MB"
+          Write-Host "`n💾 Total installer content: $([math]::Round($totalSize, 2)) MB"
           
-          # Don't fail if some components are missing - let the installer builder decide
-          Write-Host "`n🎯 Preparation completed with $($foundProjects.Count) of $($projects.Count) projects found"
+          Write-Host "`n🎯 Installer preparation completed successfully"
 
       - name: Install Inno Setup
         if: steps.cache-inno.outputs.cache-hit != 'true'

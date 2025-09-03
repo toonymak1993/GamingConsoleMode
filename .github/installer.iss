@@ -91,6 +91,14 @@ begin
   OldUninstaller := ExpandConstant('{pf32}\GCMcrew\GCM\Uninstall.exe');
   RunExternalUninstaller(OldUninstaller);
   
+  // Check bugged installs
+  OldUninstaller := ExpandConstant('{pf32}\GCM\GCM\Uninstall.exe');
+  RunExternalUninstaller(OldUninstaller);
+  
+  // Check more bugged installs
+  OldUninstaller := ExpandConstant('{pf32}\GCM\GCM\unins000.exe');
+  RunExternalUninstaller(OldUninstaller);
+  
   // Also check for uninstaller in the current GCM location
   OldUninstaller := ExpandConstant('{pf32}\GCM\unins000.exe');
   RunExternalUninstaller(OldUninstaller);
