@@ -60,7 +60,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # VERBESSERT: Cache für .NET-Pakete, Tools UND Workloads
       - name: Cache .NET
         uses: actions/cache@v4
         with:
@@ -78,7 +77,8 @@ jobs:
         id: cache-inno
         uses: actions/cache@v4
         with:
-          path: ${{ env.ProgramFiles(x86) }}\Inno Setup 6
+          # KORRIGIERT: Korrekte Syntax für Umgebungsvariablen mit Sonderzeichen
+          path: ${{ env['ProgramFiles(x86)'] }}\Inno Setup 6
           key: inno-setup-${{ env.INNO_SETUP_VERSION }}
 
       - name: Determine version
@@ -109,7 +109,6 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # VERBESSERT: dotnet publish ohne SingleFile
       - name: Build and Publish Projects
         shell: pwsh
         run: |
@@ -137,7 +136,6 @@ jobs:
               Write-Warning "⚠️ Project file not found: $projectPath"; continue
             }
             
-            # HINWEIS: /p:PublishSingleFile=true wurde entfernt, um .exe + .dlls zu erhalten
             dotnet publish $projectPath `
               --configuration $config `
               --runtime $runtimeId `
@@ -154,7 +152,6 @@ jobs:
           }
           Write-Host "`n✅ All projects built/published successfully"
 
-      # VERBESSERT: Robusteres Skript zum Vorbereiten der Dateien
       - name: Prepare installer files
         shell: pwsh
         run: |
@@ -175,7 +172,6 @@ jobs:
             $searchPath = "./$projectName/bin/$config"
             
             Write-Host "`n📍 Processing $projectName..."
-            # Sucht dynamisch nach dem 'publish'-Ordner
             $publishDir = Get-ChildItem -Path $searchPath -Directory -Recurse | Where-Object { $_.Name -eq 'publish' } | Select-Object -First 1
             
             if ($publishDir) {
@@ -238,7 +234,6 @@ jobs:
           [System.IO.File]::WriteAllText($issPath, $content, $utf8NoBom)
           Write-Host "✅ Updated ISS file with version $version"
 
-      # VERBESSERT: Umstellung auf PowerShell für Konsistenz
       - name: Build installer
         shell: pwsh
         run: |
