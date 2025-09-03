@@ -100,10 +100,10 @@
     <None Remove="functions\TV.png" />
     <None Remove="functions\windows_statusicon.png" />
     <None Remove="functions\winpart.png" />
+    <None Remove="gcmsettings.ico" />
     <None Remove="Home.xaml" />
     <None Remove="launcher.xaml" />
     <None Remove="Links.xaml" />
-    <None Remove="logo.ico" />
     <None Remove="nircmd.exe" />
     <None Remove="onboarding.xaml" />
     <None Remove="rogally.xaml" />
@@ -299,11 +299,6 @@
     </Page>
   </ItemGroup>
   <ItemGroup>
-    <Page Update="launcher.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Folder Include="opensource_apps\" />
     <Folder Include="Update\" />
   </ItemGroup>
@@ -354,6 +349,16 @@
   </ItemGroup>
   <ItemGroup>
     <Page Remove="Home.xaml" />
+    <Page Remove="launcher.xaml" />
+    <Page Remove="Links.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <CodeAnalysisDictionary Include="launcher.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </CodeAnalysisDictionary>
+    <Content Include="Links.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\rogally\allybackside.png">
@@ -371,9 +376,7 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="logo.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
+    <Page Include="gcmsettings.ico" />
   </ItemGroup>
   <ItemGroup>
     <Page Update="taskmanager.xaml">
@@ -397,11 +400,6 @@
   </ItemGroup>
   <ItemGroup>
     <Page Update="onboarding.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-  <ItemGroup>
-    <Page Update="Links.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>
