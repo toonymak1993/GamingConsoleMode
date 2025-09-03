@@ -40,10 +40,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Startmenü-Verknüpfungen
 ; Since all executables are now in the same folder, adjust paths accordingly
 Name: "{group}\GCM Settings"; Filename: "{app}\GAMINGCONSOLEMODE.exe"; WorkingDir: "{app}"
-Name: "{group}\GCM Mode"; Filename: "{app}\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; WorkingDir: "{app}"
+Name: "{group}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; WorkingDir: "{app}\gcmloader"
 
 ; Optionaler Desktop Shortcut
-Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; Tasks: desktopicon
+Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; IconFilename: "{app}\gcmloader\logo.ico"; Tasks: desktopicon; WorkingDir: "{app}\gcmloader"
 
 [Run]
 ; Starte GCM Settings automatisch nach Setup
