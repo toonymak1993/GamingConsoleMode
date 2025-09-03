@@ -176,7 +176,10 @@ jobs:
               --verbosity minimal `
               /p:Version=${{ steps.version.outputs.version }} `
               /p:AssemblyVersion=${{ github.event.inputs.version }}.0 `
-              /p:FileVersion=${{ github.event.inputs.version }}.0
+              /p:FileVersion=${{ github.event.inputs.version }}.0 `
+              /p:WindowsPackageType=None `
+              /p:PublishSingleFile=true `
+              /p:WindowsAppSDKSelfContained=true
             
             if ($LASTEXITCODE -ne 0) {
               throw "$projectName publish failed with exit code: $LASTEXITCODE"
