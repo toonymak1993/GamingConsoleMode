@@ -93,24 +93,37 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # VERBESSERT: Der 'dotnet build' Befehl erhält jetzt explizit die Plattform und die Runtime.
+      # KORRIGIERT: Baut jedes Projekt einzeln, wie von der Fehlermeldung gefordert.
       - name: Build Projects
         shell: pwsh
         run: |
           $config = "${{ github.event.inputs.build_configuration }}"
           $platform = "${{ github.event.inputs.platform }}"
-          # Leitet die passende Runtime-ID aus der Plattform ab (z.B. x64 -> win-x64)
           $runtimeId = "win-$($platform.ToLower())" 
           
           Write-Host "📦 Restoring solution packages..."
-          # Auch beim Restore geben wir die Runtime an, um Konsistenz zu gewährleisten
-          dotnet restore ${{ env.SOLUTION_PATH }} --runtime $runtimeId
+          dotnet restore ${{ env.SOLUTION_PATH }}
           if ($LASTEXITCODE -ne 0) { throw "Solution restore failed!" }
           
-          Write-Host "`n🔨 Building solution with Config='$config', Platform='$platform', Runtime='$runtimeId'..."
-          # Wir übergeben die Parameter explizit an den Build-Befehl, um Konflikte zu vermeiden
-          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config --runtime $runtimeId --no-restore
-          if ($LASTEXITCODE -ne 0) { throw "Solution build failed!" }
+          # Liste der zu bauenden Projekte
+          $projects = @(
+            "GAMINGCONSOLEMODE",
+            "gcmloader",
+            "OverlayWindow",
+            "wingamepad"
+          )
+          
+          # Jedes Projekt einzeln mit der korrekten Runtime bauen
+          foreach ($projectName in $projects) {
+            $projectPath = "./$projectName/$projectName.csproj"
+            Write-Host "`n🔨 Building project '$projectName' with Config='$config', Runtime='$runtimeId'..."
+            if (-not (Test-Path $projectPath)) {
+              Write-Warning "⚠️ Project file not found, skipping: $projectPath"; continue
+            }
+          
+            dotnet build $projectPath --configuration $config --runtime $runtimeId --no-restore
+            if ($LASTEXITCODE -ne 0) { throw "Build failed for project: $projectName" }
+          }
 
           Write-Host "`n✅ All projects built successfully!"
 
@@ -131,11 +144,9 @@ jobs:
           
           foreach ($projectName in $projects.Keys) {
             $project = $projects[$projectName]
-            # Der Suchpfad ist jetzt einfacher, da der Build-Output konsistenter ist.
-            $searchPath = "./$projectName/bin/$config"
+            $searchPath = "./$projectName/bin"
             
             Write-Host "`n📍 Processing $projectName..."
-            
             $buildOutputExe = Get-ChildItem -Path $searchPath -Filter "$projectName.exe" -Recurse | Select-Object -First 1
             
             if ($buildOutputExe) {
