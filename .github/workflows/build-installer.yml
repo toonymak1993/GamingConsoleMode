@@ -60,15 +60,13 @@ jobs:
         with:
           fetch-depth: 1
 
+      # BEREINIGT: Cache nur noch für NuGet-Pakete und Tools, da keine Workloads mehr installiert werden.
       - name: Cache .NET
         uses: actions/cache@v4
         with:
           path: |
             ~/.nuget/packages
             ~/.dotnet/tools
-            C:\Program Files\dotnet\sdk-manifests
-            C:\Program Files\dotnet\packs
-            C:\Program Files\dotnet\shared
           key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}-${{ hashFiles('**/*.csproj') }}
           restore-keys: |
             ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}-
@@ -77,7 +75,6 @@ jobs:
         id: cache-inno
         uses: actions/cache@v4
         with:
-          # KORRIGIERT: Korrekte Syntax für Umgebungsvariablen mit Sonderzeichen
           path: ${{ env['ProgramFiles(x86)'] }}\Inno Setup 6
           key: inno-setup-${{ env.INNO_SETUP_VERSION }}
 
@@ -99,12 +96,7 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Install .NET Workloads
-        shell: pwsh
-        run: |
-          Write-Host "📦 Installing .NET workloads..."
-          dotnet workload install maui-windows --skip-sign-check
-          Write-Host "✅ Workloads installed"
+      # ENTFERNT: Der unnötige Schritt zur Installation der MAUI-Workloads wurde entfernt.
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
