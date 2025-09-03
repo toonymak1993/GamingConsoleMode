@@ -39,6 +39,7 @@
     <None Remove="Assets\pause.wav" />
     <None Remove="Assets\play.wav" />
     <None Remove="Assets\shortcut.wav" />
+    <None Remove="logo.ico" />
     <None Remove="nircmd.exe" />
     <None Remove="Settings.xml" />
   </ItemGroup>
@@ -60,6 +61,9 @@
     <EmbeddedResource Include="Assets\game.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\logo.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\GCM_Startup_Video.webm">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -79,6 +83,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\xbox-controller.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="logo.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="nircmd.exe">
