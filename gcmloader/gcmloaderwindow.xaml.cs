@@ -2573,7 +2573,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                         // Get the path of the current directory and append the target executable name
                         // Get the directory of the current executable
-                        string targetExecutable = Path.Combine(AppContext.BaseDirectory,"gcmloader", "gcmloader.exe");
+                        // Holt den Pfad zum "Programme (x86)"-Ordner, egal wo er auf dem System ist.
+                        string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+                        string targetExecutable = Path.Combine(programFilesX86, "GCM", "gcmloader", "gcmloader.exe");
+
                         if (!File.Exists(targetExecutable))
                 {
                     //Logger.Logger.Log($"Error: The file '{targetExecutable}' does not exist.");
@@ -3049,8 +3053,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         // Trigger: Bei jeder Benutzeranmeldung
                         td.Triggers.Add(new LogonTrigger());
 
-                        // Aktion: wingamepad.exe starten
-                        string exePath = Path.Combine(AppContext.BaseDirectory,"wingamepad", "wingamepad.exe");
+                        // Holt den Pfad zum "Programme (x86)"-Ordner, egal wo er auf dem System ist.
+                        string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+                        // Baut den vollständigen Pfad zur .exe-Datei zusammen.
+                        string exePath = Path.Combine(programFilesX86, "GCM", "wingamepad", "wingamepad.exe");
+                       
                         td.Actions.Add(new ExecAction(exePath));
 
                         // ### ANPASSUNG FÜR HANDHELDS ###

@@ -187,7 +187,7 @@ namespace wingamepad
         {
             try
             {
-                string loaderPath = @"C:\Program Files (x86)\GCM\gcmloader\gcmloader.exe";
+                string loaderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GCM", "gcmloader", "gcmloader.exe");
                 if (File.Exists(loaderPath))
                 {
                     Process.Start(new ProcessStartInfo(loaderPath) { UseShellExecute = true, Verb = "runas" });
