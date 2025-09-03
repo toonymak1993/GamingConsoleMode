@@ -377,7 +377,7 @@ namespace GAMINGCONSOLEMODE
             try
             {
                 // Navigiere zum Unterordner "gcmloader" und starte die EXE darin
-                string fullExePath = Path.Combine(exeFolder(), "gcmloader.exe");
+                string fullExePath = Path.Combine(exeFolder(),"gcmloader", "gcmloader.exe");
 
                 Process.Start(new ProcessStartInfo
                 {
