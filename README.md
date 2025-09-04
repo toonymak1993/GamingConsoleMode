@@ -29,7 +29,6 @@ Something like **SteamOS**, but powered by the **Windows engine**.
 GCM replaces the Windows Explorer shell with its own interface, hiding the Windows desktop, taskbar, and other elements, creating a pure gaming environment.
 
 #### **2. Support for Multiple Launchers**
-![General Settings](launcher.png)
 - Seamlessly integrates with popular launchers like:
   - **Steam**
   - **Xbox**
@@ -38,7 +37,6 @@ GCM replaces the Windows Explorer shell with its own interface, hiding the Windo
 - Automatically launches the configured game launcher on startup.
 
 #### **3. Many Functions**
-![General Settings](functions1.png)
 - Functions like:
   - **CSSLOADER**
   - **JOYXOFF**
@@ -103,4 +101,5 @@ Join our Discord server: [**GameConsoleMode Discord**](https://discord.gg/FbjYDe
 
 GameConsoleMode continues to evolve, bringing new features and improvements with each release.  
 Try it out, and let us know how we can make it even better! 🎉
+
 
