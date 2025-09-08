@@ -117,11 +117,11 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
                         <TextBlock Text="LB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                        <TextBlock Text="Area back" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="Previous Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
                         <TextBlock Text="RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                        <TextBlock Text="Area forth" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="Next Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
             </Border>

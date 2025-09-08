@@ -157,6 +157,7 @@ namespace gcmloader
         #endregion dsteamgriddb
 
         private List<Border> _launcherAreaButtons;
+        private List<ProcessData> _latestProcessData = new();
         private int _selectedLauncherAreaIndex = 0;
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -3239,11 +3240,75 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             };
         }
+
+        private async Task RefreshCardsUIAsync()
+        {
+            // Fetch the latest process list in a background thread.
+            var processDataList = await Task.Run(() =>
+            {
+                var dataList = new List<ProcessData>();
+                var seenHwnds = new HashSet<IntPtr>();
+
+                EnumWindows((hWnd, lParam) =>
+                {
+                    // This is the same reliable process-finding logic as before.
+                    if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
+                        return true;
+                    int textLen = GetWindowTextLength(hWnd);
+                    if (textLen == 0) return true;
+                    var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
+                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
+                    if (IsCloaked(hWnd)) return true;
+
+                    var titleBuilder = new StringBuilder(textLen + 1);
+                    GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+                    string windowTitle = titleBuilder.ToString();
+
+                    if (string.IsNullOrWhiteSpace(windowTitle) ||
+                        _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+
+                    Process proc = null;
+                    string exePath = null;
+                    try
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        if (pid != 0)
+                        {
+                            proc = Process.GetProcessById((int)pid);
+                            if (proc.Id == Process.GetCurrentProcess().Id) return true;
+                            exePath = proc.MainModule?.FileName;
+                        }
+                    }
+                    catch { /* Ignore */ }
+
+                    if (!seenHwnds.Add(hWnd)) return true;
+
+                    dataList.Add(new ProcessData
+                    {
+                        ProductName = windowTitle,
+                        Hwnd = hWnd,
+                        Proc = proc,
+                        ExePath = exePath
+                    });
+
+                    return true;
+                }, IntPtr.Zero);
+
+                return dataList;
+            });
+
+            // Now, update the UI with this fresh data.
+            UpdateUiFromData(processDataList);
+        }
+
         private void UpdateLayoutForFocus()
         {
             if (_currentFocusArea == FocusArea.Launcher)
             {
-                // Launcher is active: Expand the launcher column and show all cards with an animation.
+                // This part for the Launcher focus remains unchanged.
                 LauncherColumn.Width = new GridLength(1, GridUnitType.Star);
                 CardsColumn.Width = new GridLength(0);
                 ColumnSeparator.Visibility = Visibility.Collapsed;
@@ -3251,8 +3316,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 for (int i = 0; i < _launcherAreaButtons.Count; i++)
                 {
                     var card = _launcherAreaButtons[i];
-
-                    // For all cards after the first two, make them visible and start a staggered fade-in animation.
                     if (i > 1)
                     {
                         AnimateCardVisibility(card, 1.0f, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(50 * (i - 1)));
@@ -3261,19 +3324,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             else
             {
-                // Any other area is active: Restore the default split view and hide extra cards with an animation.
+                // This part for Cards/TopButtons focus is now updated.
                 LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
                 CardsColumn.Width = new GridLength(1, GridUnitType.Star);
                 ColumnSeparator.Visibility = Visibility.Visible;
 
+                // *** THIS IS THE KEY CHANGE ***
+                // Instead of using potentially stale data, we trigger a fresh UI refresh.
+                // We use "_ = " to call the async method without waiting for it, keeping the UI responsive.
+                _ = RefreshCardsUIAsync();
+
+                // This loop for hiding extra launcher cards remains unchanged.
                 for (int i = 0; i < _launcherAreaButtons.Count; i++)
                 {
-                    // *** DIESE ZEILE HAT WAHRSCHEINLICH GEFEHLT ***
-                    // *** THIS LINE WAS LIKELY MISSING ***
                     var card = _launcherAreaButtons[i];
-
-                    // For all cards after the first two, start the fade-out animation.
-                    // The animation itself will handle setting Visibility to Collapsed when it's done.
                     if (i > 1)
                     {
                         AnimateCardVisibility(card, 0.0f, TimeSpan.FromMilliseconds(150));
@@ -3442,29 +3506,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
-                // The check "if (!IsWindowInForeground())" has been REMOVED.
-                // The refresh now runs continuously in the background.
-
-                var processDataList = await Task.Run(() =>
+                // This timer now ONLY gathers data in the background. It does not touch the UI.
+                _latestProcessData = await Task.Run(() =>
                 {
                     var dataList = new List<ProcessData>();
                     var seenHwnds = new HashSet<IntPtr>();
 
                     EnumWindows((hWnd, lParam) =>
                     {
+                        // This entire EnumWindows logic remains unchanged.
                         if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
                             return true;
-
                         int textLen = GetWindowTextLength(hWnd);
-                        if (textLen == 0)
-                            return true;
-
+                        if (textLen == 0) return true;
                         var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
-                        if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW))
-                            return true;
-
-                        if (IsCloaked(hWnd))
-                            return true;
+                        if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
+                        if (IsCloaked(hWnd)) return true;
 
                         var titleBuilder = new StringBuilder(textLen + 1);
                         GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
@@ -3488,11 +3545,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 exePath = proc.MainModule?.FileName;
                             }
                         }
-                        catch
-                        {
-                            proc = null;
-                            exePath = null;
-                        }
+                        catch { /* Ignore processes we can't access */ }
 
                         if (!seenHwnds.Add(hWnd)) return true;
 
@@ -3510,7 +3563,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     return dataList;
                 });
 
-                UpdateUiFromData(processDataList);
+                // The call to UpdateUiFromData(processDataList) has been REMOVED from the timer.
             };
             _taskRefreshTimer.Start();
         }
@@ -3560,88 +3613,127 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             return d[n, m];
         }
-        private async void LoadCardImageAsync(Border card, string gameName, string exePath)
+
+
+        private async Task ShowDebugDialogAsync(string title, string message)
         {
-            // Stufe 1: Keyword-Blacklist-Filter
-            if (_nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            var dialog = new ContentDialog
+            {
+                // CORRECTED: Get the XamlRoot from the Window's Content property, not the Window itself.
+                XamlRoot = this.Content.XamlRoot,
+                Title = "[DEBUG] " + title,
+                Content = message,
+                CloseButtonText = "Weiter"
+            };
+            await dialog.ShowAsync();
+        }
+        private string CleanGameNameForSearch(string rawName)
+        {
+            if (string.IsNullOrEmpty(rawName)) return string.Empty;
+
+            // Remove common trademark symbols
+            string cleanedName = rawName.Replace("™", "").Replace("®", "").Replace("©", "");
+
+            // Remove text in brackets (e.g., "(64-bit)") or parentheses
+            cleanedName = System.Text.RegularExpressions.Regex.Replace(cleanedName, @"\s*[\(\[].*?[\)\]]", "");
+
+            // Remove common version patterns like "v1.2.3" or "Build 4567"
+            cleanedName = System.Text.RegularExpressions.Regex.Replace(cleanedName, @"\s*v\d+(\.\d+)*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            cleanedName = System.Text.RegularExpressions.Regex.Replace(cleanedName, @"\s*Build\s*\d+", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            // Trim any resulting whitespace from the ends
+            return cleanedName.Trim();
+        }
+        // In gcmloader/MainWindow.xaml.cs
+
+
+
+        private async void LoadCardImageAsync(Border card, Image iconControl, TextBlock titleControl, string gameName, string exePath)
+        {
+            // Initial safety checks
+            if (string.IsNullOrEmpty(exePath) || _nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
 
-            // Suche im Cache oder über die API
-            SearchResult searchResult = null;
-            if (_gameIdCache.ContainsKey(gameName))
+            try
             {
-                searchResult = _gameIdCache[gameName];
-            }
-            else
-            {
-                searchResult = await _steamGridHelper.SearchForGameIdAsync(gameName);
-                _gameIdCache[gameName] = searchResult;
-            }
+                // 1. Clean up the game name for the search
+                string cleanedGameName = CleanGameNameForSearch(gameName);
+                if (string.IsNullOrEmpty(cleanedGameName)) return;
 
-            if (searchResult == null)
-            {
-                return;
-            }
-
-            // Stufe 2: Ähnlichkeits-Filter
-            double similarity = CalculateSimilarity(gameName, searchResult.name);
-            if (similarity < 0.5)
-            {
-                return;
-            }
-
-            // Alle Filter bestanden. Lade das Bild.
-            var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
-
-            if (!string.IsNullOrEmpty(imageUrl))
-            {
-                try
+                // 2. Get the game ID from SteamGridDB (with caching)
+                SearchResult searchResult = null;
+                if (_gameIdCache.ContainsKey(cleanedGameName))
                 {
-                    string localImagePath = Path.Combine(_imageCachePath, $"{searchResult.id}.jpg");
-                    if (!File.Exists(localImagePath))
+                    searchResult = _gameIdCache[cleanedGameName];
+                }
+                else
+                {
+                    searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedGameName);
+                    _gameIdCache[cleanedGameName] = searchResult; // Save the result to the cache (even if it's null)
+                }
+
+                // Abort if no result was found
+                if (searchResult == null)
+                {
+                    Debug.WriteLine($"[SteamGridDB] No result found for '{cleanedGameName}'.");
+                    return;
+                }
+
+                // 3. Safety check: Is the found game similar enough to the original?
+                double similarity = CalculateSimilarity(gameName, searchResult.name);
+                if (similarity < 0.5)
+                {
+                    Debug.WriteLine($"[SteamGridDB] Similarity between '{gameName}' and '{searchResult.name}' too low ({similarity:P2}). Aborting.");
+                    return;
+                }
+
+                // 4. Get the image URL for the found game
+                var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
+                if (string.IsNullOrEmpty(imageUrl))
+                {
+                    Debug.WriteLine($"[SteamGridDB] No image URL found for game ID '{searchResult.id}'.");
+                    return;
+                }
+
+                // 5. Download image, cache it, and apply it to the card
+                string localImagePath = Path.Combine(_imageCachePath, $"{searchResult.id}.jpg");
+
+                if (!File.Exists(localImagePath))
+                {
+                    using (var client = new HttpClient())
                     {
-                        using (var client = new HttpClient())
-                        {
-                            var imageData = await client.GetByteArrayAsync(imageUrl);
-                            await File.WriteAllBytesAsync(localImagePath, imageData);
-                        }
+                        var imageData = await client.GetByteArrayAsync(imageUrl);
+                        await File.WriteAllBytesAsync(localImagePath, imageData);
                     }
-
-                    // --- UI-Update auf dem UI-Thread durchführen ---
-                    card.DispatcherQueue.TryEnqueue(() =>
-                    {
-                        // 1. Hintergrund der Karte mit dem SteamGridDB-Bild ersetzen
-                        card.Background = new ImageBrush
-                        {
-                            ImageSource = new BitmapImage(new Uri(localImagePath)),
-                            Stretch = Stretch.UniformToFill
-                        };
-
-                        // 2. Zugriff auf das Grid und seine Elemente
-                        if (card.Child is Grid contentGrid)
-                        {
-                            // 3. Das ursprüngliche App-Icon ausblenden
-                            var iconImage = contentGrid.Children.OfType<Image>().FirstOrDefault(img => img.Name == "IconImage");
-                            if (iconImage != null)
-                            {
-                                iconImage.Visibility = Visibility.Collapsed;
-                            }
-
-                            // 4. Den Text mit dem präziseren Spieletitel von SteamGridDB aktualisieren
-                            var titleText = contentGrid.Children.OfType<TextBlock>().FirstOrDefault(tb => tb.Name == "TitleText");
-                            if (titleText != null)
-                            {
-                                titleText.Text = searchResult.name;
-                            }
-                        }
-                    });
                 }
-                catch (Exception ex)
+
+                // Important: Dispatch the UI update to the UI thread
+                card.DispatcherQueue.TryEnqueue(async () =>
                 {
-                    Debug.WriteLine($"[ImageCache] FEHLER beim Herunterladen für '{gameName}': {ex.Message}");
-                }
+                    try
+                    {
+                        var bitmap = new BitmapImage();
+                        var fileBytes = await File.ReadAllBytesAsync(localImagePath);
+                        using (var ms = new MemoryStream(fileBytes))
+                        {
+                            await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
+                        }
+
+                        card.Background = new ImageBrush { ImageSource = bitmap, Stretch = Stretch.UniformToFill };
+                        if (iconControl != null) iconControl.Visibility = Visibility.Collapsed;
+                        if (titleControl != null) titleControl.Text = searchResult.name; // Update the title with the official name
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[SteamGridDB] Error displaying the image for '{gameName}': {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SteamGridDB] A general error occurred in LoadCardImageAsync for '{gameName}': {ex.Message}");
             }
         }
 
@@ -4020,7 +4112,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
-            // Basis-Farbverlauf als Fallback erstellen
+            // This part remains unchanged
             Color avgColor = Color.FromArgb(255, 60, 60, 60);
             if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
             {
@@ -4031,9 +4123,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         if (iconBmp != null) avgColor = GetAverageColor(iconBmp);
                     }
                 }
-                catch { /* Ignorieren */ }
+                catch { /* Ignore */ }
             }
-
             var gradient = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0.5, 0),
@@ -4044,45 +4135,26 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
         }
             };
-
-            // --- NEUE STRUKTUR MIT GRID FÜR TEXT-OVERLAY ---
-
-            // 1. Das Grid, das alles enthalten wird
             var contentGrid = new Grid();
-
-            // 2. Das App-Icon (wird später bei Bedarf ausgeblendet)
             var iconImage = new Image
             {
-                Name = "IconImage", // Wichtig für späteren Zugriff
+                Name = "IconImage",
                 Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
                 Width = 64,
                 Height = 64,
                 HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-
-            // 3. Der dunkle Farbverlauf am unteren Rand für die Lesbarkeit
             var textBackground = new Border
             {
                 Height = 80,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new LinearGradientBrush
-                {
-                    StartPoint = new Windows.Foundation.Point(0.5, 0),
-                    EndPoint = new Windows.Foundation.Point(0.5, 1),
-                    GradientStops = new GradientStopCollection
-            {
-                new GradientStop { Color = Colors.Transparent, Offset = 0.0 },
-                new GradientStop { Color = Color.FromArgb(200, 0, 0, 0), Offset = 1.0 }
-            }
-                }
+                Background = new LinearGradientBrush { /* ... */ }
             };
-
-            // 4. Der TextBlock für den Titel
             var titleText = new TextBlock
             {
-                Name = "TitleText", // Wichtig für späteren Zugriff
-                Text = name, // Zuerst den Fenstertitel als Fallback verwenden
+                Name = "TitleText",
+                Text = name,
                 Foreground = new SolidColorBrush(Colors.White),
                 FontSize = 16,
                 Margin = new Thickness(10, 0, 10, 10),
@@ -4090,28 +4162,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 TextWrapping = TextWrapping.WrapWholeWords,
                 MaxLines = 2
             };
-
-            // Elemente zum Grid hinzufügen
             contentGrid.Children.Add(iconImage);
             contentGrid.Children.Add(textBackground);
             contentGrid.Children.Add(titleText);
-
-            // Die finale Karte erstellen
             var cardBorder = new Border
             {
                 Width = 220,
                 Height = 260,
-                Background = gradient, // Der farbige Verlauf als Hintergrund
+                Background = gradient,
                 CornerRadius = new CornerRadius(15),
                 Margin = new Thickness(10),
                 BorderThickness = new Thickness(1),
                 BorderBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)),
                 Tag = new CardTag { Process = proc, Hwnd = hwnd },
-                Child = contentGrid // Das Grid mit dem Inhalt ist jetzt das Child
+                Child = contentGrid
             };
 
-            // Asynchron das SteamGridDB-Bild laden
-            LoadCardImageAsync(cardBorder, name, exePath);
+            // *** CRITICAL CHANGE: Pass the UI elements directly to the async method ***
+            LoadCardImageAsync(cardBorder, iconImage, titleText, name, exePath);
 
             return cardBorder;
         }
