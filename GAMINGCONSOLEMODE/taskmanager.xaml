@@ -19,22 +19,22 @@ To display high-quality game covers on the task manager cards, a free API key fr
                 </TextBlock>
 
                 <HyperlinkButton Content="Get your free API Key from SteamGridDB.com" 
-             NavigateUri="https://www.steamgriddb.com/profile/preferences/api"
-             HorizontalAlignment="Center"
-                                 Background="Gray"/>
+               NavigateUri="https://www.steamgriddb.com/profile/preferences/api"
+               HorizontalAlignment="Center"
+                                       Background="Gray"/>
 
                 <TextBlock Text="API Key:" Margin="0,12,0,0"/>
                 <TextBox x:Name="SteamGridDbApiKeyBox" 
-     PlaceholderText="Paste your API key here" 
-     Padding="8"/>
+           PlaceholderText="Paste your API key here" 
+           Padding="8"/>
 
                 <Button x:Name="SaveApiKeyButton" 
-    Content="Save API Key" 
-    Click="SaveApiKeyButton_Click"
-    HorizontalAlignment="Stretch"
-    Background="#28A745"
-    Foreground="White"
-    Margin="0,12,0,0"/>
+        Content="Save API Key" 
+        Click="SaveApiKeyButton_Click"
+        HorizontalAlignment="Stretch"
+        Background="#28A745"
+        Foreground="White"
+        Margin="0,12,0,0"/>
 
                 <TextBlock HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Foreground="Gray" FontStyle="Italic" Margin="0,12,0,0">
 If no key is provided, running applications will show their default icon instead of a game cover.
@@ -42,7 +42,7 @@ If no key is provided, running applications will show their default icon instead
             </StackPanel>
 
             <ToggleSwitch x:Name="handheldtouchlauncher" VerticalAlignment="Center" HorizontalAlignment="Center" Toggled="handheldtouchlauncher_Toggled" Visibility="Collapsed"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16" Visibility="Visible">
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
 
@@ -54,6 +54,7 @@ If no key is provided, running applications will show their default icon instead
                             </Border>
                             <Button Name="SelectImage1" Click="SelectImage_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
                             <Button Name="SelectLink1" Click="SelectLink_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                            <TextBox x:Name="WorkDir1" PlaceholderText="Working Directory" FontSize="12" Padding="6" TextChanged="WorkDir_TextChanged"/>
                             <TextBox x:Name="Args1" PlaceholderText="Parameter" FontSize="12" Padding="6" TextChanged="Args_TextChanged"/>
                             <Button Name="Test1" Click="Test_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
                             <Button Name="Reset1" Click="Reset_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
@@ -65,6 +66,7 @@ If no key is provided, running applications will show their default icon instead
                             </Border>
                             <Button Name="SelectImage2" Click="SelectImage_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
                             <Button Name="SelectLink2" Click="SelectLink_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                            <TextBox x:Name="WorkDir2" PlaceholderText="Working Directory" FontSize="12" Padding="6" TextChanged="WorkDir_TextChanged"/>
                             <TextBox x:Name="Args2" PlaceholderText="Parameter" FontSize="12" Padding="6" TextChanged="Args_TextChanged"/>
                             <Button Name="Test2" Click="Test_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
                             <Button Name="Reset2" Click="Reset_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
@@ -76,6 +78,7 @@ If no key is provided, running applications will show their default icon instead
                             </Border>
                             <Button Name="SelectImage3" Click="SelectImage_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
                             <Button Name="SelectLink3" Click="SelectLink_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                            <TextBox x:Name="WorkDir3" PlaceholderText="Working Directory" FontSize="12" Padding="6" TextChanged="WorkDir_TextChanged"/>
                             <TextBox x:Name="Args3" PlaceholderText="Parameter" FontSize="12" Padding="6" TextChanged="Args_TextChanged"/>
                             <Button Name="Test3" Click="Test_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
                             <Button Name="Reset3" Click="Reset_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
@@ -87,6 +90,7 @@ If no key is provided, running applications will show their default icon instead
                             </Border>
                             <Button Name="SelectImage4" Click="SelectImage_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
                             <Button Name="SelectLink4" Click="SelectLink_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                            <TextBox x:Name="WorkDir4" PlaceholderText="Working Directory" FontSize="12" Padding="6" TextChanged="WorkDir_TextChanged"/>
                             <TextBox x:Name="Args4" PlaceholderText="Parameter" FontSize="12" Padding="6" TextChanged="Args_TextChanged"/>
                             <Button Name="Test4" Click="Test_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
                             <Button Name="Reset4" Click="Reset_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>
@@ -98,6 +102,7 @@ If no key is provided, running applications will show their default icon instead
                             </Border>
                             <Button Name="SelectImage5" Click="SelectImage_Click" FontSize="12" Padding="6" MinWidth="120" Content="📂 Image"/>
                             <Button Name="SelectLink5" Click="SelectLink_Click" FontSize="12" Padding="6" MinWidth="120" Content="🔗 Link"/>
+                            <TextBox x:Name="WorkDir5" PlaceholderText="Working Directory" FontSize="12" Padding="6" TextChanged="WorkDir_TextChanged"/>
                             <TextBox x:Name="Args5" PlaceholderText="Parameter" FontSize="12" Padding="6" TextChanged="Args_TextChanged"/>
                             <Button Name="Test5" Click="Test_Click" FontSize="12" Padding="6" MinWidth="120" Content="▶ Test" Background="#007ACC" Foreground="White"/>
                             <Button Name="Reset5" Click="Reset_Click" FontSize="12" Padding="6" MinWidth="120" Content="🗑 Reset" Background="#993333" Foreground="White"/>

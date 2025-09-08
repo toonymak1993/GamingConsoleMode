@@ -1,7 +1,11 @@
-﻿using System;
+﻿using Microsoft.UI.Xaml;
+using Microsoft.Windows.AppLifecycle;
+using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -13,28 +17,159 @@ namespace GAMINGCONSOLEMODE
         private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "settings.toml");
 
         private static readonly object _fileLock = new object();
+        // This is a helper class to show a traditional Win32 MessageBox.
+        // It's simpler for synchronous, blocking messages than using a ContentDialog.
+        public static class MessageBoxHelper
+        {
+            // Imports the user32.dll MessageBox function
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            private static extern int MessageBox(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
-        public static void FirstStart()
+            // Shows the message box
+            public static void Show(Window window, string text, string title)
+            {
+                // Gets the window handle (HWND) from the WinUI 3 window object
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+
+                // Calls the Win32 function
+                MessageBox(hwnd, text, title, 0); // 0 = MB_OK
+            }
+        }
+
+        /// <summary>
+        /// Ensures that a valid configuration file exists and cleans up obsolete files.
+        /// If the configuration needs to be created, it will trigger an application restart afterwards.
+        /// </summary>
+        /// <summary>
+        /// Ensures a valid and parseable configuration file exists.
+        /// If the file does not exist, is empty, whitespace, or syntactically invalid,
+        /// it will be deleted and regenerated, followed by an application restart.
+        /// </summary>
+        public static void FirstStart(Window window) // <-- MODIFIED: Takes a Window parameter
         {
             lock (_fileLock)
             {
-                if (!Directory.Exists(SettingsFolder))
+                // --- Clean up obsolete settings.json ---
+                try
                 {
-                    Directory.CreateDirectory(SettingsFolder);
-                    Console.WriteLine($"Settings folder created at: {SettingsFolder}");
+                    string oldJsonPath = Path.Combine(SettingsFolder, "settings.json");
+                    if (File.Exists(oldJsonPath))
+                    {
+                        File.Delete(oldJsonPath);
+                        // No message box needed here, this is a silent cleanup
+                    }
+                }
+                catch (Exception ex)
+                {
+                    //"An error occurred while deleting the old settings.json:\n{ex.Message}", "Cleanup Error");
+                }
+                //--- Clean up gcmcrew startmenu folder
+                try
+                {
+                    // Get the path to the user's Start Menu Programs folder dynamically
+                    string startMenuProgramsPath = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+
+                    // Combine it with the folder name you want to delete
+                    string folderToDeletePath = Path.Combine(startMenuProgramsPath, "GCMcrew");
+
+                    // Check if the folder exists
+                    if (Directory.Exists(folderToDeletePath))
+                    {
+                        // Delete the folder and all its contents (recursive: true)
+                        Directory.Delete(folderToDeletePath, true);
+                        Console.WriteLine($"Obsolete Start Menu folder deleted: {folderToDeletePath}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Show an error if deletion fails (e.g., due to permissions)
+                    MessageBoxHelper.Show(window, $"An error occurred while deleting the GCMcrew Start Menu folder:\n{ex.Message}", "Cleanup Error");
                 }
 
+                // --- Ensure the settings directory exists ---
+                Directory.CreateDirectory(SettingsFolder);
+
+                // --- Main Validation Logic ---
                 if (!File.Exists(SettingsFilePath))
                 {
-                    initialconfig();
+                    RegenerateConfigAndRestart(window); 
                 }
                 else
                 {
-                    Console.WriteLine("Settings file already exists.");
+                    try
+                    {
+                        string content = File.ReadAllText(SettingsFilePath);
+                        if (string.IsNullOrWhiteSpace(content))
+                        {
+                            throw new Exception("File is empty or contains only whitespace.");
+                        }
+                        var model = Toml.ToModel(content);
+                        Console.WriteLine("Valid and parseable settings file found.");
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBoxHelper.Show(window, $"The settings file is corrupt or invalid and will be recreated.\n\nError: {ex.Message}", "Configuration Error");
+                        RegenerateConfigAndRestart(window); // <-- MODIFIED: Passes the window
+                    }
                 }
             }
         }
 
+        /// <summary>
+        /// Helper method to handle the process of deleting, re-creating, and restarting.
+        /// </summary>
+        private static void RegenerateConfigAndRestart(Window window) // <-- MODIFIED: Takes a Window parameter
+        {
+            if (File.Exists(SettingsFilePath))
+            {
+                File.Delete(SettingsFilePath);
+            }
+
+            initialconfig();
+
+            // --- Restart after initial configuration with a MessageBox ---
+            MessageBoxHelper.Show(window, "The initial setup is complete. The application will now restart to apply the new settings.", "Restart Required");
+            RestartApplication();
+        }
+
+        /// <summary>
+        /// Helper method to handle the process of deleting, re-creating, and restarting.
+        /// </summary>
+        private static void RegenerateConfigAndRestart()
+        {
+            // Ensure the file is deleted before creating a new one.
+            if (File.Exists(SettingsFilePath))
+            {
+                File.Delete(SettingsFilePath);
+            }
+
+            // Create the default configuration.
+            initialconfig();
+
+            // --- Restart after initial configuration ---
+            Console.WriteLine("Initial setup is complete. The application will now restart.");
+            RestartApplication();
+        }
+
+        /// <summary>
+        /// Startet die Anwendung neu.
+        /// </summary>
+        public static void RestartApplication()
+        {
+            try
+            {
+                // Startet die Anwendung neu und beendet die aktuelle Instanz.
+                // Der Parameter kann für Startargumente verwendet werden, wir brauchen hier aber keine.
+                AppInstance.Restart(string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"restart error {ex.Message}");
+                // Optional: Dem Benutzer eine Fehlermeldung anzeigen.
+                // WICHTIG: Da wir hier keine Referenz auf das UI-Fenster haben, 
+                // ist eine MessageBox schwierig. Console-Logging ist hier sicherer.
+            }
+        }
         public static void Save(string key, object value)
         {
             lock (_fileLock)

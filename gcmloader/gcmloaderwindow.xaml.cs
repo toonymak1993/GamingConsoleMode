@@ -2,6 +2,7 @@
 using Discord.WebSocket;
 using GAMINGCONSOLEMODE;
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -156,6 +157,7 @@ namespace gcmloader
         #endregion dsteamgriddb
 
         private List<Border> _launcherAreaButtons;
+        private List<ProcessData> _latestProcessData = new();
         private int _selectedLauncherAreaIndex = 0;
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -664,11 +666,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _steamGridHelper = new SteamGridDBHelper(null);
                 Debug.WriteLine("[WARN] SteamGridDB API key setting does not exist. Feature is disabled.");
             }
-
+          
             MinimizeAllWindows();
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
-            _launcherAreaButtons = new List<Border> { LauncherCard, DiscordCard };
+            LoadDynamicLauncherCards();
             _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
 
             // Catch unhandled exceptions
@@ -704,8 +706,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         }
 
-    
-
+       
+     
         private void perfectsettings()
         {
             // Usewinpartstartapps
@@ -3190,7 +3192,313 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         #endregion start
         #region TaskManager
+        /// <summary>
+        /// Animates the opacity of a UIElement to make it fade in or out.
+        /// </summary>
+        /// <param name="element">The UI element to animate.</param>
+        /// <param name="targetOpacity">The target opacity (0.0 for fade out, 1.0 for fade in).</param>
+        /// <param name="duration">The duration of the animation.</param>
+        /// <param name="delay">An optional delay before the animation starts.</param>
+        /// <summary>
+        /// Animates the opacity of a UIElement to make it fade in or out.
+        /// </summary>
+        private void AnimateCardVisibility(UIElement element, float toOpacity, TimeSpan duration, TimeSpan delay = default)
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var compositor = visual.Compositor;
 
+            // Create the fade animation
+            var opacityAnimation = compositor.CreateScalarKeyFrameAnimation();
+            opacityAnimation.Duration = duration;
+            opacityAnimation.DelayTime = delay;
+            opacityAnimation.InsertKeyFrame(1.0f, toOpacity, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
+
+            // If we are fading in, make the element visible before the animation starts.
+            if (toOpacity > 0)
+            {
+                element.Visibility = Visibility.Visible;
+                // The animation will start from the visual's current opacity, which should be 0.
+            }
+
+            // Create a batch to know when the animation is complete
+            var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+            visual.StartAnimation("Opacity", opacityAnimation);
+            batch.End();
+
+            // When the animation batch completes...
+            batch.Completed += (s, e) =>
+            {
+                // If we faded out, collapse the element to remove it from the layout.
+                // IMPORTANT: This event runs on a background thread, so we must dispatch back to the UI thread
+                // to change UI properties like Visibility.
+                if (toOpacity == 0)
+                {
+                    element.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        element.Visibility = Visibility.Collapsed;
+                    });
+                }
+            };
+        }
+
+        private async Task RefreshCardsUIAsync()
+        {
+            // Fetch the latest process list in a background thread.
+            var processDataList = await Task.Run(() =>
+            {
+                var dataList = new List<ProcessData>();
+                var seenHwnds = new HashSet<IntPtr>();
+
+                EnumWindows((hWnd, lParam) =>
+                {
+                    // This is the same reliable process-finding logic as before.
+                    if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
+                        return true;
+                    int textLen = GetWindowTextLength(hWnd);
+                    if (textLen == 0) return true;
+                    var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
+                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
+                    if (IsCloaked(hWnd)) return true;
+
+                    var titleBuilder = new StringBuilder(textLen + 1);
+                    GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+                    string windowTitle = titleBuilder.ToString();
+
+                    if (string.IsNullOrWhiteSpace(windowTitle) ||
+                        _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+
+                    Process proc = null;
+                    string exePath = null;
+                    try
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        if (pid != 0)
+                        {
+                            proc = Process.GetProcessById((int)pid);
+                            if (proc.Id == Process.GetCurrentProcess().Id) return true;
+                            exePath = proc.MainModule?.FileName;
+                        }
+                    }
+                    catch { /* Ignore */ }
+
+                    if (!seenHwnds.Add(hWnd)) return true;
+
+                    dataList.Add(new ProcessData
+                    {
+                        ProductName = windowTitle,
+                        Hwnd = hWnd,
+                        Proc = proc,
+                        ExePath = exePath
+                    });
+
+                    return true;
+                }, IntPtr.Zero);
+
+                return dataList;
+            });
+
+            // Now, update the UI with this fresh data.
+            UpdateUiFromData(processDataList);
+        }
+
+        private void UpdateLayoutForFocus()
+        {
+            if (_currentFocusArea == FocusArea.Launcher)
+            {
+                // This part for the Launcher focus remains unchanged.
+                LauncherColumn.Width = new GridLength(1, GridUnitType.Star);
+                CardsColumn.Width = new GridLength(0);
+                ColumnSeparator.Visibility = Visibility.Collapsed;
+
+                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+                {
+                    var card = _launcherAreaButtons[i];
+                    if (i > 1)
+                    {
+                        AnimateCardVisibility(card, 1.0f, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(50 * (i - 1)));
+                    }
+                }
+            }
+            else
+            {
+                // This part for Cards/TopButtons focus is now updated.
+                LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
+                CardsColumn.Width = new GridLength(1, GridUnitType.Star);
+                ColumnSeparator.Visibility = Visibility.Visible;
+
+                // *** THIS IS THE KEY CHANGE ***
+                // Instead of using potentially stale data, we trigger a fresh UI refresh.
+                // We use "_ = " to call the async method without waiting for it, keeping the UI responsive.
+                _ = RefreshCardsUIAsync();
+
+                // This loop for hiding extra launcher cards remains unchanged.
+                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+                {
+                    var card = _launcherAreaButtons[i];
+                    if (i > 1)
+                    {
+                        AnimateCardVisibility(card, 0.0f, TimeSpan.FromMilliseconds(150));
+                    }
+                }
+            }
+        }
+
+        public class LauncherCardItem
+        {
+            public string Name { get; set; }
+            public string ImagePath { get; set; }
+            public string ExePath { get; set; }
+            public string Arguments { get; set; }
+            // We use Action<...> to pass click methods directly.
+            public Action<object, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs> TapAction { get; set; }
+        }
+        /// <summary>
+        /// Loads all configured launcher apps from the settings,
+        /// creates the UI cards, and adds them to the launcher area.
+        /// </summary>
+        private void LoadDynamicLauncherCards()
+        {
+            // First, we initialize the list for gamepad navigation
+            _launcherAreaButtons = new List<Border>();
+
+            // 1. Create and add the main launcher card (Steam, Playnite, etc.)
+            var mainLauncherItem = new LauncherCardItem
+            {
+                Name = "Main Launcher",
+                TapAction = (s, e) => SwitchToConfiguredLauncher()
+            };
+            var mainLauncherCard = CreateLauncherCard(mainLauncherItem);
+            LauncherAreaPanel.Children.Add(mainLauncherCard);
+            _launcherAreaButtons.Add(mainLauncherCard);
+
+            // 2. Create and add the Discord card
+            var discordItem = new LauncherCardItem
+            {
+                Name = "Discord",
+                ImagePath = "ms-appx:///Assets/discord.png", // Make sure this icon is in your Assets folder!
+                TapAction = (s, e) =>
+                {
+                    MakeSelfNonTopmost();
+                    StartDiscord();
+                    PlayActivationSound();
+                }
+            };
+            var discordCard = CreateLauncherCard(discordItem);
+            LauncherAreaPanel.Children.Add(discordCard);
+            _launcherAreaButtons.Add(discordCard);
+
+            // 3. Load and add the 5 custom app slots from settings.toml
+            for (int i = 1; i <= 5; i++)
+            {
+                try
+                {
+                    string exePath = AppSettings.Load<string>($"button{i}link");
+                    string imagePath = AppSettings.Load<string>($"button{i}image");
+                    string args = AppSettings.Load<string>($"button{i}args") ?? "";
+
+                    // Only add if EXE and image are valid and exist
+                    if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath) &&
+                        !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    {
+                        var customItem = new LauncherCardItem
+                        {
+                            Name = $"Custom App {i}",
+                            ImagePath = imagePath,
+                            ExePath = exePath,
+                            Arguments = args,
+                            TapAction = (s, e) =>
+                            {
+                                MakeSelfNonTopmost();
+                                try
+                                {
+                                    Process.Start(new ProcessStartInfo(exePath)
+                                    {
+                                        Arguments = args,
+                                        UseShellExecute = true
+                                    });
+                                    PlayActivationSound();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[ERROR] Failed to start custom app {i}: {ex.Message}");
+                                }
+                            }
+                        };
+                        var customCard = CreateLauncherCard(customItem);
+                        LauncherAreaPanel.Children.Add(customCard);
+                        _launcherAreaButtons.Add(customCard);
+                    }
+                }
+                catch (Exception)
+                {
+                    // Setting not found, just ignore it and continue with the next slot.
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Creates a single, clickable launcher card based on the provided data.
+        /// </summary>
+        /// <param name="item">The data for the card to be created.</param>
+        /// <returns>A Border element representing the final card.</returns>
+        private Border CreateLauncherCard(LauncherCardItem item)
+        {
+            // Determine the card size based on its name
+            double cardWidth = (item.Name == "Main Launcher") ? 300 : 150;
+            double cardHeight = (item.Name == "Main Launcher") ? 250 : 180;
+
+            // Create the card's content (icon and text)
+            UIElement cardContent;
+            if (item.Name == "Main Launcher")
+            {
+                cardContent = new StackPanel
+                {
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Spacing = 15,
+                    Children = {
+                new FontIcon { Glyph = "\uE80F", FontSize = 48, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) },
+                new TextBlock { Text = "Launcher", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) }
+            }
+                };
+            }
+            else
+            {
+                cardContent = new Image
+                {
+                    Source = new BitmapImage(new Uri(item.ImagePath)),
+                    Width = 80, // Adjusted size for a uniform look
+                    Height = 80,
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+            }
+
+            var cardBorder = new Border
+            {
+                Width = cardWidth,
+                Height = cardHeight,
+                Background = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), // #33FFFFFF
+                CornerRadius = new CornerRadius(20),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray),
+                Child = cardContent,
+                Tag = item // *** THIS IS THE KEY CHANGE *** We store the item data directly on the card.
+            };
+
+            // Add the Tapped event handler for mouse/touch
+            if (item.TapAction != null)
+            {
+                cardBorder.Tapped += (s, e) => item.TapAction(s, e);
+            }
+
+            return cardBorder;
+        }
 
         private void StartAutoTaskRefresh()
         {
@@ -3198,28 +3506,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
-                if (!IsWindowInForeground()) return;
-
-                var processDataList = await Task.Run(() =>
+                // This timer now ONLY gathers data in the background. It does not touch the UI.
+                _latestProcessData = await Task.Run(() =>
                 {
                     var dataList = new List<ProcessData>();
                     var seenHwnds = new HashSet<IntPtr>();
 
                     EnumWindows((hWnd, lParam) =>
                     {
+                        // This entire EnumWindows logic remains unchanged.
                         if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
                             return true;
-
                         int textLen = GetWindowTextLength(hWnd);
-                        if (textLen == 0)
-                            return true;
-
+                        if (textLen == 0) return true;
                         var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
-                        if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW))
-                            return true;
-
-                        if (IsCloaked(hWnd))
-                            return true;
+                        if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
+                        if (IsCloaked(hWnd)) return true;
 
                         var titleBuilder = new StringBuilder(textLen + 1);
                         GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
@@ -3243,11 +3545,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 exePath = proc.MainModule?.FileName;
                             }
                         }
-                        catch
-                        {
-                            proc = null;
-                            exePath = null;
-                        }
+                        catch { /* Ignore processes we can't access */ }
 
                         if (!seenHwnds.Add(hWnd)) return true;
 
@@ -3265,7 +3563,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     return dataList;
                 });
 
-                UpdateUiFromData(processDataList);
+                // The call to UpdateUiFromData(processDataList) has been REMOVED from the timer.
             };
             _taskRefreshTimer.Start();
         }
@@ -3315,88 +3613,127 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             return d[n, m];
         }
-        private async void LoadCardImageAsync(Border card, string gameName, string exePath)
+
+
+        private async Task ShowDebugDialogAsync(string title, string message)
         {
-            // Stufe 1: Keyword-Blacklist-Filter
-            if (_nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            var dialog = new ContentDialog
+            {
+                // CORRECTED: Get the XamlRoot from the Window's Content property, not the Window itself.
+                XamlRoot = this.Content.XamlRoot,
+                Title = "[DEBUG] " + title,
+                Content = message,
+                CloseButtonText = "Weiter"
+            };
+            await dialog.ShowAsync();
+        }
+        private string CleanGameNameForSearch(string rawName)
+        {
+            if (string.IsNullOrEmpty(rawName)) return string.Empty;
+
+            // Remove common trademark symbols
+            string cleanedName = rawName.Replace("™", "").Replace("®", "").Replace("©", "");
+
+            // Remove text in brackets (e.g., "(64-bit)") or parentheses
+            cleanedName = System.Text.RegularExpressions.Regex.Replace(cleanedName, @"\s*[\(\[].*?[\)\]]", "");
+
+            // Remove common version patterns like "v1.2.3" or "Build 4567"
+            cleanedName = System.Text.RegularExpressions.Regex.Replace(cleanedName, @"\s*v\d+(\.\d+)*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            cleanedName = System.Text.RegularExpressions.Regex.Replace(cleanedName, @"\s*Build\s*\d+", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            // Trim any resulting whitespace from the ends
+            return cleanedName.Trim();
+        }
+        // In gcmloader/MainWindow.xaml.cs
+
+
+
+        private async void LoadCardImageAsync(Border card, Image iconControl, TextBlock titleControl, string gameName, string exePath)
+        {
+            // Initial safety checks
+            if (string.IsNullOrEmpty(exePath) || _nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
 
-            // Suche im Cache oder über die API
-            SearchResult searchResult = null;
-            if (_gameIdCache.ContainsKey(gameName))
+            try
             {
-                searchResult = _gameIdCache[gameName];
-            }
-            else
-            {
-                searchResult = await _steamGridHelper.SearchForGameIdAsync(gameName);
-                _gameIdCache[gameName] = searchResult;
-            }
+                // 1. Clean up the game name for the search
+                string cleanedGameName = CleanGameNameForSearch(gameName);
+                if (string.IsNullOrEmpty(cleanedGameName)) return;
 
-            if (searchResult == null)
-            {
-                return;
-            }
-
-            // Stufe 2: Ähnlichkeits-Filter
-            double similarity = CalculateSimilarity(gameName, searchResult.name);
-            if (similarity < 0.5)
-            {
-                return;
-            }
-
-            // Alle Filter bestanden. Lade das Bild.
-            var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
-
-            if (!string.IsNullOrEmpty(imageUrl))
-            {
-                try
+                // 2. Get the game ID from SteamGridDB (with caching)
+                SearchResult searchResult = null;
+                if (_gameIdCache.ContainsKey(cleanedGameName))
                 {
-                    string localImagePath = Path.Combine(_imageCachePath, $"{searchResult.id}.jpg");
-                    if (!File.Exists(localImagePath))
+                    searchResult = _gameIdCache[cleanedGameName];
+                }
+                else
+                {
+                    searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedGameName);
+                    _gameIdCache[cleanedGameName] = searchResult; // Save the result to the cache (even if it's null)
+                }
+
+                // Abort if no result was found
+                if (searchResult == null)
+                {
+                    Debug.WriteLine($"[SteamGridDB] No result found for '{cleanedGameName}'.");
+                    return;
+                }
+
+                // 3. Safety check: Is the found game similar enough to the original?
+                double similarity = CalculateSimilarity(gameName, searchResult.name);
+                if (similarity < 0.5)
+                {
+                    Debug.WriteLine($"[SteamGridDB] Similarity between '{gameName}' and '{searchResult.name}' too low ({similarity:P2}). Aborting.");
+                    return;
+                }
+
+                // 4. Get the image URL for the found game
+                var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
+                if (string.IsNullOrEmpty(imageUrl))
+                {
+                    Debug.WriteLine($"[SteamGridDB] No image URL found for game ID '{searchResult.id}'.");
+                    return;
+                }
+
+                // 5. Download image, cache it, and apply it to the card
+                string localImagePath = Path.Combine(_imageCachePath, $"{searchResult.id}.jpg");
+
+                if (!File.Exists(localImagePath))
+                {
+                    using (var client = new HttpClient())
                     {
-                        using (var client = new HttpClient())
-                        {
-                            var imageData = await client.GetByteArrayAsync(imageUrl);
-                            await File.WriteAllBytesAsync(localImagePath, imageData);
-                        }
+                        var imageData = await client.GetByteArrayAsync(imageUrl);
+                        await File.WriteAllBytesAsync(localImagePath, imageData);
                     }
-
-                    // --- UI-Update auf dem UI-Thread durchführen ---
-                    card.DispatcherQueue.TryEnqueue(() =>
-                    {
-                        // 1. Hintergrund der Karte mit dem SteamGridDB-Bild ersetzen
-                        card.Background = new ImageBrush
-                        {
-                            ImageSource = new BitmapImage(new Uri(localImagePath)),
-                            Stretch = Stretch.UniformToFill
-                        };
-
-                        // 2. Zugriff auf das Grid und seine Elemente
-                        if (card.Child is Grid contentGrid)
-                        {
-                            // 3. Das ursprüngliche App-Icon ausblenden
-                            var iconImage = contentGrid.Children.OfType<Image>().FirstOrDefault(img => img.Name == "IconImage");
-                            if (iconImage != null)
-                            {
-                                iconImage.Visibility = Visibility.Collapsed;
-                            }
-
-                            // 4. Den Text mit dem präziseren Spieletitel von SteamGridDB aktualisieren
-                            var titleText = contentGrid.Children.OfType<TextBlock>().FirstOrDefault(tb => tb.Name == "TitleText");
-                            if (titleText != null)
-                            {
-                                titleText.Text = searchResult.name;
-                            }
-                        }
-                    });
                 }
-                catch (Exception ex)
+
+                // Important: Dispatch the UI update to the UI thread
+                card.DispatcherQueue.TryEnqueue(async () =>
                 {
-                    Debug.WriteLine($"[ImageCache] FEHLER beim Herunterladen für '{gameName}': {ex.Message}");
-                }
+                    try
+                    {
+                        var bitmap = new BitmapImage();
+                        var fileBytes = await File.ReadAllBytesAsync(localImagePath);
+                        using (var ms = new MemoryStream(fileBytes))
+                        {
+                            await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
+                        }
+
+                        card.Background = new ImageBrush { ImageSource = bitmap, Stretch = Stretch.UniformToFill };
+                        if (iconControl != null) iconControl.Visibility = Visibility.Collapsed;
+                        if (titleControl != null) titleControl.Text = searchResult.name; // Update the title with the official name
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[SteamGridDB] Error displaying the image for '{gameName}': {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SteamGridDB] A general error occurred in LoadCardImageAsync for '{gameName}': {ex.Message}");
             }
         }
 
@@ -3775,7 +4112,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
-            // Basis-Farbverlauf als Fallback erstellen
+            // This part remains unchanged
             Color avgColor = Color.FromArgb(255, 60, 60, 60);
             if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
             {
@@ -3786,9 +4123,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         if (iconBmp != null) avgColor = GetAverageColor(iconBmp);
                     }
                 }
-                catch { /* Ignorieren */ }
+                catch { /* Ignore */ }
             }
-
             var gradient = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0.5, 0),
@@ -3799,45 +4135,26 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
         }
             };
-
-            // --- NEUE STRUKTUR MIT GRID FÜR TEXT-OVERLAY ---
-
-            // 1. Das Grid, das alles enthalten wird
             var contentGrid = new Grid();
-
-            // 2. Das App-Icon (wird später bei Bedarf ausgeblendet)
             var iconImage = new Image
             {
-                Name = "IconImage", // Wichtig für späteren Zugriff
+                Name = "IconImage",
                 Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
                 Width = 64,
                 Height = 64,
                 HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-
-            // 3. Der dunkle Farbverlauf am unteren Rand für die Lesbarkeit
             var textBackground = new Border
             {
                 Height = 80,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new LinearGradientBrush
-                {
-                    StartPoint = new Windows.Foundation.Point(0.5, 0),
-                    EndPoint = new Windows.Foundation.Point(0.5, 1),
-                    GradientStops = new GradientStopCollection
-            {
-                new GradientStop { Color = Colors.Transparent, Offset = 0.0 },
-                new GradientStop { Color = Color.FromArgb(200, 0, 0, 0), Offset = 1.0 }
-            }
-                }
+                Background = new LinearGradientBrush { /* ... */ }
             };
-
-            // 4. Der TextBlock für den Titel
             var titleText = new TextBlock
             {
-                Name = "TitleText", // Wichtig für späteren Zugriff
-                Text = name, // Zuerst den Fenstertitel als Fallback verwenden
+                Name = "TitleText",
+                Text = name,
                 Foreground = new SolidColorBrush(Colors.White),
                 FontSize = 16,
                 Margin = new Thickness(10, 0, 10, 10),
@@ -3845,28 +4162,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 TextWrapping = TextWrapping.WrapWholeWords,
                 MaxLines = 2
             };
-
-            // Elemente zum Grid hinzufügen
             contentGrid.Children.Add(iconImage);
             contentGrid.Children.Add(textBackground);
             contentGrid.Children.Add(titleText);
-
-            // Die finale Karte erstellen
             var cardBorder = new Border
             {
                 Width = 220,
                 Height = 260,
-                Background = gradient, // Der farbige Verlauf als Hintergrund
+                Background = gradient,
                 CornerRadius = new CornerRadius(15),
                 Margin = new Thickness(10),
                 BorderThickness = new Thickness(1),
                 BorderBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)),
                 Tag = new CardTag { Process = proc, Hwnd = hwnd },
-                Child = contentGrid // Das Grid mit dem Inhalt ist jetzt das Child
+                Child = contentGrid
             };
 
-            // Asynchron das SteamGridDB-Bild laden
-            LoadCardImageAsync(cardBorder, name, exePath);
+            // *** CRITICAL CHANGE: Pass the UI elements directly to the async method ***
+            LoadCardImageAsync(cardBorder, iconImage, titleText, name, exePath);
 
             return cardBorder;
         }
@@ -4647,6 +4960,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return;
             }
 
+            // --- Navigation Logic ---
+
+            // This is the existing logic for the Right Bumper (RB) to cycle forwards.
             if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
             {
                 switch (_currentFocusArea)
@@ -4655,6 +4971,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
                 }
+                // Resetting indexes and updating UI is necessary after every area switch.
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
                 _selectedLauncherAreaIndex = 0;
@@ -4662,17 +4979,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 PlayNavigationSound();
             }
 
+            // *** NEW LOGIC FOR LEFT BUMPER (LB) ***
+            // This handles cycling backwards through the focus areas.
+            if (IsNewButtonPress(GamepadButtonFlags.LeftShoulder, currentButtons))
+            {
+                switch (_currentFocusArea)
+                {
+                    case FocusArea.Launcher: _currentFocusArea = FocusArea.TopButtons; break; // Go backwards from Launcher to TopButtons
+                    case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;    // Go backwards from Cards to Launcher
+                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;   // Go backwards from TopButtons to Cards
+                }
+                // Resetting indexes and updating UI is the same as for RB
+                _selectedCardIndex = 0;
+                _selectedTopButtonIndex = 0;
+                _selectedLauncherAreaIndex = 0;
+                UpdateVisualFocus();
+                PlayNavigationSound();
+            }
+
+            // The rest of the D-Pad and A/B button logic remains exactly the same.
             if (_currentFocusArea == FocusArea.Launcher)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
-                    _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
+                    if (_launcherAreaButtons.Any())
+                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
                 else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
-                    _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
+                    if (_launcherAreaButtons.Any())
+                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
@@ -4681,13 +5019,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
-                    _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
+                    if (_topButtons.Any())
+                        _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
                 else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
-                    _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
+                    if (_topButtons.Any())
+                        _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
@@ -4710,15 +5050,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
 
+            // --- Action Logic (A and B buttons) ---
             if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
             {
                 if (_currentFocusArea == FocusArea.Launcher)
                 {
-                    if (_selectedLauncherAreaIndex == 0) LauncherCard_Tapped(null, null);
-                    else if (_selectedLauncherAreaIndex == 1) DiscordCard_Tapped(null, null);
+                    if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count)
+                    {
+                        var selectedCard = _launcherAreaButtons[_selectedLauncherAreaIndex];
+                        if (selectedCard.Tag is LauncherCardItem item)
+                        {
+                            item.TapAction?.Invoke(selectedCard, null);
+                        }
+                    }
                 }
-                else if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, true);
-                else if (_currentFocusArea == FocusArea.TopButtons) ClickSelectedTopButton();
+                else if (_currentFocusArea == FocusArea.Cards)
+                {
+                    TriggerCardAction(_selectedCardIndex, true);
+                }
+                else if (_currentFocusArea == FocusArea.TopButtons)
+                {
+                    ClickSelectedTopButton();
+                }
                 PlayActivationSound();
             }
 
@@ -4734,9 +5087,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Aktualisiert die UI performant, indem nur das alte und neue Element geändert wird.
         /// </summary>
+        // In gcmloader/MainWindow.xaml.cs
+
+        /// <summary>
+        /// Updates the UI performantly by only changing the old and new focused elements.
+        /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
-            // Alle Elemente zurücksetzen
+            // *** ADDED: Call the new layout method every time the focus changes ***
+            UpdateLayoutForFocus();
+
+            // Reset all elements
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
             _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
             for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
@@ -4744,7 +5105,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
             }
 
-            // Aktuelles Element hervorheben
+            // Highlight the currently focused element
             if (_currentFocusArea == FocusArea.Launcher)
             {
                 var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
@@ -4778,25 +5139,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void AnimateScale(UIElement element, bool isSelected)
         {
+            // Ensure a CompositeTransform exists, creating one if it doesn't.
+            // This prevents conflicts with other animations.
+            if (element.RenderTransform is not CompositeTransform)
+            {
+                element.RenderTransform = new CompositeTransform();
+            }
+
             var visual = ElementCompositionPreview.GetElementVisual(element);
             var compositor = visual.Compositor;
-            var targetScale = isSelected ? new Vector3(1.04f, 1.04f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
+            var targetScale = isSelected ? new Vector3(1.05f, 1.05f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
 
             var scaleAnimation = compositor.CreateVector3KeyFrameAnimation();
             scaleAnimation.Duration = TimeSpan.FromMilliseconds(250);
             scaleAnimation.InsertKeyFrame(1.0f, targetScale, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
 
-            // ENTFERNT: Die langsame CenterPoint-Berechnung für maximale Performance.
-            // Die Animation startet jetzt von der oberen linken Ecke.
+            // Correctly set the center point for the scaling animation
+            if (element is FrameworkElement fe)
+            {
+                visual.CenterPoint = new Vector3((float)fe.ActualWidth / 2, (float)fe.ActualHeight / 2, 0f);
+            }
 
             visual.StartAnimation("Scale", scaleAnimation);
         }
 
-        /// <summary>
-        /// Verarbeitet alle globalen Gamepad-Shortcuts.
-        /// </summary>
-     
-      
+        
+
+
 
         /// <summary>
         /// Führt die Klick-Aktion für den aktuell ausgewählten oberen Button aus.

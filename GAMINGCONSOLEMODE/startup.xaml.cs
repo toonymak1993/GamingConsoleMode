@@ -974,15 +974,11 @@ namespace GAMINGCONSOLEMODE
                 // Get playback devices
                 foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, NAudio.CoreAudioApi.DeviceState.Active))
                 {
-                    if (discord == true)
-                    {
-                        // Geräte-Namen zur ComboBox hinzufügen
-                    }
-                    else if (preaudio == true)
-                    {
+                    
+                    
                         preaudio_end.Items.Add(device.FriendlyName);
                         preaudio_start.Items.Add(device.FriendlyName);
-                    }
+                    
 
                 }
 
@@ -1767,7 +1763,7 @@ namespace GAMINGCONSOLEMODE
         {
             try
             {
-                string sourcePath = @"C:\Program Files (x86)\GCM\GCM\functions\config.toml";
+                string sourcePath = @"C:\Program Files (x86)\GCM\functions\config.toml";
 
                 if (!File.Exists(sourcePath))
                 {
@@ -1782,6 +1778,7 @@ namespace GAMINGCONSOLEMODE
 
                 File.Copy(sourcePath, targetPath, true);
 
+                AppSettings.Save("useboilr", true);
                 return $"✅ BoilR config.toml copied successfully:\n{targetPath}";
             }
             catch (Exception ex)
