@@ -60,60 +60,39 @@
                 </Grid>
             </Border>
 
-            <Grid VerticalAlignment="Bottom"    
-                  Height="420"
-                  HorizontalAlignment="Stretch">
+            <Grid VerticalAlignment="Bottom"      
+      Height="420"
+      HorizontalAlignment="Stretch">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="LauncherColumn" Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition x:Name="CardsColumn" Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" Orientation="Horizontal"    
-                            VerticalAlignment="Center" HorizontalAlignment="Center" Margin="60,0,0,0">
-
-                    <Border x:Name="LauncherCard"
-                            Width="300" Height="250"
-                            Background="#33FFFFFF"
-                            CornerRadius="20"
-                            BorderBrush="Gray"
-                            BorderThickness="1"
-                            Tapped="LauncherCard_Tapped">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
-                            <FontIcon Glyph="&#xE80F;" FontSize="48" Foreground="White"/>
-                            <TextBlock Text="Launcher" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
-                        </StackPanel>
-                    </Border>
-
-                    <Border x:Name="DiscordCard"
-                            Width="150" Height="180"
-                            Background="#337289DA"
-                            CornerRadius="20"
-                            Margin="20,0,0,0"
-                            Tapped="DiscordCard_Tapped">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
-                            <Image Source="Assets/discord.png" Width="64" Height="64"/>
-                            <TextBlock Text="Discord" FontSize="20" FontWeight="SemiBold" Foreground="White"/>
-                        </StackPanel>
-                    </Border>
-
+                <StackPanel x:Name="LauncherAreaPanel" 
+                Grid.Column="0" 
+                Orientation="Horizontal"
+                Spacing="10"
+                VerticalAlignment="Center" 
+                HorizontalAlignment="Left" 
+                Margin="60,0,0,0">
                 </StackPanel>
 
-                <Rectangle Grid.Column="1"
-                           Width="2"
-                           Fill="#55FFFFFF"
-                           Height="200"
-                           RadiusX="1" RadiusY="1"
-                           VerticalAlignment="Center"
-                           Margin="40,0,40,0"/>
+                <Rectangle x:Name="ColumnSeparator" Grid.Column="1"
+               Width="2"
+               Fill="#55FFFFFF"
+               Height="200"
+               RadiusX="1" RadiusY="1"
+               VerticalAlignment="Center"
+               Margin="40,0,40,0"/>
 
                 <ScrollViewer x:Name="ProgramScrollViewer"
-                              Grid.Column="2"
-                              VerticalScrollBarVisibility="Disabled"
-                              VerticalAlignment="Center"
-                              Padding="0,0,60,0"
-                              HorizontalScrollMode="Enabled"    
-                              HorizontalScrollBarVisibility="Hidden">
+                  Grid.Column="2"
+                  VerticalScrollBarVisibility="Disabled"
+                  VerticalAlignment="Center"
+                  Padding="0,0,60,0"
+                  HorizontalScrollMode="Enabled"    
+                  HorizontalScrollBarVisibility="Hidden">
                     <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
                 </ScrollViewer>
             </Grid>
@@ -137,8 +116,12 @@
                         <TextBlock Text="Close" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                        <TextBlock Text="LB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
+                        <TextBlock Text="Area back" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
                         <TextBlock Text="RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                        <TextBlock Text="Switch Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="Area forth" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
             </Border>

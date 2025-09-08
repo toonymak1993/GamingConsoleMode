@@ -2,6 +2,7 @@
 using Discord.WebSocket;
 using GAMINGCONSOLEMODE;
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -664,11 +665,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _steamGridHelper = new SteamGridDBHelper(null);
                 Debug.WriteLine("[WARN] SteamGridDB API key setting does not exist. Feature is disabled.");
             }
-
+          
             MinimizeAllWindows();
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
-            _launcherAreaButtons = new List<Border> { LauncherCard, DiscordCard };
+            LoadDynamicLauncherCards();
             _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
 
             // Catch unhandled exceptions
@@ -704,8 +705,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         }
 
-    
-
+       
+     
         private void perfectsettings()
         {
             // Usewinpartstartapps
@@ -3190,7 +3191,250 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         #endregion start
         #region TaskManager
+        /// <summary>
+        /// Animates the opacity of a UIElement to make it fade in or out.
+        /// </summary>
+        /// <param name="element">The UI element to animate.</param>
+        /// <param name="targetOpacity">The target opacity (0.0 for fade out, 1.0 for fade in).</param>
+        /// <param name="duration">The duration of the animation.</param>
+        /// <param name="delay">An optional delay before the animation starts.</param>
+        /// <summary>
+        /// Animates the opacity of a UIElement to make it fade in or out.
+        /// </summary>
+        private void AnimateCardVisibility(UIElement element, float toOpacity, TimeSpan duration, TimeSpan delay = default)
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var compositor = visual.Compositor;
 
+            // Create the fade animation
+            var opacityAnimation = compositor.CreateScalarKeyFrameAnimation();
+            opacityAnimation.Duration = duration;
+            opacityAnimation.DelayTime = delay;
+            opacityAnimation.InsertKeyFrame(1.0f, toOpacity, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
+
+            // If we are fading in, make the element visible before the animation starts.
+            if (toOpacity > 0)
+            {
+                element.Visibility = Visibility.Visible;
+                // The animation will start from the visual's current opacity, which should be 0.
+            }
+
+            // Create a batch to know when the animation is complete
+            var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+            visual.StartAnimation("Opacity", opacityAnimation);
+            batch.End();
+
+            // When the animation batch completes...
+            batch.Completed += (s, e) =>
+            {
+                // If we faded out, collapse the element to remove it from the layout.
+                // IMPORTANT: This event runs on a background thread, so we must dispatch back to the UI thread
+                // to change UI properties like Visibility.
+                if (toOpacity == 0)
+                {
+                    element.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        element.Visibility = Visibility.Collapsed;
+                    });
+                }
+            };
+        }
+        private void UpdateLayoutForFocus()
+        {
+            if (_currentFocusArea == FocusArea.Launcher)
+            {
+                // Launcher is active: Expand the launcher column and show all cards with an animation.
+                LauncherColumn.Width = new GridLength(1, GridUnitType.Star);
+                CardsColumn.Width = new GridLength(0);
+                ColumnSeparator.Visibility = Visibility.Collapsed;
+
+                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+                {
+                    var card = _launcherAreaButtons[i];
+
+                    // For all cards after the first two, make them visible and start a staggered fade-in animation.
+                    if (i > 1)
+                    {
+                        AnimateCardVisibility(card, 1.0f, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(50 * (i - 1)));
+                    }
+                }
+            }
+            else
+            {
+                // Any other area is active: Restore the default split view and hide extra cards with an animation.
+                LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
+                CardsColumn.Width = new GridLength(1, GridUnitType.Star);
+                ColumnSeparator.Visibility = Visibility.Visible;
+
+                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+                {
+                    // *** DIESE ZEILE HAT WAHRSCHEINLICH GEFEHLT ***
+                    // *** THIS LINE WAS LIKELY MISSING ***
+                    var card = _launcherAreaButtons[i];
+
+                    // For all cards after the first two, start the fade-out animation.
+                    // The animation itself will handle setting Visibility to Collapsed when it's done.
+                    if (i > 1)
+                    {
+                        AnimateCardVisibility(card, 0.0f, TimeSpan.FromMilliseconds(150));
+                    }
+                }
+            }
+        }
+
+        public class LauncherCardItem
+        {
+            public string Name { get; set; }
+            public string ImagePath { get; set; }
+            public string ExePath { get; set; }
+            public string Arguments { get; set; }
+            // We use Action<...> to pass click methods directly.
+            public Action<object, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs> TapAction { get; set; }
+        }
+        /// <summary>
+        /// Loads all configured launcher apps from the settings,
+        /// creates the UI cards, and adds them to the launcher area.
+        /// </summary>
+        private void LoadDynamicLauncherCards()
+        {
+            // First, we initialize the list for gamepad navigation
+            _launcherAreaButtons = new List<Border>();
+
+            // 1. Create and add the main launcher card (Steam, Playnite, etc.)
+            var mainLauncherItem = new LauncherCardItem
+            {
+                Name = "Main Launcher",
+                TapAction = (s, e) => SwitchToConfiguredLauncher()
+            };
+            var mainLauncherCard = CreateLauncherCard(mainLauncherItem);
+            LauncherAreaPanel.Children.Add(mainLauncherCard);
+            _launcherAreaButtons.Add(mainLauncherCard);
+
+            // 2. Create and add the Discord card
+            var discordItem = new LauncherCardItem
+            {
+                Name = "Discord",
+                ImagePath = "ms-appx:///Assets/discord.png", // Make sure this icon is in your Assets folder!
+                TapAction = (s, e) =>
+                {
+                    MakeSelfNonTopmost();
+                    StartDiscord();
+                    PlayActivationSound();
+                }
+            };
+            var discordCard = CreateLauncherCard(discordItem);
+            LauncherAreaPanel.Children.Add(discordCard);
+            _launcherAreaButtons.Add(discordCard);
+
+            // 3. Load and add the 5 custom app slots from settings.toml
+            for (int i = 1; i <= 5; i++)
+            {
+                try
+                {
+                    string exePath = AppSettings.Load<string>($"button{i}link");
+                    string imagePath = AppSettings.Load<string>($"button{i}image");
+                    string args = AppSettings.Load<string>($"button{i}args") ?? "";
+
+                    // Only add if EXE and image are valid and exist
+                    if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath) &&
+                        !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    {
+                        var customItem = new LauncherCardItem
+                        {
+                            Name = $"Custom App {i}",
+                            ImagePath = imagePath,
+                            ExePath = exePath,
+                            Arguments = args,
+                            TapAction = (s, e) =>
+                            {
+                                MakeSelfNonTopmost();
+                                try
+                                {
+                                    Process.Start(new ProcessStartInfo(exePath)
+                                    {
+                                        Arguments = args,
+                                        UseShellExecute = true
+                                    });
+                                    PlayActivationSound();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[ERROR] Failed to start custom app {i}: {ex.Message}");
+                                }
+                            }
+                        };
+                        var customCard = CreateLauncherCard(customItem);
+                        LauncherAreaPanel.Children.Add(customCard);
+                        _launcherAreaButtons.Add(customCard);
+                    }
+                }
+                catch (Exception)
+                {
+                    // Setting not found, just ignore it and continue with the next slot.
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Creates a single, clickable launcher card based on the provided data.
+        /// </summary>
+        /// <param name="item">The data for the card to be created.</param>
+        /// <returns>A Border element representing the final card.</returns>
+        private Border CreateLauncherCard(LauncherCardItem item)
+        {
+            // Determine the card size based on its name
+            double cardWidth = (item.Name == "Main Launcher") ? 300 : 150;
+            double cardHeight = (item.Name == "Main Launcher") ? 250 : 180;
+
+            // Create the card's content (icon and text)
+            UIElement cardContent;
+            if (item.Name == "Main Launcher")
+            {
+                cardContent = new StackPanel
+                {
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Spacing = 15,
+                    Children = {
+                new FontIcon { Glyph = "\uE80F", FontSize = 48, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) },
+                new TextBlock { Text = "Launcher", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) }
+            }
+                };
+            }
+            else
+            {
+                cardContent = new Image
+                {
+                    Source = new BitmapImage(new Uri(item.ImagePath)),
+                    Width = 80, // Adjusted size for a uniform look
+                    Height = 80,
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+            }
+
+            var cardBorder = new Border
+            {
+                Width = cardWidth,
+                Height = cardHeight,
+                Background = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), // #33FFFFFF
+                CornerRadius = new CornerRadius(20),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray),
+                Child = cardContent,
+                Tag = item // *** THIS IS THE KEY CHANGE *** We store the item data directly on the card.
+            };
+
+            // Add the Tapped event handler for mouse/touch
+            if (item.TapAction != null)
+            {
+                cardBorder.Tapped += (s, e) => item.TapAction(s, e);
+            }
+
+            return cardBorder;
+        }
 
         private void StartAutoTaskRefresh()
         {
@@ -3198,7 +3442,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
-                if (!IsWindowInForeground()) return;
+                // The check "if (!IsWindowInForeground())" has been REMOVED.
+                // The refresh now runs continuously in the background.
 
                 var processDataList = await Task.Run(() =>
                 {
@@ -4647,6 +4892,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return;
             }
 
+            // --- Navigation Logic ---
+
+            // This is the existing logic for the Right Bumper (RB) to cycle forwards.
             if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
             {
                 switch (_currentFocusArea)
@@ -4655,6 +4903,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
                 }
+                // Resetting indexes and updating UI is necessary after every area switch.
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
                 _selectedLauncherAreaIndex = 0;
@@ -4662,17 +4911,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 PlayNavigationSound();
             }
 
+            // *** NEW LOGIC FOR LEFT BUMPER (LB) ***
+            // This handles cycling backwards through the focus areas.
+            if (IsNewButtonPress(GamepadButtonFlags.LeftShoulder, currentButtons))
+            {
+                switch (_currentFocusArea)
+                {
+                    case FocusArea.Launcher: _currentFocusArea = FocusArea.TopButtons; break; // Go backwards from Launcher to TopButtons
+                    case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;    // Go backwards from Cards to Launcher
+                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;   // Go backwards from TopButtons to Cards
+                }
+                // Resetting indexes and updating UI is the same as for RB
+                _selectedCardIndex = 0;
+                _selectedTopButtonIndex = 0;
+                _selectedLauncherAreaIndex = 0;
+                UpdateVisualFocus();
+                PlayNavigationSound();
+            }
+
+            // The rest of the D-Pad and A/B button logic remains exactly the same.
             if (_currentFocusArea == FocusArea.Launcher)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
-                    _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
+                    if (_launcherAreaButtons.Any())
+                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
                 else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
-                    _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
+                    if (_launcherAreaButtons.Any())
+                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
@@ -4681,13 +4951,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
-                    _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
+                    if (_topButtons.Any())
+                        _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
                 else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
                 {
-                    _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
+                    if (_topButtons.Any())
+                        _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
                     UpdateVisualFocus();
                     PlayNavigationSound();
                 }
@@ -4710,15 +4982,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
 
+            // --- Action Logic (A and B buttons) ---
             if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
             {
                 if (_currentFocusArea == FocusArea.Launcher)
                 {
-                    if (_selectedLauncherAreaIndex == 0) LauncherCard_Tapped(null, null);
-                    else if (_selectedLauncherAreaIndex == 1) DiscordCard_Tapped(null, null);
+                    if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count)
+                    {
+                        var selectedCard = _launcherAreaButtons[_selectedLauncherAreaIndex];
+                        if (selectedCard.Tag is LauncherCardItem item)
+                        {
+                            item.TapAction?.Invoke(selectedCard, null);
+                        }
+                    }
                 }
-                else if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, true);
-                else if (_currentFocusArea == FocusArea.TopButtons) ClickSelectedTopButton();
+                else if (_currentFocusArea == FocusArea.Cards)
+                {
+                    TriggerCardAction(_selectedCardIndex, true);
+                }
+                else if (_currentFocusArea == FocusArea.TopButtons)
+                {
+                    ClickSelectedTopButton();
+                }
                 PlayActivationSound();
             }
 
@@ -4734,9 +5019,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Aktualisiert die UI performant, indem nur das alte und neue Element geändert wird.
         /// </summary>
+        // In gcmloader/MainWindow.xaml.cs
+
+        /// <summary>
+        /// Updates the UI performantly by only changing the old and new focused elements.
+        /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
-            // Alle Elemente zurücksetzen
+            // *** ADDED: Call the new layout method every time the focus changes ***
+            UpdateLayoutForFocus();
+
+            // Reset all elements
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
             _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
             for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
@@ -4744,7 +5037,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
             }
 
-            // Aktuelles Element hervorheben
+            // Highlight the currently focused element
             if (_currentFocusArea == FocusArea.Launcher)
             {
                 var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
@@ -4778,25 +5071,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void AnimateScale(UIElement element, bool isSelected)
         {
+            // Ensure a CompositeTransform exists, creating one if it doesn't.
+            // This prevents conflicts with other animations.
+            if (element.RenderTransform is not CompositeTransform)
+            {
+                element.RenderTransform = new CompositeTransform();
+            }
+
             var visual = ElementCompositionPreview.GetElementVisual(element);
             var compositor = visual.Compositor;
-            var targetScale = isSelected ? new Vector3(1.04f, 1.04f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
+            var targetScale = isSelected ? new Vector3(1.05f, 1.05f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
 
             var scaleAnimation = compositor.CreateVector3KeyFrameAnimation();
             scaleAnimation.Duration = TimeSpan.FromMilliseconds(250);
             scaleAnimation.InsertKeyFrame(1.0f, targetScale, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
 
-            // ENTFERNT: Die langsame CenterPoint-Berechnung für maximale Performance.
-            // Die Animation startet jetzt von der oberen linken Ecke.
+            // Correctly set the center point for the scaling animation
+            if (element is FrameworkElement fe)
+            {
+                visual.CenterPoint = new Vector3((float)fe.ActualWidth / 2, (float)fe.ActualHeight / 2, 0f);
+            }
 
             visual.StartAnimation("Scale", scaleAnimation);
         }
 
-        /// <summary>
-        /// Verarbeitet alle globalen Gamepad-Shortcuts.
-        /// </summary>
-     
-      
+        
+
+
 
         /// <summary>
         /// Führt die Klick-Aktion für den aktuell ausgewählten oberen Button aus.

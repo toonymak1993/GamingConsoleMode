@@ -1,5 +1,14 @@
-// ERSETZE DEN KOMPLETTEN INHALT DEINER taskmanager.xaml.cs HIERMIT
 
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Imaging;
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -22,7 +31,7 @@ namespace GAMINGCONSOLEMODE
         }
 
         /// <summary>
-        /// Lädt alle Einstellungen und aktualisiert die gesamte Benutzeroberfläche.
+        /// Loads all settings and updates the entire user interface.
         /// </summary>
         private void UpdateUI()
         {
@@ -30,13 +39,13 @@ namespace GAMINGCONSOLEMODE
             {
                 for (int i = 1; i <= 5; i++)
                 {
-                    LoadSettingsForButton(i); // Lädt alle Einstellungen für jeden Button
+                    LoadSettingsForButton(i); // Loads all settings for each button
                 }
                 LoadHandheldTouchLauncherSetting();
             }
             catch
             {
-
+                // Ignore potential errors during UI update
             }
 
             try
@@ -45,7 +54,7 @@ namespace GAMINGCONSOLEMODE
             }
             catch
             {
-
+                // Ignore if API key setting doesn't exist
             }
         }
 
@@ -56,7 +65,7 @@ namespace GAMINGCONSOLEMODE
             {
                 SteamGridDbApiKeyBox.Text = AppSettings.Load<string>("steamgriddb_api_key");
             }
-            catch { /* Einstellung existiert nicht, ignoriere. */ }
+            catch { /* Setting does not exist, ignore. */ }
         }
 
         private async void SaveApiKeyButton_Click(object sender, RoutedEventArgs e)
@@ -65,67 +74,73 @@ namespace GAMINGCONSOLEMODE
             var dialog = new ContentDialog
             {
                 XamlRoot = this.XamlRoot,
-                Title = "Gespeichert",
-                Content = "API Key wurde erfolgreich gespeichert!",
+                Title = "Saved",
+                Content = "API key successfully saved!",
                 CloseButtonText = "Ok"
             };
             await dialog.ShowAsync();
         }
         #endregion
 
-        #region Launcher Konfiguration (NEU & VERBESSERT)
+        #region Launcher Configuration (NEW & IMPROVED)
 
-        // --- HILFSMETHODEN, DIE DEN CODE STARK VEREINFACHEN ---
+        // --- HELPER METHODS THAT GREATLY SIMPLIFY THE CODE ---
 
         /// <summary>
-        /// Lädt die Einstellungen für einen bestimmten Button-Slot und zeigt sie in der UI an.
+        /// Loads the settings for a specific button slot and displays them in the UI.
         /// </summary>
         private void LoadSettingsForButton(int index)
         {
-            // Finde die richtigen UI-Elemente basierend auf dem Index
+            // Find the correct UI elements based on the index
             var imageControl = this.FindName($"Image{index}") as Image;
             var argsBox = this.FindName($"Args{index}") as TextBox;
-            if (imageControl == null || argsBox == null) return;
+            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
+            if (imageControl == null || argsBox == null || workDirBox == null) return; // *** MODIFIED ***
 
             try
             {
-                // Bild laden
+                // Load image
                 string imagePath = AppSettings.Load<string>($"button{index}image");
                 if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                 {
                     imageControl.Source = new BitmapImage(new Uri(imagePath));
                 }
 
-                // Parameter laden
+                // Load parameters
                 argsBox.Text = AppSettings.Load<string>($"button{index}args");
+
+                // *** ADDED: Load Working Directory ***
+                workDirBox.Text = AppSettings.Load<string>($"button{index}workdir");
             }
-            catch { /* Ignoriere Fehler, falls eine Einstellung fehlt */ }
+            catch { /* Ignore errors if a setting is missing */ }
         }
 
         /// <summary>
-        /// Speichert alle Einstellungen für einen bestimmten Button-Slot.
+        /// Saves all settings for a specific button slot.
         /// </summary>
         private void SaveSettingsForButton(int index)
         {
             var argsBox = this.FindName($"Args{index}") as TextBox;
-            if (argsBox == null) return;
+            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
+            if (argsBox == null || workDirBox == null) return; // *** MODIFIED ***
 
             try
             {
                 AppSettings.Save($"button{index}args", argsBox.Text);
-                AppSettings.Save($"button{index}", true); // Markiere den Slot als "aktiv"
+                AppSettings.Save($"button{index}workdir", workDirBox.Text); // *** ADDED ***
+                AppSettings.Save($"button{index}", true); // Mark the slot as "active"
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[ERROR] Fehler beim Speichern für Button {index}: {ex.Message}");
+                Debug.WriteLine($"[ERROR] Error saving for Button {index}: {ex.Message}");
             }
         }
 
-        // --- EVENT HANDLER (jetzt viel kürzer) ---
+        // --- EVENT HANDLERS (now much shorter) ---
 
         private async void SelectImage_Click(object sender, RoutedEventArgs e)
         {
-            int index = int.Parse((sender as Button).Name.Replace("SelectImage", "").Replace("_Click", ""));
+            int index = int.Parse((sender as Button).Name.Replace("SelectImage", ""));
             var imageControl = this.FindName($"Image{index}") as Image;
 
             var file = await PickFileAsync(new[] { ".png", ".jpg", ".jpeg" });
@@ -139,58 +154,98 @@ namespace GAMINGCONSOLEMODE
 
         private async void SelectLink_Click(object sender, RoutedEventArgs e)
         {
-            int index = int.Parse((sender as Button).Name.Replace("SelectLink", "").Replace("_Click", ""));
+            int index = int.Parse((sender as Button).Name.Replace("SelectLink", ""));
+            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
 
             var file = await PickFileAsync(new[] { ".exe" });
             if (file != null)
             {
                 AppSettings.Save($"button{index}link", file.Path);
+
+                // *** ADDED: Automatically set and save the working directory ***
+                if (workDirBox != null)
+                {
+                    string directory = Path.GetDirectoryName(file.Path);
+                    workDirBox.Text = directory; // Set text in UI
+                    // The TextChanged event will handle saving
+                }
+
                 SaveSettingsForButton(index);
             }
         }
 
         private void Test_Click(object sender, RoutedEventArgs e)
         {
-            int index = int.Parse((sender as Button).Name.Replace("Test", "").Replace("_Click", ""));
+            int index = int.Parse((sender as Button).Name.Replace("Test", ""));
             try
             {
                 string exePath = AppSettings.Load<string>($"button{index}link");
                 string arguments = (this.FindName($"Args{index}") as TextBox)?.Text ?? "";
+                string workDir = (this.FindName($"WorkDir{index}") as TextBox)?.Text ?? ""; // *** ADDED ***
 
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                 {
-                    Process.Start(new ProcessStartInfo(exePath) { Arguments = arguments, UseShellExecute = true });
+                    // *** MODIFIED: Use ProcessStartInfo to include WorkingDirectory ***
+                    var startInfo = new ProcessStartInfo(exePath)
+                    {
+                        Arguments = arguments,
+                        UseShellExecute = true
+                    };
+
+                    if (!string.IsNullOrEmpty(workDir) && Directory.Exists(workDir))
+                    {
+                        startInfo.WorkingDirectory = workDir;
+                    }
+
+                    Process.Start(startInfo);
                 }
             }
-            catch (Exception ex) { Debug.WriteLine($"[TEST] Fehler: {ex.Message}"); }
+            catch (Exception ex) { Debug.WriteLine($"[TEST] Error: {ex.Message}"); }
         }
 
         private void Args_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // Finde heraus, welche Textbox geändert wurde, indem wir die Zahl aus dem Namen lesen.
+            // Find out which textbox was changed by reading the number from its name.
             var textBox = sender as TextBox;
             int index = int.Parse(Regex.Match(textBox.Name, @"\d+").Value);
 
-            // Speichere den neuen Text in der Einstellungsdatei unter dem passenden Schlüssel (z.B. "button1args").
+            // Save the new text to the settings file under the correct key (e.g., "button1args").
             AppSettings.Save($"button{index}args", textBox.Text);
+        }
+
+        // *** NEW METHOD ***
+        /// <summary>
+        /// Saves the working directory path when the user types in the TextBox.
+        /// </summary>
+        private void WorkDir_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Find out which textbox was changed by reading the number from its name.
+            var textBox = sender as TextBox;
+            int index = int.Parse(Regex.Match(textBox.Name, @"\d+").Value);
+
+            // Save the new text to the settings file under the correct key (e.g., "button1workdir").
+            AppSettings.Save($"button{index}workdir", textBox.Text);
         }
 
         private void Reset_Click(object sender, RoutedEventArgs e)
         {
-            int index = int.Parse((sender as Button).Name.Replace("Reset", "").Replace("_Click", ""));
+            int index = int.Parse((sender as Button).Name.Replace("Reset", ""));
             var imageControl = this.FindName($"Image{index}") as Image;
             var argsBox = this.FindName($"Args{index}") as TextBox;
+            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
 
             if (imageControl != null) imageControl.Source = null;
             if (argsBox != null) argsBox.Text = "";
+            if (workDirBox != null) workDirBox.Text = ""; // *** ADDED ***
 
             AppSettings.Delete($"button{index}");
             AppSettings.Delete($"button{index}link");
             AppSettings.Delete($"button{index}image");
             AppSettings.Delete($"button{index}args");
+            AppSettings.Delete($"button{index}workdir"); // *** ADDED ***
         }
 
-        // --- ALLGEMEINE HILFSMETHODE FÜR DATEIAUSWAHL ---
+        // --- GENERAL HELPER METHOD FOR FILE SELECTION ---
 
         private async Task<Windows.Storage.StorageFile> PickFileAsync(string[] fileTypes)
         {

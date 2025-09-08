@@ -49,7 +49,7 @@ namespace GAMINGCONSOLEMODE
             // Set the window size
             SetWindowSize(1500, 1100);
             // 1. First Start: Create folder and default config file if needed
-            AppSettings.FirstStart();
+            AppSettings.FirstStart(this);
             versioninfopanel(currentVersion);
             #region onboarding
             try
