@@ -50,6 +50,7 @@ using Windows.System;
 using Windows.UI;
 using WinRT.Interop;
 using static Vanara.PInvoke.Gdi32;
+using static Vanara.PInvoke.Kernel32.PSS_HANDLE_ENTRY;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
 using Application = Microsoft.UI.Xaml.Application;
@@ -2004,6 +2005,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             displayfusion("end");
             //Stop Deckyloader
             KillProcess("PluginLoader_noconsole.exe");
+            Console.WriteLine("PluginLoader_noconsole killed");
             CleanupLogging();
             preaudio(false, true);
             StartWingamepad();
