@@ -1927,7 +1927,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Error attempting to kill explorer.exe: {ex.Message}");
+                            Console.WriteLine($"Error attempting to kill : {ex.Message}");
                         }
                     }
                 }
@@ -2002,6 +2002,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Schritt 3: Restliche Aufräum-Aktionen
             displayfusion("end");
+            //Stop Deckyloader
+            KillProcess("PluginLoader_noconsole.exe");
             CleanupLogging();
             preaudio(false, true);
             StartWingamepad();

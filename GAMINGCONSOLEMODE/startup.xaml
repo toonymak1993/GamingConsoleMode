@@ -632,8 +632,10 @@
                                               Header="ON/OFF" >
                                                 <ToggleSwitch x:Name="use_decky_loader"
                                                               Toggled="use_decky_loader_Toggled_1"
-                                                              HorizontalAlignment="Center"/>
+                                                              HorizontalAlignment="Left"/>
+                                                
                                             </controls:SettingsCard>
+                                            
 
 
                                             <controls:SettingsCard Header="INSTALLATION PANEL">
@@ -655,14 +657,15 @@
                                                 </controls:SettingsCard.Description>
 
                                                 <StackPanel VerticalAlignment="Center">
-                                                    <Button x:Name="button_install_decky_loader" Content="DOWNLOAD" Margin="10" Width="150" Click="button_install_decky_loader_Click"/>
+                                                    <Button x:Name="button_install_decky_loader" Content="Install" Margin="10" Width="150" Click="button_install_decky_loader_Click"/>
+                                                    <Button x:Name="button_uninstall_decky_loader" Content="Uninstall" Margin="10" Width="150" Click="button_uninstall_decky_loader_Click"/>
                                                 </StackPanel>
                                             </controls:SettingsCard>
 
 
                                             <TextBlock Text="Documentary" FontSize="14" FontWeight="SemiBold" Margin="0,8,24,0"/>
 
-                                            <controls:SettingsCard  Description="Please extract all files into a folder and run the executable inside. Then, return to GCM."
+                                            <controls:SettingsCard  Description="Install Decky Loader for Windows and click on after successful installation."
                                                                     Header="Installation instructions" >
                                                 <controls:SettingsCard.Resources>
                                                     <x:Double x:Key="SettingsCardWrapThreshold">800</x:Double>
@@ -671,12 +674,7 @@
                                             </controls:SettingsCard>
 
 
-                                            <controls:SettingsCard Header="Github Repo">
-                                                <controls:SettingsCard.Description>
-                                                    <HyperlinkButton Content="Learn more about Decky Loader" NavigateUri="https://wiki.deckbrew.xyz/"/>
-                                                </controls:SettingsCard.Description>
-                                                <HyperlinkButton Content="Link to Github Repo" NavigateUri="https://github.com/SteamDeckHomebrew/decky-loader#-installation"/>
-                                            </controls:SettingsCard>
+                                         
 
                                             <controls:SettingsCard x:Name="AboutDeckyLoader"
                                                                    Header="About">
@@ -697,7 +695,6 @@
                                                     <TextBlock Text="◦  PlayCount" Margin="0,2,0,0"/>
                                                     <TextBlock Text="◦  PlayTime" Margin="0,2,0,0"/>
                                                     <TextBlock Text="◦  ProtonDB Badges" Margin="0,2,0,0"/>
-                                                    <TextBlock Text="◦  SteamGridDB" Margin="0,2,0,0"/>
                                                     <TextBlock Text="◦  TabMaster" Margin="0,2,0,0"/>
                                                     <TextBlock Text="◦  Web Browser" Margin="0,2,0,0"/>
                                                 </StackPanel>
