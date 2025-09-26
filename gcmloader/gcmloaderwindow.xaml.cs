@@ -198,7 +198,7 @@ namespace gcmloader
 
                 if (appWindow.Presenter is OverlappedPresenter overlappedPresenter)
                 {
-                    overlappedPresenter.Minimize();
+                    //overlappedPresenter.Minimize();
                 }
             }
             else
@@ -247,39 +247,84 @@ namespace gcmloader
         /// Wird jede Sekunde vom Timer aufgerufen.
         /// </summary>
         /// <summary>
+        /// 
+
+        private void AnimateOverlayOpacity(UIElement element, double toOpacity, bool hideWhenDone = false)
+        {
+            var storyboard = new Storyboard();
+            var animation = new DoubleAnimation
+            {
+                To = toOpacity,
+                Duration = new Duration(TimeSpan.FromMilliseconds(300)), // 0.3 Sekunden für einen sanften Übergang
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+            };
+
+            Storyboard.SetTarget(animation, element);
+            Storyboard.SetTargetProperty(animation, "Opacity");
+            storyboard.Children.Add(animation);
+
+            if (hideWhenDone)
+            {
+                storyboard.Completed += (s, e) => {
+                    element.Visibility = Visibility.Collapsed;
+                };
+            }
+
+            storyboard.Begin();
+        }
+
         private void _focusCheckTimer_Tick(object sender, object e)
         {
-            // Breche ab, wenn die anfängliche Gnadenfrist nach dem App-Start noch aktiv ist.
             if (_isStartupGracePeriod) return;
 
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
-            var appWindow = AppWindow.GetFromWindowId(windowId);
+            // Handle des eigenen Fensters holen
+            IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            // Handle des Fensters, das gerade im Vordergrund ist
+            IntPtr foregroundHwnd = GetForegroundWindow();
 
-            if (appWindow.IsVisible && !IsWindowInForeground())
+            // 1. Prüfen, ob unser eigenes Fenster bereits im Fokus ist
+            if (foregroundHwnd == selfHwnd)
             {
-                // --- HIER IST DIE NEUE LOGIK ---
-                // Anstatt sofort zu minimieren, starten wir den 3-Sekunden-Timer,
-                // aber nur, wenn er nicht schon läuft.
-                if (!_minimizeGracePeriodTimer.IsEnabled)
+                // Wenn unser Fenster den Fokus hat, aber das Overlay noch aktiv ist -> ausblenden
+                if (_isOverlayActive)
                 {
-                    Debug.WriteLine("Window lost focus. Starting 3-second grace period before minimizing.");
-                    _minimizeGracePeriodTimer.Start();
+                    _isOverlayActive = false;
+                    AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
                 }
+                return; // Nichts weiter zu tun
             }
+
+            // Wenn wir hier ankommen, hat ein ANDERES Fenster den Fokus.
+            // Wir finden jetzt heraus, welches es ist.
+            StringBuilder classNameBuilder = new StringBuilder(256);
+            GetClassName(foregroundHwnd, classNameBuilder, classNameBuilder.Capacity);
+            string className = classNameBuilder.ToString();
+
+            // 2. Prüfen, ob der Desktop im Fokus ist
+            if (className == "Progman" || className == "WorkerW")
+            {
+                // Der Desktop ist aktiv! Unser GCM holt sich den Fokus zurück.
+                Debug.WriteLine("Desktop is active, reclaiming focus for GCM.");
+                BringToFrontAndFocus(selfHwnd);
+                // Die Logik zum Ausblenden des Overlays wird im nächsten Tick automatisch greifen,
+                // wenn unser Fenster wieder den Fokus hat (siehe Schritt 1).
+            }
+            // 3. Eine andere Anwendung (weder wir noch der Desktop) ist im Fokus
             else
             {
-                // Wenn das Fenster den Fokus wiedererlangt, stoppen wir den Timer,
-                // damit es nicht unnötig minimiert wird.
-                if (_minimizeGracePeriodTimer.IsEnabled)
+                // Wenn eine andere App den Fokus hat und unser Overlay noch nicht aktiv ist -> einblenden
+                if (!_isOverlayActive)
                 {
-                    Debug.WriteLine("Window regained focus. Canceling minimize timer.");
-                    _minimizeGracePeriodTimer.Stop();
+                    _isOverlayActive = true;
+                    FocusLossOverlay.Opacity = 0;
+                    FocusLossOverlay.Visibility = Visibility.Visible;
+                    AnimateOverlayOpacity(FocusLossOverlay, 1.0);
                 }
             }
         }
         private DispatcherTimer _focusCheckTimer;
         private DispatcherTimer _minimizeGracePeriodTimer;
+        private bool _isOverlayActive = false;
         [DllImport("user32.dll")]
         private static extern bool LockSetForegroundWindow(uint uLockCode);
         /// <summary>
@@ -3183,6 +3228,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             prestartlist();
             StartLosslessScaling();
             SwitchToConfiguredLauncher();
+            await Task.Delay(500); // Gibt dem Launcher kurz Zeit zu starten
+            AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
+            _isOverlayActive = false;
         }
         #endregion start
         #region TaskManager
@@ -5505,10 +5553,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void TransitionToMainUI()
         {
-            // === HIER IST DIE ÄNDERUNG ===
             // Lade das Hintergrundbild JETZT, direkt bevor die UI erscheint.
             SetBackgroundImage(GetScreenWidth(), GetScreenHeight());
-            // =============================
 
             // Video-Player aufräumen
             if (_startupMediaPlayer != null)
@@ -5520,19 +5566,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             StartupVideoPlayer.SetMediaPlayer(null);
             StartupVideoPlayer.Visibility = Visibility.Collapsed;
 
-            // Haupt-UI mit einer sanften Einblend-Animation sichtbar machen
+            // --- ÄNDERUNG HIER ---
+            // Statt die Haupt-UI einzublenden, zeigen wir sofort das Overlay an.
+            // Die Haupt-UI wird im Hintergrund sichtbar, aber vom Overlay verdeckt.
+            MainContent.Opacity = 1.0;
             MainContent.Visibility = Visibility.Visible;
-            var fadeInAnimation = new DoubleAnimation
-            {
-                From = 0.0,
-                To = 1.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(500))
-            };
-            var storyboard = new Storyboard();
-            storyboard.Children.Add(fadeInAnimation);
-            Storyboard.SetTarget(fadeInAnimation, MainContent);
-            Storyboard.SetTargetProperty(fadeInAnimation, "Opacity");
-            storyboard.Begin();
+
+            FocusLossOverlay.Opacity = 1.0;
+            FocusLossOverlay.Visibility = Visibility.Visible;
+            _isOverlayActive = true; // Wichtig: Den Status sofort setzen!
+                                     // --- ENDE DER ÄNDERUNG ---
 
             // Signal an die Start()-Methode, dass sie weitermachen kann
             startupVideoFinished = true;

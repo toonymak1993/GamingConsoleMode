@@ -126,11 +126,25 @@
                 </StackPanel>
             </Border>
         </Grid>
+        <Border x:Name="FocusLossOverlay"
+        Background="#D8000000" Visibility="Collapsed"
+        Canvas.ZIndex="99">
+            <Grid>
+                <Image Source="/Assets/gcm_ui_logo.png"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Center"
+               Width="200"
+               Height="200"
+               Stretch="Uniform"/>
+            </Grid>
+        </Border>
+
         <MediaPlayerElement x:Name="StartupVideoPlayer"
                               AreTransportControlsEnabled="False"
                               Stretch="Uniform"
                               HorizontalAlignment="Stretch"
                               VerticalAlignment="Stretch"
                               Background="Black"/>
+        
     </Grid>
 </Window>
