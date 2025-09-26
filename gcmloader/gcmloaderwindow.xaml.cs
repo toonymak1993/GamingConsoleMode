@@ -1,5 +1,4 @@
-﻿using Discord;
-using Discord.WebSocket;
+﻿using Discord.WebSocket;
 using GAMINGCONSOLEMODE;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -13,8 +12,6 @@ using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.Win32;
 using Microsoft.Win32.TaskScheduler;
-using Microsoft.Windows.AppNotifications;
-using Microsoft.Windows.AppNotifications.Builder;
 using NAudio.CoreAudioApi;
 using SharpDX.XInput;
 using System;
@@ -38,19 +35,11 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
-using System.Xml;
 using Tomlyn;
 using Tomlyn.Model;
-using Vanara.PInvoke;
-using Vanara.PInvoke;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.System;
-using Windows.UI;
-using WinRT.Interop;
-using static Vanara.PInvoke.Gdi32;
-using static Vanara.PInvoke.Kernel32.PSS_HANDLE_ENTRY;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
 using Application = Microsoft.UI.Xaml.Application;
@@ -58,6 +47,7 @@ using Button = Microsoft.UI.Xaml.Controls.Button;
 using Color = Windows.UI.Color;
 using Image = Microsoft.UI.Xaml.Controls.Image;
 using Point = System.Drawing.Point;
+using Process = System.Diagnostics.Process;
 using Task = System.Threading.Tasks.Task;
 
 namespace gcmloader
@@ -1398,7 +1388,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         try
                         {
                             // Wait for 3 seconds before starting
-                            Thread.Sleep(3000);
+                            System.Threading.Thread.Sleep(3000);
 
                             // Start the AudioSwitch executable
                             Process.Start(exePath);
@@ -1976,7 +1966,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 else
                 {
                     KillProcess("explorer.exe");
-                    Thread.Sleep(500);
+                    System.Threading.Thread.Sleep(500);
                     Process.Start("explorer.exe");
                 }
 
@@ -2549,7 +2539,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             
                         }
 
-                            Thread.Sleep(5000);
+                            System.Threading.Thread.Sleep(5000);
                         
                         //HideShellWindow("Windows.UI.StartMenu");
                         KillProcess("WidgetBoard");
@@ -2863,7 +2853,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 // Small delay to ensure processes are terminated
-                Thread.Sleep(3000);
+                System.Threading.Thread.Sleep(3000);
             }
         }
 
