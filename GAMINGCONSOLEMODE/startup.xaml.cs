@@ -35,20 +35,23 @@ namespace GAMINGCONSOLEMODE
 
 
 
-
+        private readonly DeckyInstallerLogic _deckyInstaller;
         private Storyboard ShowDetailStoryboard;
         private Storyboard HideDetailStoryboard;
 
         private List<Button> allDashboardButtons = new();
-
+        
         #endregion generate Dashboard function
         public startup()
         {
             this.InitializeComponent();
+
             updateui();
             InitializeTimer();
             ShowDetailStoryboard = (Storyboard)this.Resources["ShowDetailPanelStoryboard"];
             HideDetailStoryboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
+            // Initial _deckyInstaller-Objekt
+            _deckyInstaller = new DeckyInstallerLogic();
 
             // save Buttons, at start
             this.Loaded += (s, e) =>
@@ -633,6 +636,8 @@ namespace GAMINGCONSOLEMODE
             catch
             {
             }
+
+
             #endregion deckyloader
             #region preloadlist
             try
@@ -992,93 +997,94 @@ namespace GAMINGCONSOLEMODE
         #region deckyloader
         private async void button_install_decky_loader_Click(object sender, RoutedEventArgs e)
         {
-            // 1. Retrieve the latest release information from GitHub API
-            string latestReleaseApiUrl = "https://api.github.com/repos/ACCESS-DENIIED/Decky-Loader-For-Windows/releases/latest";
-            using (HttpClient httpClient = new HttpClient())
+            // Disable the button to prevent multiple clicks
+            button_install_decky_loader.IsEnabled = false;
+            button_install_decky_loader.Content = "Installing...";
+            button_uninstall_decky_loader.IsEnabled = false;
+
+            try
             {
-                // GitHub API requires a valid User-Agent header
-                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-                string releaseJson;
-                try
+                // Call the installation method from your logic class
+                await _deckyInstaller.ExecuteInstallationAsync();
+
+                // Update the UI after a successful installation
+                updateui();
+
+                // Show a success message using a ContentDialog (WinUI 3 standard)
+                ContentDialog successDialog = new ContentDialog
                 {
-                    releaseJson = await httpClient.GetStringAsync(latestReleaseApiUrl);
-                }
-                catch (Exception ex)
+                    Title = "Installation successful",
+                    Content = "Decky Loader has been successfully installed!",
+                    CloseButtonText = "OK",
+                    XamlRoot = this.XamlRoot // Required for WinUI 3 dialogs
+                };
+                await successDialog.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                // Catch and display any exceptions from your logic class
+                ContentDialog errorDialog = new ContentDialog
                 {
-                    Console.WriteLine("Error retrieving the latest release info: " + ex.Message);
-                    return;
-                }
+                    Title = "Installation Error",
+                    Content = $"An error occurred during installation:\n\n{ex.Message}",
+                    CloseButtonText = "OK",
+                    XamlRoot = this.XamlRoot // Required for WinUI 3 dialogs
+                };
+                await errorDialog.ShowAsync();
+            }
+            finally
+            {
+                // Re-enable the button and restore its text, no matter what happened
+                button_install_decky_loader.IsEnabled = true;
+                button_uninstall_decky_loader.IsEnabled = true;
+                button_install_decky_loader.Content = "Install Decky Loader";
+            }
+        }
 
-                // 2. Parse the JSON to extract the tag name and select the MSI asset
-                JsonDocument jsonDoc = JsonDocument.Parse(releaseJson);
-                JsonElement root = jsonDoc.RootElement;
-                string tagName = root.GetProperty("tag_name").GetString();
-                Console.WriteLine("Latest release version: " + tagName);
+        private async void button_uninstall_decky_loader_Click(object sender, RoutedEventArgs e)
+        {
+            // Disable the button to prevent multiple clicks
+            button_uninstall_decky_loader.IsEnabled = false;
+            button_install_decky_loader.IsEnabled = false;
+            button_uninstall_decky_loader.Content = "Uninstalling...";
 
-                // Get the assets array from the JSON
-                JsonElement assets = root.GetProperty("assets");
-                JsonElement? msiAsset = null;
-                foreach (JsonElement asset in assets.EnumerateArray())
+            try
+            {
+                // Call the uninstallation method from your logic class
+                await _deckyInstaller.ExecuteUninstallationAsync();
+
+                // Update the UI after a successful uninstallation
+                updateui();
+                AppSettings.Save("usedeckyloader", false);
+                // Show a success message using a ContentDialog
+                ContentDialog successDialog = new ContentDialog
                 {
-                    string assetName = asset.GetProperty("name").GetString();
-                    // Select asset if it ends with .msi (case-insensitive)
-                    if (assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                    {
-                        msiAsset = asset;
-                        break;
-                    }
-                }
-
-                if (msiAsset == null)
+                    Title = "Uninstallation successful",
+                    Content = "Decky Loader has been successfully removed.",
+                    CloseButtonText = "OK",
+                    XamlRoot = this.XamlRoot // Required for WinUI 3 dialogs
+                };
+                await successDialog.ShowAsync();    
+            }
+            catch (Exception ex)
+            {
+                AppSettings.Save("usedeckyloader", false);
+                // Catch and display any exceptions from your logic class
+                ContentDialog errorDialog = new ContentDialog
                 {
-                    Console.WriteLine("No Zip asset found in the latest release.");
-                    return;
-                }
-
-                string selectedAssetName = msiAsset.Value.GetProperty("name").GetString();
-                string downloadUrl = msiAsset.Value.GetProperty("browser_download_url").GetString();
-
-                Console.WriteLine("Selected asset: " + selectedAssetName);
-                Console.WriteLine("Download URL: " + downloadUrl);
-
-                // 3. Determine the destination folder (create a custom subfolder in the Downloads directory)
-                string downloadsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "deckyloader");
-                if (!Directory.Exists(downloadsFolder))
-                    Directory.CreateDirectory(downloadsFolder);
-
-                string destinationPath = Path.Combine(downloadsFolder, selectedAssetName);
-
-                // 4. Download the MSI file using Flurl.Http (the async download is awaited)
-                try
-                {
-                    Console.WriteLine("Starting download of the MSI asset...");
-                    await downloadUrl.DownloadFileAsync(downloadsFolder, selectedAssetName);
-                    Console.WriteLine("Download complete. File saved at:");
-                    Console.WriteLine(destinationPath);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Download error: " + ex.Message);
-                    return;
-                }
-
-                // 5. Open the folder in File Explorer so the user can directly access the downloaded zip file
-                try
-                {
-                    
-
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "explorer.exe",
-                        Arguments = $"\"{downloadsFolder}\"",
-                        UseShellExecute = true
-                    });
-                    Console.WriteLine("Folder opened in File Explorer.");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Error opening the folder: " + ex.Message);
-                }
+                    Title = "Uninstallation Error",
+                    Content = $"An error occurred during uninstallation:\n\n{ex.Message}",
+                    CloseButtonText = "OK",
+                    XamlRoot = this.XamlRoot // Required for WinUI 3 dialogs
+                };
+                await errorDialog.ShowAsync();
+            }
+            finally
+            {
+                // Re-enable the button and restore its text
+                button_uninstall_decky_loader.IsEnabled = true;
+                button_install_decky_loader.IsEnabled = true;
+                button_uninstall_decky_loader.Content = "Uninstall Decky Loader";
             }
         }
         private void use_decky_loader_Toggled_1(object sender, RoutedEventArgs e)
@@ -2125,8 +2131,6 @@ namespace GAMINGCONSOLEMODE
         }
 
        
-
-
     }
 
     //region nircmd code
