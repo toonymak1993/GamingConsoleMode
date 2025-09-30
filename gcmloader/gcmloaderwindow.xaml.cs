@@ -150,6 +150,8 @@ namespace gcmloader
         private List<Border> _launcherAreaButtons;
         private List<ProcessData> _latestProcessData = new();
         private int _selectedLauncherAreaIndex = 0;
+        [DllImport("powrprof.dll", SetLastError = true)]
+        private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool IsIconic(IntPtr hWnd);
@@ -462,13 +464,15 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, Cards, TopButtons }
-private FocusArea _currentFocusArea = FocusArea.Cards;
+        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu } 
+        private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
         private int _selectedTopButtonIndex = 0;
-private List<Button> _topButtons;
-     
+        private List<Button> _topButtons;
+        private List<Button> _powerMenuItems; 
+        private int _selectedPowerMenuItemIndex = 0; 
+
 
 
         private const int GWL_STYLE = -16;
@@ -708,7 +712,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             LoadDynamicLauncherCards();
             _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
-
+            _powerMenuItems = new List<Button> { ShutdownMenuItem, SleepMenuItem, RestartMenuItem };
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Application.Current.UnhandledException += CurrentApp_UnhandledException;
@@ -5002,9 +5006,42 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return;
             }
 
-            // --- Navigation Logic ---
+            // Logik für das geöffnete Power-Menü
+            if (_currentFocusArea == FocusArea.PowerMenu)
+            {
+                if (IsNewButtonPress(GamepadButtonFlags.DPadDown, currentButtons))
+                {
+                    _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
+                }
+                else if (IsNewButtonPress(GamepadButtonFlags.DPadUp, currentButtons))
+                {
+                    _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
+                }
+                else if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
+                {
+                    var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
+                    if (selectedButton == ShutdownMenuItem) { ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+                    else if (selectedButton == SleepMenuItem) { SleepMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+                    else if (selectedButton == RestartMenuItem) { RestartMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+                    PlayActivationSound();
+                }
+                else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
+                {
+                    // HIER IST DIE KORREKTE LOGIK ZUM SCHLIESSEN
+                    PowerMenu.Visibility = Visibility.Collapsed;
+                    _currentFocusArea = FocusArea.TopButtons;
+                    UpdateVisualFocus();
+                    PlaydeactivationSound();
+                }
+                _lastButtonState = currentButtons;
+                return; // Verhindert, dass die restliche Navigation ausgeführt wird
+            }
 
-            // This is the existing logic for the Right Bumper (RB) to cycle forwards.
+            // Fokus-Bereich mit Schultertasten wechseln
             if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
             {
                 switch (_currentFocusArea)
@@ -5013,25 +5050,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
                 }
-                // Resetting indexes and updating UI is necessary after every area switch.
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
                 _selectedLauncherAreaIndex = 0;
                 UpdateVisualFocus();
                 PlayNavigationSound();
             }
-
-            // *** NEW LOGIC FOR LEFT BUMPER (LB) ***
-            // This handles cycling backwards through the focus areas.
-            if (IsNewButtonPress(GamepadButtonFlags.LeftShoulder, currentButtons))
+            else if (IsNewButtonPress(GamepadButtonFlags.LeftShoulder, currentButtons))
             {
                 switch (_currentFocusArea)
                 {
-                    case FocusArea.Launcher: _currentFocusArea = FocusArea.TopButtons; break; // Go backwards from Launcher to TopButtons
-                    case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;    // Go backwards from Cards to Launcher
-                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;   // Go backwards from TopButtons to Cards
+                    case FocusArea.Launcher: _currentFocusArea = FocusArea.TopButtons; break;
+                    case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;
+                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;
                 }
-                // Resetting indexes and updating UI is the same as for RB
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
                 _selectedLauncherAreaIndex = 0;
@@ -5039,8 +5071,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 PlayNavigationSound();
             }
 
-            // The rest of the D-Pad and A/B button logic remains exactly the same.
-            if (_currentFocusArea == FocusArea.Launcher)
+            // Navigation innerhalb der Bereiche (D-Pad)
+            else if (_currentFocusArea == FocusArea.Launcher)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
                 {
@@ -5092,7 +5124,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
 
-            // --- Action Logic (A and B buttons) ---
+            // Aktions-Logik (A und B Buttons)
             if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
             {
                 if (_currentFocusArea == FocusArea.Launcher)
@@ -5112,18 +5144,52 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 else if (_currentFocusArea == FocusArea.TopButtons)
                 {
-                    ClickSelectedTopButton();
+                    var selectedButton = _topButtons[_selectedTopButtonIndex];
+                    if (selectedButton == ShutdownButton)
+                    {
+                        _currentFocusArea = FocusArea.PowerMenu;
+                        _selectedPowerMenuItemIndex = 0;
+                        PowerButton_Click(null, null);
+                        UpdateVisualFocus();
+                    }
+                    else
+                    {
+                        ClickSelectedTopButton();
+                    }
                 }
                 PlayActivationSound();
             }
-
-            if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
+            else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
             {
                 if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, false);
                 PlaydeactivationSound();
             }
 
             _lastButtonState = currentButtons;
+        }
+
+        private void PowerButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (PowerMenu.Visibility == Visibility.Visible)
+            {
+                PowerMenu.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                // Positioniere das Menü direkt unter dem Power-Button
+                var transform = ShutdownButton.TransformToVisual(RootGrid);
+                var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+
+                // Passt die Position an, damit es rechtsbündig mit dem infopanel ist
+                PowerMenu.Margin = new Thickness(
+                    0,
+                    position.Y + ShutdownButton.ActualHeight + 5, // Top
+                    20, // Right (gleicher Abstand wie das infopanel)
+                    0
+                );
+
+                PowerMenu.Visibility = Visibility.Visible;
+            }
         }
 
         /// <summary>
@@ -5136,12 +5202,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
-            // *** ADDED: Call the new layout method every time the focus changes ***
             UpdateLayoutForFocus();
 
             // Reset all elements
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
             _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
+            _powerMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
             for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
             {
                 if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
@@ -5150,15 +5216,21 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Highlight the currently focused element
             if (_currentFocusArea == FocusArea.Launcher)
             {
-                var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
-                AnimateScale(selectedButton, true);
-                AnimateBorderColor(selectedButton, true);
+                if (_launcherAreaButtons.Count > _selectedLauncherAreaIndex)
+                {
+                    var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
+                    AnimateScale(selectedButton, true);
+                    AnimateBorderColor(selectedButton, true);
+                }
             }
             else if (_currentFocusArea == FocusArea.TopButtons)
             {
-                var selectedButton = _topButtons[_selectedTopButtonIndex];
-                selectedButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
-                selectedButton.BorderThickness = new Thickness(2);
+                if (_topButtons.Count > _selectedTopButtonIndex)
+                {
+                    var selectedButton = _topButtons[_selectedTopButtonIndex];
+                    selectedButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
+                    selectedButton.BorderThickness = new Thickness(2);
+                }
             }
             else if (_currentFocusArea == FocusArea.Cards && ProgramCardPanel.Children.Count > _selectedCardIndex)
             {
@@ -5167,6 +5239,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     AnimateScale(card, true);
                     AnimateBorderColor(card, true);
                     ScrollToCardAnimated(card);
+                }
+            }
+            else if (_currentFocusArea == FocusArea.PowerMenu)
+            {
+                // Hebe den ausgewählten Menüpunkt hervor
+                if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
+                {
+                    var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
+                    selectedButton.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)); // Leicht weißer Hintergrund
                 }
             }
         }
@@ -5205,7 +5286,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             visual.StartAnimation("Scale", scaleAnimation);
         }
 
-        
+
 
 
 
@@ -5220,7 +5301,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // Führe die passende Klick-Methode aus
                 if (buttonToClick == ExitGcmButton) ExitGcmButton_Click_1(null, null);
-                else if (buttonToClick == ShutdownButton) ShutdownButton_Click(null, null);
+                // Die Logik für den ShutdownButton wurde in die GamepadButtonCheck-Methode verlagert
             }
         }
         private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -5615,6 +5696,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error in RenameSteamStartupVideo_Start: {ex.Message}"); }
         }
+       
 
         public static void RenameSteamStartupVideo_End()
         {
@@ -5642,6 +5724,55 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion Startupvideo
 
+        #region shurdownmenuitem
+        private void ShutdownMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            Console.WriteLine("Shutdown-Button geklickt. Räume auf und fahre den Computer herunter...");
+
+            // ZUERST die Aufräum-Methode aufrufen
+            RenameSteamStartupVideo_End();
+
+            // DANN den Computer herunterfahren
+            Process.Start("shutdown", "/s /t 0");
+        }
+
+        private void SleepMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            PowerMenu.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.TopButtons;
+            UpdateVisualFocus();
+            // Die beiden anderen Parameter sind Standard und sollten auf false bleiben.
+            SetSuspendState(true, false, false);
+            PlaydeactivationSound();
+        }
+
+        private async void RestartMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            PowerMenu.Visibility = Visibility.Collapsed;
+
+            // Wichtige Aufräum-Aktion vor dem Neustart ausführen
+            RenameSteamStartupVideo_End();
+
+            // Kurze Verzögerung, um sicherzustellen, dass der vorherige Befehl abgeschlossen ist
+            await Task.Delay(200);
+
+            // Startet den Computer neu
+            Process.Start("shutdown", "/r /t 0");
+        }
+
+        private void ShutdownButton_Click_1(object sender, RoutedEventArgs e)
+        {
+            Console.WriteLine("Shutdown-Button geklickt. Räume auf und fahre den Computer herunter...");
+
+            // ZUERST die Aufräum-Methode aufrufen
+            RenameSteamStartupVideo_End();
+
+            // DANN den Computer herunterfahren
+            Process.Start("shutdown", "/s /t 0");
+        }
+        #endregion shurdownmenuitem
+
+
         #endregion methodes
 
         private void LauncherTileRow_Loaded(object sender, RoutedEventArgs e)
@@ -5649,22 +5780,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
            
         }
 
-        /// <summary>
-        /// Fährt den Computer herunter.
-        /// </summary>
-        private async void ShutdownButton_Click(object sender, RoutedEventArgs e)
-        {
-            Console.WriteLine("Shutdown-Button geklickt. Räume auf und fahre den Computer herunter...");
-
-            // ZUERST die Aufräum-Methode aufrufen
-            RenameSteamStartupVideo_End();
-
-            // Gib dem System einen winzigen Moment Zeit, die Dateioperation abzuschließen
-            await Task.Delay(200);
-
-            // DANN den Computer herunterfahren
-            Process.Start("shutdown", "/s /t 0");
-        }
 
         private void ExitGcmButton_Click_1(object sender, RoutedEventArgs e)
         {

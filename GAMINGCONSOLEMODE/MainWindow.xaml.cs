@@ -42,7 +42,7 @@ namespace GAMINGCONSOLEMODE
 
         string owner = "toonymak1993";  // Repository owner
     string repo = "GameConsoleMode";   // Repository name
-    string currentVersion = "2.3.6";  // Your current version // <change when new Verison
+    string currentVersion = "2.3.7";  // Your current version // <change when new Verison
         public MainWindow()
         {
             this.InitializeComponent();
