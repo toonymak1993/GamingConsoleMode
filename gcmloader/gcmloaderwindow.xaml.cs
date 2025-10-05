@@ -22,6 +22,8 @@ using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using Windows.Devices.Power;
+using Windows.Networking.Connectivity;
 using System.Media;
 // SteamGridDBHelper.cs
 using System.Net.Http;
@@ -56,7 +58,9 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
-      
+        #region ui status
+        private DispatcherTimer _statusUpdateTimer;
+        #endregion ui status
 
         #region wingamepad
         private DispatcherTimer _wingamepadMonitor;
@@ -712,7 +716,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             LoadDynamicLauncherCards();
             _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
-            _powerMenuItems = new List<Button> { ShutdownMenuItem, SleepMenuItem, RestartMenuItem };
+            _powerMenuItems = new List<Button> { ShutdownMenuItem, RestartMenuItem, SleepMenuItem , LogOffMenuItem };
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Application.Current.UnhandledException += CurrentApp_UnhandledException;
@@ -723,7 +727,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
            
             LoadShortcutsFromSettings();
             SetupGamepad();
-            
+            SetupStatusTimer();
             Start();
             //ASYNC PROZES
             ShowTaskManager();
@@ -746,8 +750,123 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         }
 
-       
-     
+        #region uistatustimer
+        private void SetupStatusTimer()
+        {
+            _statusUpdateTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(5) // Aktualisiert alle 5 Sekunden
+            };
+            _statusUpdateTimer.Tick += StatusUpdateTimer_Tick;
+            _statusUpdateTimer.Start();
+
+            // Rufe die Aktualisierung einmal direkt beim Start auf
+            StatusUpdateTimer_Tick(null, null);
+        }
+
+        /// <summary>
+        /// Wird vom Timer alle 5 Sekunden aufgerufen, um die Status-Icons zu aktualisieren.
+        /// </summary>
+        private void StatusUpdateTimer_Tick(object sender, object e)
+        {
+            UpdateBatteryStatus();
+            UpdateNetworkStatus();
+        }
+
+        /// <summary>
+        /// Liest den Akku-Status aus und aktualisiert das Icon und die Prozentanzeige.
+        /// Versteckt die Anzeige automatisch auf Desktop-PCs ohne Akku.
+        /// </summary>
+        private void UpdateBatteryStatus()
+        {
+            try
+            {
+                var batteryReport = Battery.AggregateBattery.GetReport();
+
+                // Prüfen, ob überhaupt ein Akku vorhanden ist
+                if (batteryReport.FullChargeCapacityInMilliwattHours == null ||
+                    batteryReport.RemainingCapacityInMilliwattHours == null ||
+                    batteryReport.Status == Windows.System.Power.BatteryStatus.NotPresent)
+                {
+                    BatteryIcon.Visibility = Visibility.Collapsed;
+                    BatteryPercentageText.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                // Wenn ein Akku da ist, sorge dafür, dass die Elemente sichtbar sind
+                BatteryIcon.Visibility = Visibility.Visible;
+                BatteryPercentageText.Visibility = Visibility.Visible;
+
+                double percentage = (double)batteryReport.RemainingCapacityInMilliwattHours.Value / batteryReport.FullChargeCapacityInMilliwattHours.Value * 100;
+                BatteryPercentageText.Text = $"{Math.Round(percentage)}%";
+
+                var isCharging = batteryReport.Status == Windows.System.Power.BatteryStatus.Charging;
+                int percentageStep = (int)(Math.Round(percentage / 10.0)); // In 10er-Schritte für die Icons umrechnen
+
+                // Wähle das passende Glyph aus der Segoe Fluent Icons Schriftart
+                BatteryIcon.Glyph = (isCharging, percentageStep) switch
+                {
+                    (true, _) => "\uE83E",   // Lade-Symbol
+                    (false, 10) => "\uE83F", // 100%
+                    (false, 9) => "\uE83E",  // 90%
+                    (false, 8) => "\uE83D",  // 80%
+                    (false, 7) => "\uE83C",  // 70%
+                    (false, 6) => "\uE83B",  // 60%
+                    (false, 5) => "\uE83A",  // 50%
+                    (false, 4) => "\uE839",  // 40%
+                    (false, 3) => "\uE838",  // 30%
+                    (false, 2) => "\uE837",  // 20%
+                    (false, 1) => "\uE836",  // 10%
+                    _ => "\uE835"           // 0% oder weniger
+                };
+            }
+            catch (Exception ex)
+            {
+                // Fehler abfangen, falls die API aus irgendeinem Grund nicht verfügbar ist
+                Debug.WriteLine($"[UpdateBatteryStatus] Error: {ex.Message}");
+                BatteryIcon.Visibility = Visibility.Collapsed;
+                BatteryPercentageText.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// Prüft den Netzwerkstatus und wählt das passende Icon für WLAN, LAN oder keine Verbindung.
+        /// </summary>
+        private void UpdateNetworkStatus()
+        {
+            var connectionProfile = Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
+
+            if (connectionProfile == null || connectionProfile.GetNetworkConnectivityLevel() < NetworkConnectivityLevel.InternetAccess)
+            {
+                NetworkStatusIcon.Glyph = "\uF140"; // "Keine Verbindung"-Icon
+                return;
+            }
+
+            if (connectionProfile.IsWlanConnectionProfile)
+            {
+                // Signalstärke für WLAN
+                byte? signalBars = connectionProfile.GetSignalBars();
+                NetworkStatusIcon.Glyph = signalBars switch
+                {
+                    4 or 5 => "\uE704", // 4 Balken (max)
+                    3 => "\uE703",      // 3 Balken
+                    2 => "\uE702",      // 2 Balken
+                    1 => "\uE701",      // 1 Balken
+                    _ => "\uE700"       // Kein Signal
+                };
+            }
+            else if (connectionProfile.NetworkAdapter.IanaInterfaceType == 6) // IANA-Typ 6 ist "ethernetCsmacd"
+            {
+                NetworkStatusIcon.Glyph = "\uE839"; // Ethernet-Icon
+            }
+            else
+            {
+                NetworkStatusIcon.Glyph = "\uE774"; // Generisches "Netzwerk"-Icon für andere Verbindungen
+            }
+        }
+
+        #endregion ui statustimer
+
         private void perfectsettings()
         {
             // Usewinpartstartapps
@@ -5024,9 +5143,25 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 else if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
                 {
                     var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                    if (selectedButton == ShutdownMenuItem) { ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs()); }
-                    else if (selectedButton == SleepMenuItem) { SleepMenuItem_Click(selectedButton, new RoutedEventArgs()); }
-                    else if (selectedButton == RestartMenuItem) { RestartMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+
+           
+                    if (selectedButton == ShutdownMenuItem)
+                    {
+                        ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
+                    }
+                    else if (selectedButton == RestartMenuItem)
+                    {
+                        RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
+                    }
+                    else if (selectedButton == LogOffMenuItem) 
+                    {
+                        LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
+                    }
+                    else if (selectedButton == SleepMenuItem)
+                    {
+                        SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
+                    }
+
                     PlayActivationSound();
                 }
                 else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
@@ -5744,6 +5879,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Die beiden anderen Parameter sind Standard und sollten auf false bleiben.
             SetSuspendState(true, false, false);
             PlaydeactivationSound();
+        }
+
+        private async void LogOffMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            PowerMenu.Visibility = Visibility.Collapsed;
+
+            // Wichtige Aufräum-Aktion vor dem Abmelden ausführen
+            RenameSteamStartupVideo_End();
+
+            await Task.Delay(200);
+
+            // Meldet den aktuellen Benutzer ab
+            Process.Start("shutdown", "/l");
         }
 
         private async void RestartMenuItem_Click(object sender, RoutedEventArgs e)

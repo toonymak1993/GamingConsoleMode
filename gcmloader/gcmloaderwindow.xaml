@@ -4,9 +4,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="GCM TaskManager">
 
-
-    
-    
     <Grid x:Name="RootGrid">
         <Grid.Resources>
             <Style x:Key="PowerMenuStyle" TargetType="Button">
@@ -18,6 +15,7 @@
                 <Setter Property="HorizontalContentAlignment" Value="Left"/>
             </Style>
         </Grid.Resources>
+
         <Grid x:Name="MainContent" Visibility="Collapsed">
 
             <Button x:Name="FocusSink" Width="0" Height="0" IsTabStop="True"/>
@@ -41,18 +39,29 @@
                    IsHitTestVisible="False"/>
 
             <Border x:Name="infopanelright"
-        Background="#88000000"
-        CornerRadius="10"
-        HorizontalAlignment="Right"
-        VerticalAlignment="Top"
-        Margin="20" Padding="10">
+                    Background="#88000000"
+                    CornerRadius="10"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="20" Padding="10">
                 <Grid ColumnSpacing="15" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
+
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
 
+                        <!-- HINZUGEFÜGT: STATUS-ICONS -->
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,15,0">
+                            <FontIcon x:Name="NetworkStatusIcon" Glyph="&#xE701;" FontSize="16" Foreground="White"/>
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <FontIcon x:Name="BatteryIcon" Glyph="&#xE83F;" FontSize="16" Foreground="White"/>
+                                <TextBlock x:Name="BatteryPercentageText" Text="100%" FontSize="14" Foreground="White" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Bestehende Buttons -->
                         <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1">
                             <ToolTipService.ToolTip>
                                 <TextBlock Text="Zurück zum Desktop"/>
@@ -60,51 +69,51 @@
                             <FontIcon Glyph="&#xf1cb;" FontSize="18"/>
                         </Button>
 
-                        <Button x:Name="ShutdownButton" Width="50" Height="40" Click="ShutdownButton_Click_1">
+                        <Button x:Name="ShutdownButton" Width="50" Height="40" Click="PowerButton_Click">
                             <ToolTipService.ToolTip>
                                 <TextBlock Text="Power-Menü"/>
                             </ToolTipService.ToolTip>
                             <FontIcon Glyph="&#xe7e8;" FontSize="18"/>
                         </Button>
-
                     </StackPanel>
+
                     <TextBlock x:Name="ClockText" Grid.Column="1" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
                 </Grid>
             </Border>
 
             <Grid VerticalAlignment="Bottom"      
-      Height="420"
-      HorizontalAlignment="Stretch">
+                  Height="420"
+                  HorizontalAlignment="Stretch">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition x:Name="LauncherColumn" Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition x:Name="CardsColumn" Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <StackPanel x:Name="LauncherAreaPanel" 
-                Grid.Column="0" 
-                Orientation="Horizontal"
-                Spacing="10"
-                VerticalAlignment="Center" 
-                HorizontalAlignment="Left" 
-                Margin="60,0,0,0">
+                <StackPanel x:Name="LauncherAreaPanel"  
+                            Grid.Column="0"  
+                            Orientation="Horizontal"
+                            Spacing="10"
+                            VerticalAlignment="Center"  
+                            HorizontalAlignment="Left"  
+                            Margin="60,0,0,0">
                 </StackPanel>
 
                 <Rectangle x:Name="ColumnSeparator" Grid.Column="1"
-               Width="2"
-               Fill="#55FFFFFF"
-               Height="200"
-               RadiusX="1" RadiusY="1"
-               VerticalAlignment="Center"
-               Margin="40,0,40,0"/>
+                           Width="2"
+                           Fill="#55FFFFFF"
+                           Height="200"
+                           RadiusX="1" RadiusY="1"
+                           VerticalAlignment="Center"
+                           Margin="40,0,40,0"/>
 
                 <ScrollViewer x:Name="ProgramScrollViewer"
-                  Grid.Column="2"
-                  VerticalScrollBarVisibility="Disabled"
-                  VerticalAlignment="Center"
-                  Padding="0,0,60,0"
-                  HorizontalScrollMode="Enabled"    
-                  HorizontalScrollBarVisibility="Hidden">
+                              Grid.Column="2"
+                              VerticalScrollBarVisibility="Disabled"
+                              VerticalAlignment="Center"
+                              Padding="0,0,60,0"
+                              HorizontalScrollMode="Enabled"    
+                              HorizontalScrollBarVisibility="Hidden">
                     <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
                 </ScrollViewer>
             </Grid>
@@ -138,16 +147,17 @@
                 </StackPanel>
             </Border>
         </Grid>
+
         <Border x:Name="FocusLossOverlay"
-        Background="#D8000000" Visibility="Collapsed"
-        Canvas.ZIndex="99">
+                Background="#D8000000" Visibility="Collapsed"
+                Canvas.ZIndex="99">
             <Grid>
                 <Image Source="/Assets/gcm_ui_logo.png"
-               HorizontalAlignment="Center"
-               VerticalAlignment="Center"
-               Width="200"
-               Height="200"
-               Stretch="Uniform"/>
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Width="200"
+                       Height="200"
+                       Stretch="Uniform"/>
             </Grid>
         </Border>
 
@@ -158,7 +168,6 @@
                               VerticalAlignment="Stretch"
                               Background="Black"/>
 
-        <!-- POWERMENU -->
         <Border x:Name="PowerMenu"
                 Visibility="Collapsed"
                 HorizontalAlignment="Right"
@@ -175,20 +184,25 @@
                         <TextBlock Text="Shutdown"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="SleepMenuItem" Style="{StaticResource PowerMenuStyle}" Click="SleepMenuItem_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xe740;" FontSize="16"/>
-                        <TextBlock Text="Sleep"/>
-                    </StackPanel>
-                </Button>
                 <Button x:Name="RestartMenuItem" Style="{StaticResource PowerMenuStyle}" Click="RestartMenuItem_Click">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xe777;" FontSize="16"/>
                         <TextBlock Text="Restart"/>
                     </StackPanel>
                 </Button>
+                <Button x:Name="SleepMenuItem" Style="{StaticResource PowerMenuStyle}" Click="SleepMenuItem_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xe740;" FontSize="16"/>
+                        <TextBlock Text="Sleep"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="LogOffMenuItem" Style="{StaticResource PowerMenuStyle}" Click="LogOffMenuItem_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xe77b;" FontSize="16"/>
+                        <TextBlock Text="Log Off"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Border>
-
     </Grid>
 </Window>
