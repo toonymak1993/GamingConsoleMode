@@ -5899,9 +5899,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
 
-
-
-
         /// <summary>
         /// Führt die Klick-Aktion für den aktuell ausgewählten oberen Button aus.
         /// </summary>

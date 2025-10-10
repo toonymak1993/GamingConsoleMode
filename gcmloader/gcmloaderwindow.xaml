@@ -248,16 +248,16 @@
                         <TextBlock Text="Restart"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="LogOffMenuItem" Style="{StaticResource PowerMenuStyle}" Click="LogOffMenuItem_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xe77b;" FontSize="16"/>
-                        <TextBlock Text="Log Off"/>
-                    </StackPanel>
-                </Button>
                 <Button x:Name="SleepMenuItem" Style="{StaticResource PowerMenuStyle}" Click="SleepMenuItem_Click">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xe740;" FontSize="16"/>
                         <TextBlock Text="Sleep"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="LogOffMenuItem" Style="{StaticResource PowerMenuStyle}" Click="LogOffMenuItem_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xe77b;" FontSize="16"/>
+                        <TextBlock Text="Log Off"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
