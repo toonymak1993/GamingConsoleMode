@@ -16,14 +16,13 @@ using NAudio.CoreAudioApi;
 using SharpDX.XInput;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Data;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
-using Windows.Devices.Power;
-using Windows.Networking.Connectivity;
 using System.Media;
 // SteamGridDBHelper.cs
 using System.Net.Http;
@@ -31,17 +30,24 @@ using System.Net.Http.Headers;
 using System.Numerics; 
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Tomlyn;
 using Tomlyn.Model;
+using Windows.ApplicationModel;
+using Windows.Devices.Power;
 using Windows.Media.Core;
 using Windows.Media.Playback;
+using Windows.Networking.Connectivity;
 using Windows.System;
+using static System.Net.Mime.MediaTypeNames;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
 using Application = Microsoft.UI.Xaml.Application;
@@ -58,10 +64,65 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+        // FÜGE DIESEN NEUEN BEREICH HINZU
+        #region App Launcher
+
+         bool isAppListLoaded = false;
+
+        [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        internal interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, uint fFlags);
+            void GetIDList(out IntPtr ppidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxName);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+            void GetHotkey(out short pwHotkey);
+            void SetHotkey(short wHotkey);
+            void GetShowCmd(out int piShowCmd);
+            void SetShowCmd(int iShowCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+            void Resolve(IntPtr hwnd, uint fFlags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+        }
+
+        [ComImport, Guid("0000010b-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        internal interface IPersistFile
+        {
+            void GetClassID(out Guid pClassID);
+            void IsDirty();
+            void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+            void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, bool fRemember);
+            void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+            void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+        }
+
+        [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+        internal class ShellLink { }
+        private List<Button> _launcherResultButtons = new List<Button>();
+        private int _selectedLauncherResultIndex = 0;
+        private ObservableCollection<AppInfo> AllInstalledApps { get; } = new ObservableCollection<AppInfo>();
+        #endregion
+
         #region ui status
         private DispatcherTimer _statusUpdateTimer;
         #endregion ui status
-
+        #region window engine
+        // In MainWindow.cs, bei den anderen Klassenvariablen
+        private DispatcherTimer _windowEngineTimer;
+        private HashSet<IntPtr> _knownWindowHandles = new HashSet<IntPtr>();
+        private bool _isEngineInitialized = false;
+        private DateTime _appStartTime;
+        // FÜGE DIESE KONSTANTEN WIEDER OBEN HINZU
+        private const long WS_MAXIMIZEBOX = 0x00010000L;
+        private const long WS_THICKFRAME = 0x00040000L;
+        #endregion window engine
         #region wingamepad
         private DispatcherTimer _wingamepadMonitor;
         private bool _isExiting = false; 
@@ -468,7 +529,7 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu } 
+        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher }
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
@@ -531,7 +592,7 @@ namespace gcmloader
                 string discordPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "Update.exe");
                 if (File.Exists(discordPath))
                 {
-                    Process.Start(new ProcessStartInfo(discordPath, "--processStart Discord.exe") { UseShellExecute = true });
+                    Process.Start(new ProcessStartInfo(discordPath) { Arguments = "--processStart Discord.exe", UseShellExecute = true });
                 }
                 else
                 {
@@ -655,6 +716,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         public MainWindow()
         {
             this.InitializeComponent();
+           
             perfectsettings();
             StartTaskbarHidingLoop();
             // Zugriff auf das Grid-Root-Element
@@ -680,6 +742,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 };
             }
            
+
+
+
+
 
 
             // Initialisiere den SteamGridDB Helper
@@ -715,7 +781,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             LoadDynamicLauncherCards();
-            _topButtons = new List<Button> { ExitGcmButton,ShutdownButton };
+            _topButtons = new List<Button> { ExitGcmButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { ShutdownMenuItem, RestartMenuItem, SleepMenuItem , LogOffMenuItem };
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
@@ -748,7 +814,330 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             //after 10 seconds AND Start Windows Partmode
             StartAsynctasks();
 
+            _appStartTime = DateTime.UtcNow;
+            SetupWindowEngine();
+
         }
+
+        #region App Launcher Logic
+        private void AppSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Get the current search text
+            string searchText = AppSearchBox.Text;
+
+            // Create a new, filtered list from the master "AllInstalledApps" list
+            var filteredList = AllInstalledApps
+                .Where(app => app.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            // Assign the filtered list as the new data source for the GridView
+            AppGridView.ItemsSource = filteredList;
+
+            // Show the "No results" message only if the search is active but finds nothing
+            if (string.IsNullOrEmpty(searchText))
+            {
+                NoSearchResultsText.Visibility = Visibility.Collapsed;
+                // Show the original "No apps" message if the master list is empty
+                NoAppsFoundText.Visibility = (AllInstalledApps.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                NoSearchResultsText.Visibility = (filteredList.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
+                NoAppsFoundText.Visibility = Visibility.Collapsed;
+            }
+        }
+
+
+        /// <summary>
+        /// This event is triggered when the semi-transparent background of the App Launcher is clicked.
+        /// </summary>
+        private void AppLauncher_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            // A click on the background should close the launcher.
+            // We can simply call the same method that opens and closes it.
+            ToggleAppLauncher_Click(sender, null); // Using null for RoutedEventArgs is fine here
+        }
+
+        /// <summary>
+        /// This event is triggered when anything INSIDE the main content border is clicked.
+        /// </summary>
+        private void AppLauncherContent_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            // By marking the event as "handled," we stop it from "bubbling up" to the parent Grid.
+            // This prevents a click on the GridView from also being treated as a background click.
+            e.Handled = true;
+        }
+
+        private async Task LoadInstalledAppsAsync()
+        {
+            Debug.WriteLine("[AppLauncher] Starting ROBUST HYBRID scan for all applications...");
+            isAppListLoaded = false;
+            AllInstalledApps.Clear();
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                AppLoadingRing.IsActive = true;
+                AppLoadingRing.Visibility = Visibility.Visible;
+                NoAppsFoundText.Visibility = Visibility.Collapsed;
+            });
+
+            var appData = await Task.Run(() =>
+            {
+                var discoveredApps = new List<(string Name, string FilePath)>();
+                var seenDisplayNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                // =====================================================================
+                // TEIL 1: REGISTRY-SCAN (stabil und schnell)
+                // =====================================================================
+                // (Dieser Teil bleibt unverändert und funktioniert ja bei dir)
+                string[] registryPaths = { @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" };
+                RegistryKey[] rootKeys = { Registry.CurrentUser, Registry.LocalMachine };
+                foreach (var rootKey in rootKeys) { /* ... Deine komplette Registry-Logik von vorhin hier ... */ }
+
+                // =================================================================================
+                // TEIL 2: MANUELLER STARTMENÜ-SCAN (immun gegen "Access Denied")
+                // =================================================================================
+                Debug.WriteLine("[AppLauncher] ----- Starting Part 2: Manual & Robust Start Menu (.lnk) Scan -----");
+                string[] startMenuPaths = {
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
+            Environment.GetFolderPath(Environment.SpecialFolder.StartMenu)
+        };
+
+                foreach (var path in startMenuPaths)
+                {
+                    // Wir starten die neue, rekursive Suchfunktion
+                    ScanFolderForLnks(path, discoveredApps, seenDisplayNames);
+                }
+
+                return discoveredApps.OrderBy(a => a.Name).ToList();
+            });
+
+            foreach (var app in appData)
+            {
+                AllInstalledApps.Add(new AppInfo
+                {
+                    Name = app.Name,
+                    FilePath = app.FilePath,
+                    Icon = GetAppIconAsBitmapImage(app.FilePath)
+                });
+            }
+
+            Debug.WriteLine($"[AppLauncher] Hybrid Scan finished. Total found: {AllInstalledApps.Count} applications.");
+            isAppListLoaded = true;
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                AppLoadingRing.IsActive = false;
+                AppLoadingRing.Visibility = Visibility.Collapsed;
+                NoAppsFoundText.Visibility = AllInstalledApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                if (AppLauncher.Visibility == Visibility.Visible && AppGridView.Items.Count > 0)
+                {
+                    AppGridView.SelectedIndex = 0;
+                }
+            });
+        }
+
+        private void ScanFolderForLnks(string folderPath, List<(string Name, string FilePath)> discoveredApps, HashSet<string> seenDisplayNames)
+        {
+            try
+            {
+                // Schritt 1: Hole alle .lnk-Dateien NUR in der aktuellen Ordnerebene
+                foreach (var lnkFile in Directory.GetFiles(folderPath, "*.lnk", SearchOption.TopDirectoryOnly))
+                {
+                    string name = Path.GetFileNameWithoutExtension(lnkFile);
+                    if (!string.IsNullOrWhiteSpace(name) && !name.ToLower().Contains("uninstall") && seenDisplayNames.Add(name))
+                    {
+                        discoveredApps.Add((name, lnkFile));
+                    }
+                }
+
+                // Schritt 2: Gehe in jeden Unterordner und rufe diese Funktion für ihn erneut auf
+                foreach (var subFolderPath in Directory.GetDirectories(folderPath))
+                {
+                    ScanFolderForLnks(subFolderPath, discoveredApps, seenDisplayNames);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Das ist der entscheidende Punkt: Wenn wir auf einen geschützten Ordner stoßen,
+                // protokollieren wir das und machen einfach weiter, anstatt abzubrechen.
+                Debug.WriteLine($"[AppLauncher] SKIPPED protected folder: {folderPath}");
+            }
+            catch (Exception ex)
+            {
+                // Fange andere mögliche Dateisystemfehler ab
+                Debug.WriteLine($"[AppLauncher] Error scanning folder '{folderPath}': {ex.Message}");
+            }
+        }
+
+        // NEU: Unsere eigene Methode zum Auslesen von .lnk-Dateien
+        private string ResolveLnkShortcut(string lnkPath)
+        {
+            var shellLink = (IShellLinkW)new ShellLink();
+            var persistFile = (IPersistFile)shellLink;
+            persistFile.Load(lnkPath, 0); // STGM_READ
+
+            var sb = new StringBuilder(1024);
+            shellLink.GetPath(sb, sb.Capacity, IntPtr.Zero, 0);
+
+            return sb.ToString();
+        }
+
+        #endregion
+
+
+        #region window engine
+
+        /// <summary>
+        /// Prüft, ob ein Fenster maximiert werden kann (indem es nach dem Maximize-Button im Stil sucht).
+        /// </summary>
+        private bool CanWindowBeMaximized(IntPtr hWnd)
+        {
+            long style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+            return (style & WS_MAXIMIZEBOX) != 0;
+        }
+
+        /// <summary>
+        /// Prüft anhand des Dateipfads, ob es sich wahrscheinlich um ein Spiel handelt.
+        /// </summary>
+        private bool IsLikelyGame(Process proc)
+        {
+            try
+            {
+                string exePath = proc.MainModule?.FileName;
+                if (!string.IsNullOrEmpty(exePath) && _gamePathKeywords.Any(keyword => exePath.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+            catch { /* Zugriff verweigert, ignorieren */ }
+            return false;
+        }
+
+        /// <summary>
+        /// Erzwingt den randlosen Vollbildmodus (nur für Spiele verwenden).
+        /// </summary>
+        private void ForceWindowFullscreen(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return;
+            int screenWidth = GetScreenWidth();
+            int screenHeight = GetScreenHeight();
+            IntPtr style = GetWindowLongPtr(hwnd, GWL_STYLE);
+            style = (IntPtr)((long)style & ~WS_CAPTION & ~WS_THICKFRAME);
+            SetWindowLongPtr(hwnd, GWL_STYLE, style);
+            SetWindowPos(hwnd, HWND_TOP, 0, 0, screenWidth, screenHeight, 0x0020);
+        }
+        private void SetupWindowEngine()
+        {
+            _windowEngineTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _windowEngineTimer.Tick += WindowEngine_Tick;
+            _windowEngineTimer.Start();
+        }
+
+        /// <summary>
+        /// Die Kernlogik der Window Engine, wird jede Sekunde ausgeführt.
+        /// </summary>
+        /// <summary>
+        /// Die Kernlogik der Window Engine, wird jede Sekunde ausgeführt.
+        /// </summary>
+        private void WindowEngine_Tick(object sender, object e)
+        {
+            // Initialisierungs-Logik bleibt unverändert
+            if (!_isEngineInitialized)
+            {
+                if ((DateTime.UtcNow - _appStartTime).TotalSeconds > 10)
+                {
+                    _knownWindowHandles = GetCurrentWindows();
+                    _isEngineInitialized = true;
+                    Debug.WriteLine($"[WindowEngine] Initialized with {_knownWindowHandles.Count} windows.");
+                }
+                return;
+            }
+
+            var currentWindows = GetCurrentWindows();
+            var newWindows = currentWindows.Except(_knownWindowHandles).ToList();
+
+            if (newWindows.Any())
+            {
+                IntPtr newWindowHwnd = newWindows.Last();
+
+                try
+                {
+                    GetWindowThreadProcessId(newWindowHwnd, out uint pid);
+                    if (pid == 0) return;
+
+                    Process newProcess = Process.GetProcessById((int)pid);
+
+                    // --- NEUE, INTELLIGENTE ENTSCHEIDUNGSLOGIK ---
+
+                    // Fall 1: Ist es ein Spiel?
+                    if (IsLikelyGame(newProcess))
+                    {
+                        Debug.WriteLine($"[WindowEngine] Game detected: {newProcess.ProcessName}. Forcing fullscreen.");
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            BringToFrontAndFocus(newWindowHwnd);
+                            ForceWindowFullscreen(newWindowHwnd);
+                            // Optional: GCM ausblenden, um maximale Performance zu geben
+                            // ShowWindow(WinRT.Interop.WindowNative.GetWindowHandle(this), 0); 
+                        });
+                    }
+                    // Fall 2: Ist es eine normale App, die Maximieren unterstützt?
+                    else if (CanWindowBeMaximized(newWindowHwnd))
+                    {
+                        Debug.WriteLine($"[WindowEngine] App detected: {newProcess.ProcessName}. Maximizing.");
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            BringToFrontAndFocus(newWindowHwnd);
+                            ShowWindow(newWindowHwnd, SW_SHOWMAXIMIZED);
+                        });
+                    }
+                    // Fall 3: Es ist ein Dialog oder ein Fenster mit fester Größe.
+                    else
+                    {
+                        Debug.WriteLine($"[WindowEngine] Dialog/Fixed window detected: {newProcess.ProcessName}. Bringing to front only.");
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            BringToFrontAndFocus(newWindowHwnd);
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[WindowEngine] Error processing new window, ignoring: {ex.Message}");
+                }
+            }
+            _knownWindowHandles = currentWindows;
+        }
+
+
+
+
+        /// <summary>
+        /// Sammelt alle relevanten, sichtbaren Hauptfenster.
+        /// </summary>
+        private HashSet<IntPtr> GetCurrentWindows()
+        {
+            var windows = new HashSet<IntPtr>();
+            var selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+            EnumWindows((hWnd, lParam) => {
+                // Filtere unser eigenes Fenster, unsichtbare Fenster und "Kind"-Fenster heraus
+                if (hWnd == selfHwnd || !IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
+                    return true;
+
+                // Filtere Fenster ohne Titel und spezielle "Tool"-Fenster heraus
+                var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
+                if (GetWindowTextLength(hWnd) == 0 || style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW) || IsCloaked(hWnd))
+                    return true;
+
+                windows.Add(hWnd);
+                return true;
+            }, IntPtr.Zero);
+
+            return windows;
+        }
+        #endregion window engine
 
         #region uistatustimer
         private void SetupStatusTimer()
@@ -2200,22 +2589,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Forces a window into true borderless fullscreen by resizing it to the screen dimensions.
         /// </summary>
-        private void ForceWindowFullscreen(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return;
-
-            // Get the actual screen dimensions
-            int screenWidth = GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
-            int screenHeight = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
-
-            // Remove window styles that create borders and a title bar
-            IntPtr style = GetWindowLongPtr(hwnd, GWL_STYLE);
-            style = (IntPtr)((long)style & ~WS_CAPTION & ~0x00040000L); // WS_THICKFRAME
-            SetWindowLongPtr(hwnd, GWL_STYLE, style);
-
-            // Resize and move the window to cover the entire screen
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, 0x0020); // SWP_FRAMECHANGED
-        }
+       
 
 
         private void MinimizeSelf()
@@ -2276,6 +2650,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // making it the top-level window without changing its Z-order insertion.
             SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
         }
+
+        private IntPtr FindSteamBigPictureWindow()
+        {
+            IntPtr steamHwnd = IntPtr.Zero;
+            EnumWindows((hWnd, lParam) => {
+                // Fenster muss sichtbar sein und einen Titel haben
+                if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0)
+                    return true;
+
+                var titleBuilder = new StringBuilder(256);
+                GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
+                string windowTitle = titleBuilder.ToString();
+
+                // Der Titel von Big Picture ist oft nur "Steam" und der Prozess ist "steam"
+                if (windowTitle.Equals("Steam", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        Process p = Process.GetProcessById((int)pid);
+                        if (p.ProcessName.Equals("steam", StringComparison.OrdinalIgnoreCase))
+                        {
+                            steamHwnd = hWnd;
+                            return false; // Fenster gefunden, Suche beenden
+                        }
+                    }
+                    catch { /* Prozess existiert vielleicht nicht mehr, ignorieren */ }
+                }
+                return true; // Weitersuchen
+            }, IntPtr.Zero);
+
+            return steamHwnd;
+        }
+
+
         private async void SwitchToConfiguredLauncher()
         {
             MakeSelfNonTopmost();
@@ -2283,85 +2692,66 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             string launcher = AppSettings.Load<string>("launcher");
             Debug.WriteLine($"Switching to launcher '{launcher}'...");
 
-            switch (launcher)
+            try
             {
-                // ... (steam, playnite, custom bleiben unverändert) ...
-                case "steam":
-                    Process.Start(new ProcessStartInfo("steam://open/bigpicture") { UseShellExecute = true });
-                    break;
-                case "playnite":
-                    string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
-                    string playniteProcessName = "Playnite.FullscreenApp";
-                    Process playniteProcess = Process.GetProcessesByName(playniteProcessName).FirstOrDefault();
-                    if (playniteProcess != null && playniteProcess.MainWindowHandle != IntPtr.Zero)
-                    { TaskManagerBringWindowToForeground(playniteProcess.MainWindowHandle); }
-                    else
-                    { Process.Start(new ProcessStartInfo(playnitePath, "--startfullscreen") { UseShellExecute = true }); }
-                    break;
-                case "custom":
-                    string customPath = AppSettings.Load<string>("customlauncherpath");
-                    string customProcessName = Path.GetFileNameWithoutExtension(customPath);
-                    Process customProcess = Process.GetProcessesByName(customProcessName).FirstOrDefault();
-                    if (customProcess != null && customProcess.MainWindowHandle != IntPtr.Zero)
-                    { TaskManagerBringWindowToForeground(customProcess.MainWindowHandle); }
-                    else
-                    { Process.Start(new ProcessStartInfo(customPath) { UseShellExecute = true }); }
-                    break;
+                IntPtr launcherHwnd = IntPtr.Zero;
+                string processNameToFind = null;
+                bool startNew = false;
 
-                case "xbox":
-                    IntPtr hwnd = await FindXboxWindowHandleAsync(0);
+                switch (launcher)
+                {
+                    case "steam":
+                        // Steam hat oft mehrere Fenster, wir brauchen das "BigPicture"-Fenster
+                        launcherHwnd = FindSteamBigPictureWindow();
+                        if (launcherHwnd == IntPtr.Zero) startNew = true;
+                        break;
 
-                    if (hwnd != IntPtr.Zero)
-                    {
-                        // --- DAS IST DIE FINALE LOGIK ---
-                        Debug.WriteLine("Xbox window found. Switching focus carefully...");
+                    case "playnite":
+                        processNameToFind = "Playnite.FullscreenApp";
+                        break;
 
-                        // Schritt 1: Prüfe, ob das Fenster MINIMIERT ist.
-                        if (IsIconic(hwnd))
-                        {
-                            // Nur wenn es minimiert ist, stellen wir es wieder her.
-                            Debug.WriteLine("Window is minimized, restoring it...");
-                            ShowWindow(hwnd, SW_RESTORE);
-                        }
+                    case "custom":
+                        processNameToFind = Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath"));
+                        break;
 
-                        // Schritt 2: Bringe das Fenster in den Vordergrund, OHNE seine Größe zu ändern.
-                        // Wir benutzen hierfür den zuverlässigen "AttachThreadInput"-Trick.
-                        IntPtr foregroundHwnd = GetForegroundWindow();
-                        if (foregroundHwnd != hwnd) // Nur ausführen, wenn es nicht schon vorne ist
-                        {
-                            uint foregroundThreadId = GetWindowThreadProcessId(foregroundHwnd, out _);
-                            uint ourThreadId = GetCurrentThreadId();
+                    case "xbox":
+                        // Xbox Logik bleibt getrennt, da UWP anders funktioniert
+                        IntPtr hwndXbox = await FindXboxWindowHandleAsync(0);
+                        if (hwndXbox != IntPtr.Zero) { SwitchToWindowReliably(hwndXbox); }
+                        else { Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true }); }
+                        return; // Beende die Methode hier für Xbox
+                }
 
-                            AttachThreadInput(ourThreadId, foregroundThreadId, true);
-                            SetForegroundWindow(hwnd);
-                            AttachThreadInput(ourThreadId, foregroundThreadId, false);
-                        }
-                    }
-                    else
-                    {
-                        // Wenn das Fenster nicht existiert, starten wir es und maximieren es danach.
-                        Debug.WriteLine("Xbox window not found. Launching and then maximizing...");
-                        Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
-                        hwnd = await FindXboxWindowHandleAsync(15);
+                if (processNameToFind != null)
+                {
+                    Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
+                    if (proc != null) launcherHwnd = proc.MainWindowHandle;
+                    else startNew = true;
+                }
 
-                        if (hwnd != IntPtr.Zero)
-                        {
-                            TaskManagerBringWindowToForeground(hwnd);
-                            await Task.Delay(10);
-
-                            if (!IsWindowMaximized(hwnd))
-                            {
-                                MaximizeXboxWindow(hwnd);
-                            }
-                        }
-                        else
-                        {
-                            await messagebox("Xbox App konnte nicht gefunden werden.");
-                        }
-                    }
-                    break;
+                if (launcherHwnd != IntPtr.Zero)
+                {
+                    Debug.WriteLine($"[GCM] Existing launcher window found. Showing and restoring it.");
+                    // Mache das Fenster wieder sichtbar und hole es nach vorne
+                    ShowWindow(launcherHwnd, 9); // SW_RESTORE
+                    SwitchToWindowReliably(launcherHwnd);
+                }
+                else if (startNew)
+                {
+                    Debug.WriteLine($"[GCM] No existing launcher window found. Starting a new instance.");
+                    // Starte den Launcher, wenn kein Fenster gefunden wurde
+                    if (launcher == "steam") Process.Start(new ProcessStartInfo("steam://open/bigpicture") { UseShellExecute = true });
+                    else if (launcher == "playnite") Process.Start(AppSettings.Load<string>("playnitelauncherpath"), "--startfullscreen");
+                    else if (launcher == "custom") Process.Start(AppSettings.Load<string>("customlauncherpath"));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Error during launcher switch: {ex.Message}");
             }
         }
+
+
 
         private static void MaximizeXboxWindow(IntPtr hwnd)
         {
@@ -3113,7 +3503,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (useDeckyLoader)
                 {
                     Console.WriteLine("Decky Loader is enabled. Attempting to start...");
-                    KillProcess("PluginLoader_noconsole.exe"); // Ensure no old instance is running
+                    KillProcess("PluginLoader_noconsole.exe"); 
 
                     string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                     string pluginLoaderPath = Path.Combine(userHome, "homebrew", "services", "PluginLoader_noconsole.exe");
@@ -3122,7 +3512,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         Process.Start(new ProcessStartInfo(pluginLoaderPath) { UseShellExecute = true });
                         Console.WriteLine("PluginLoader_noconsole.exe started.");
-                        await Task.Delay(2000); // Give Decky Loader a moment to initialize.
+                        await Task.Delay(2000); 
                     }
                     else
                     {
@@ -3131,9 +3521,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 // Step 4: Start Steam.
-                // These arguments are used whether Decky is on or off.
                 string arguments = "-gamepadui -noverifyfiles -nobootstrapupdate";
-                Process.Start(new ProcessStartInfo(steamPath, arguments));
+                Process.Start(new ProcessStartInfo(steamPath) { Arguments = arguments, UseShellExecute = true });
                 Console.WriteLine("Steam launched.");
             }
             catch (Exception ex)
@@ -3157,7 +3546,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 KillProcess("Playnite.FullscreenApp.exe");
-                Process.Start(new ProcessStartInfo(playnitePath, "--startfullscreen"));
+                Process.Start(new ProcessStartInfo(playnitePath) { Arguments = "--startfullscreen", UseShellExecute = true });
             }
             catch (Exception ex)
             {
@@ -3311,7 +3700,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 KillProcess(Path.GetFileName(launcherPath));
-                Process.Start(new ProcessStartInfo(launcherPath));
+                Process.Start(launcherPath);
             }
             catch (Exception ex)
             {
@@ -3579,6 +3968,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 MakeSelfNonTopmost();
                                 try
                                 {
+                                    // ZURÜCK ZUM EINFACHEN PROCESS.START
                                     Process.Start(new ProcessStartInfo(exePath)
                                     {
                                         Arguments = args,
@@ -3603,6 +3993,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
+
 
 
         /// <summary>
@@ -4544,17 +4935,46 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// The main entry point for the shortcut. Checks for Xbox fullscreen, then brings this app to front.
         /// </summary>
+        /// 
         public void BringTaskManagerToFrontAndFocus()
         {
-            // Die BringToFrontAndFocus-Methode ist stark genug, um den Fokus zu übernehmen.
-
-            // Wir müssen nur sicherstellen, dass dieser Aufruf auf dem UI-Thread ausgeführt wird.
-            DispatcherQueue.TryEnqueue(() =>
+            this.DispatcherQueue.TryEnqueue(() =>
             {
-                IntPtr hWnd = Process.GetCurrentProcess().MainWindowHandle;
-                BringToFrontAndFocus(hWnd);
+                // Finde den Prozessnamen des aktuellen Launchers aus den Einstellungen
+                string launcher = AppSettings.Load<string>("launcher");
+                string processNameToHide = launcher switch
+                {
+                    "steam" => "steam",
+                    "playnite" => "Playnite.FullscreenApp",
+                    "custom" => Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath")),
+                    _ => null
+                };
+
+                if (processNameToHide != null)
+                {
+                    try
+                    {
+                        // Finde den Prozess und verstecke sein Hauptfenster
+                        Process proc = Process.GetProcessesByName(processNameToHide).FirstOrDefault();
+                        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+                        {
+                            Debug.WriteLine($"[GCM] Hiding {processNameToHide} window.");
+                            ShowWindow(proc.MainWindowHandle, 0); // SW_HIDE
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[GCM] Error trying to hide launcher window: {ex.Message}");
+                    }
+                }
+
+                // Bringe danach unser eigenes Fenster nach vorne
+                IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                BringToFrontAndFocus(selfHwnd);
             });
         }
+
+
         private async Task StartXbox()
         {
             try
@@ -5125,7 +5545,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return;
             }
 
-            // Logik für das geöffnete Power-Menü
+            // --- Logik für das geöffnete Power-Menü ---
             if (_currentFocusArea == FocusArea.PowerMenu)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadDown, currentButtons))
@@ -5143,30 +5563,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 else if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
                 {
                     var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-
-           
-                    if (selectedButton == ShutdownMenuItem)
-                    {
-                        ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
-                    }
-                    else if (selectedButton == RestartMenuItem)
-                    {
-                        RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
-                    }
-                    else if (selectedButton == LogOffMenuItem) 
-                    {
-                        LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
-                    }
-                    else if (selectedButton == SleepMenuItem)
-                    {
-                        SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
-                    }
-
+                    if (selectedButton == ShutdownMenuItem) { ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+                    else if (selectedButton == RestartMenuItem) { RestartMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+                    else if (selectedButton == LogOffMenuItem) { LogOffMenuItem_Click(selectedButton, new RoutedEventArgs()); }
+                    else if (selectedButton == SleepMenuItem) { SleepMenuItem_Click(selectedButton, new RoutedEventArgs()); }
                     PlayActivationSound();
                 }
                 else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
                 {
-                    // HIER IST DIE KORREKTE LOGIK ZUM SCHLIESSEN
                     PowerMenu.Visibility = Visibility.Collapsed;
                     _currentFocusArea = FocusArea.TopButtons;
                     UpdateVisualFocus();
@@ -5175,8 +5579,84 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _lastButtonState = currentButtons;
                 return; // Verhindert, dass die restliche Navigation ausgeführt wird
             }
+            // --- Logik für den geöffneten App Launcher (KOMPLETT KORRIGIERT) ---
+            else if (_currentFocusArea == FocusArea.AppLauncher)
+            {
+                if (AppGridView.Items.Count > 0)
+                {
+                    // Anzahl der Spalten dynamisch berechnen für korrekte Hoch/Runter-Navigation
+                    int columns = 4; // Standard-Fallback-Wert
+                    if (AppGridView.ActualWidth > 0)
+                    {
+                        var container = AppGridView.ContainerFromIndex(0) as GridViewItem;
+                        if (container != null && container.ActualWidth > 0)
+                        {
+                            columns = (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth);
+                            if (columns == 0) columns = 1; // Verhindert Division durch Null
+                        }
+                    }
 
-            // Fokus-Bereich mit Schultertasten wechseln
+                    if (IsNewButtonPress(GamepadButtonFlags.DPadDown, currentButtons))
+                    {
+                        var newIndex = AppGridView.SelectedIndex + columns; // Springe eine ganze Zeile nach unten
+                        if (newIndex >= AppGridView.Items.Count) newIndex = AppGridView.Items.Count - 1;
+                        AppGridView.SelectedIndex = newIndex;
+                        AppGridView.ScrollIntoView(AppGridView.SelectedItem);
+                        PlayNavigationSound();
+                    }
+                    else if (IsNewButtonPress(GamepadButtonFlags.DPadUp, currentButtons))
+                    {
+                        var newIndex = AppGridView.SelectedIndex - columns; // Springe eine ganze Zeile nach oben
+                        if (newIndex < 0) newIndex = 0;
+                        AppGridView.SelectedIndex = newIndex;
+                        AppGridView.ScrollIntoView(AppGridView.SelectedItem);
+                        PlayNavigationSound();
+                    }
+                    else if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
+                    {
+                        AppGridView.SelectedIndex = (AppGridView.SelectedIndex + 1) % AppGridView.Items.Count;
+                        AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Sorgt für automatisches Scrollen
+                        PlayNavigationSound();
+                    }
+                    else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
+                    {
+                        AppGridView.SelectedIndex = (AppGridView.SelectedIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count;
+                        AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Sorgt für automatisches Scrollen
+                        PlayNavigationSound();
+                    }
+                }
+
+                if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
+                {
+                    if (AppGridView.SelectedItem is AppInfo app)
+                    {
+                        // Korrekte Start-Logik, die den "schreibgeschützt"-Fehler behebt
+                        try
+                        {
+                            var psi = new ProcessStartInfo(app.FilePath) { UseShellExecute = true };
+                            Process.Start(psi);
+
+                            AppLauncher.Visibility = Visibility.Collapsed;
+                            _currentFocusArea = FocusArea.Cards;
+                            UpdateVisualFocus();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[AppLauncher] Failed to launch shortcut '{app.FilePath}': {ex.Message}");
+                        }
+                    }
+                    PlayActivationSound();
+                }
+                else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
+                {
+                    ToggleAppLauncher_Click(null, null);
+                }
+
+                _lastButtonState = currentButtons;
+                return; // Wichtig: Verhindert, dass die restliche Navigation ausgeführt wird
+            }
+
+            // --- Hauptnavigation mit Schultertasten ---
             if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
             {
                 switch (_currentFocusArea)
@@ -5206,7 +5686,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 PlayNavigationSound();
             }
 
-            // Navigation innerhalb der Bereiche (D-Pad)
+            // --- D-Pad Navigation in den Hauptbereichen ---
             else if (_currentFocusArea == FocusArea.Launcher)
             {
                 if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
@@ -5259,7 +5739,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
 
-            // Aktions-Logik (A und B Buttons)
+            // --- A/B-Button Aktionen in den Hauptbereichen ---
             if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
             {
                 if (_currentFocusArea == FocusArea.Launcher)
@@ -5279,18 +5759,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 else if (_currentFocusArea == FocusArea.TopButtons)
                 {
-                    var selectedButton = _topButtons[_selectedTopButtonIndex];
-                    if (selectedButton == ShutdownButton)
-                    {
-                        _currentFocusArea = FocusArea.PowerMenu;
-                        _selectedPowerMenuItemIndex = 0;
-                        PowerButton_Click(null, null);
-                        UpdateVisualFocus();
-                    }
-                    else
-                    {
-                        ClickSelectedTopButton();
-                    }
+                    ClickSelectedTopButton();
                 }
                 PlayActivationSound();
             }
@@ -5330,16 +5799,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Aktualisiert die UI performant, indem nur das alte und neue Element geändert wird.
         /// </summary>
-        // In gcmloader/MainWindow.xaml.cs
+       
 
         /// <summary>
         /// Updates the UI performantly by only changing the old and new focused elements.
         /// </summary>
+        
+
         private void UpdateVisualFocus(bool isInitial = false)
         {
             UpdateLayoutForFocus();
 
-            // Reset all elements
+            // Reset all highlights (dieser Teil bleibt gleich)
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
             _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
             _powerMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
@@ -5378,12 +5849,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             else if (_currentFocusArea == FocusArea.PowerMenu)
             {
-                // Hebe den ausgewählten Menüpunkt hervor
                 if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
                 {
                     var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                    selectedButton.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)); // Leicht weißer Hintergrund
+                    selectedButton.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
                 }
+            }
+            // ### HIER IST DIE VEREINFACHUNG ###
+            // Der alte, komplizierte Code für AppLauncher wird komplett entfernt.
+            // Wir müssen hier nichts mehr tun, da das XAML die Hervorhebung übernimmt.
+            else if (_currentFocusArea == FocusArea.AppLauncher)
+            {
+                // Leer lassen! Die GridView kümmert sich dank des neuen Styles selbst darum.
             }
         }
 
@@ -5434,9 +5911,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 var buttonToClick = _topButtons[_selectedTopButtonIndex];
 
-                // Führe die passende Klick-Methode aus
-                if (buttonToClick == ExitGcmButton) ExitGcmButton_Click_1(null, null);
-                // Die Logik für den ShutdownButton wurde in die GamepadButtonCheck-Methode verlagert
+                // Execute the correct click method
+                if (buttonToClick == ExitGcmButton)
+                {
+                    ExitGcmButton_Click_1(null, null);
+                }
+                // =================================================================
+                // ADDED: Logic for the new Settings Button
+                // =================================================================
+                else if (buttonToClick == SettingsButton)
+                {
+                    SettingsButton_Click(null, null);
+                }
+                // =================================================================
+                else if (buttonToClick == AppLauncherButton)
+                {
+                    ToggleAppLauncher_Click(null, null);
+                }
+                else if (buttonToClick == ShutdownButton)
+                {
+                    // This opens the Power-Menu, the logic is already in GamepadButtonCheck
+                    _currentFocusArea = FocusArea.PowerMenu;
+                    _selectedPowerMenuItemIndex = 0;
+                    PowerButton_Click(null, null);
+                    UpdateVisualFocus();
+                }
             }
         }
         private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -5894,6 +6393,86 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Process.Start("shutdown", "/l");
         }
 
+        // In MainWindow.xaml.cs
+
+       
+        private async void ToggleAppLauncher_Click(object sender, RoutedEventArgs e)
+        {
+            if (AppLauncher.Visibility == Visibility.Visible)
+            {
+                AppLauncher.Visibility = Visibility.Collapsed;
+                _currentFocusArea = FocusArea.TopButtons;
+                UpdateVisualFocus();
+                PlaydeactivationSound();
+                return;
+            }
+
+            AppLauncher.Visibility = Visibility.Visible;
+            _currentFocusArea = FocusArea.AppLauncher;
+
+            // NEW: Clear the search bar and reset the list
+            AppSearchBox.Text = "";
+            AppGridView.ItemsSource = AllInstalledApps; // Show the full list again
+
+            if (!isAppListLoaded)
+            {
+                await LoadInstalledAppsAsync();
+            }
+
+            // Set the focus directly into the search bar for intuitive use
+            AppSearchBox.Focus(FocusState.Programmatic);
+
+            UpdateVisualFocus();
+            PlayActivationSound();
+        }
+
+        private void AppGridView_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is AppInfo app)
+            {
+                try
+                {
+                    if (app.FilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var psi = new ProcessStartInfo(app.FilePath) { UseShellExecute = true };
+                        Process.Start(psi);
+                    }
+                    else
+                    {
+                        Process.Start(app.FilePath);
+                    }
+                    AppLauncher.Visibility = Visibility.Collapsed;
+                    _currentFocusArea = FocusArea.Cards;
+                    UpdateVisualFocus();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[AppLauncher] Failed to launch '{app.FilePath}': {ex.Message}");
+                }
+            }
+        }
+
+        private void LaunchApp(AppInfo app)
+        {
+            if (app == null) return;
+
+            try
+            {
+                // Deine ursprüngliche Start-Logik ist jetzt hier zentralisiert
+                Process.Start(app.FilePath);
+
+                // UI aufräumen
+                AppLauncher.Visibility = Visibility.Collapsed;
+                _currentFocusArea = FocusArea.Cards;
+                UpdateVisualFocus();
+                PlayActivationSound();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AppLauncher] Failed to launch app '{app.FilePath}': {ex.Message}");
+            }
+        }
+
         private async void RestartMenuItem_Click(object sender, RoutedEventArgs e)
         {
             PowerMenu.Visibility = Visibility.Collapsed;
@@ -5919,6 +6498,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Process.Start("shutdown", "/s /t 0");
         }
         #endregion shurdownmenuitem
+
+        private void SettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // This command launches the main Windows Settings page.
+                Process.Start(new ProcessStartInfo("ms-settings:") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Could not open Windows Settings: {ex.Message}");
+            }
+        }
 
 
         #endregion methodes
@@ -6203,5 +6795,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             SHAppBarMessage(ABM_SETSTATE, ref data);
             Debug.WriteLine($"Taskleiste 'Automatisch ausblenden' gesetzt auf: {enable}");
         }
+    }
+    /// <summary>
+    /// Helperclass for applauncher.
+    /// </summary>
+    public class AppInfo
+    {
+        public string Name { get; set; }
+        public string FilePath { get; set; }
+        public BitmapImage Icon { get; set; }
     }
 }
