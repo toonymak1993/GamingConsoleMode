@@ -2486,7 +2486,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             TaskbarManager.RestoreOriginalState();
 
             MakeSelfNonTopmost();
-         
+            TaskManagerReEnableServices();
             Console.WriteLine("Exit-Button geklickt. Stelle den Desktop wieder her und beende die App...");
 
             // Schritt 1: Taskleiste und Icons für die aktuelle Sitzung wieder sichtbar machen
@@ -3284,10 +3284,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     ("Fax", null),                           // Fax-Dienst
     ("WSearch", "SearchIndexer"),            // Windows Suche :contentReference[oaicite:1]{index=1}
     ("OneSyncSvc", "OneDrive"),              // OneDrive Sync
-    ("BthAvctpSvc", null),                   // Bluetooth AV
     ("PhoneSvc", null),                      // Telefon-Anbindung
     ("WerSvc", null),                        // Fehlerberichte
-    ("WbioSrvc", null),                      // Biometrie (wenn kein Fingerprint)
     ("Spooler", null),                       // Druckerwarteschlange
     ("dmwappushservice", null),              // Push Notifications
     ("ConnectedUserExperiencesAndTelemetry", null), // Feedback & Telemetrie :contentReference[oaicite:2]{index=2}
@@ -3306,7 +3304,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     ("Fax", null),
     ("WSearch", "SearchIndexer"),
     ("OneSyncSvc", "OneDrive"),
-    ("BthAvctpSvc", null),
     ("WerSvc", null),
     ("dmwappushservice", null),
     ("PhoneSvc", null),
