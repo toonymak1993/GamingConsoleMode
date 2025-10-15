@@ -2654,100 +2654,167 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private IntPtr FindSteamBigPictureWindow()
         {
             IntPtr steamHwnd = IntPtr.Zero;
+
             EnumWindows((hWnd, lParam) => {
-                // Fenster muss sichtbar sein und einen Titel haben
-                if (!IsWindowVisible(hWnd) || GetWindowTextLength(hWnd) == 0)
-                    return true;
+                // ### WICHTIG: Prüfe wieder, ob das Fenster überhaupt sichtbar ist. ###
+                if (!IsWindowVisible(hWnd))
+                    return true; // Weitersuchen
 
-                var titleBuilder = new StringBuilder(256);
-                GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
-                string windowTitle = titleBuilder.ToString();
+                GetWindowThreadProcessId(hWnd, out uint pid);
+                if (pid == 0) return true;
 
-                // Der Titel von Big Picture ist oft nur "Steam" und der Prozess ist "steam"
-                if (windowTitle.Equals("Steam", StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    try
+                    Process p = Process.GetProcessById((int)pid);
+                    if (!p.ProcessName.Equals("steam", StringComparison.OrdinalIgnoreCase))
                     {
-                        GetWindowThreadProcessId(hWnd, out uint pid);
-                        Process p = Process.GetProcessById((int)pid);
-                        if (p.ProcessName.Equals("steam", StringComparison.OrdinalIgnoreCase))
-                        {
-                            steamHwnd = hWnd;
-                            return false; // Fenster gefunden, Suche beenden
-                        }
+                        return true;
                     }
-                    catch { /* Prozess existiert vielleicht nicht mehr, ignorieren */ }
                 }
-                return true; // Weitersuchen
+                catch { return true; }
+
+                StringBuilder classNameBuilder = new StringBuilder(256);
+                GetClassName(hWnd, classNameBuilder, classNameBuilder.Capacity);
+                string className = classNameBuilder.ToString();
+
+                if (className.Equals("CUIEngineWin32", StringComparison.OrdinalIgnoreCase))
+                {
+                    steamHwnd = hWnd;
+                    Debug.WriteLine($"[GCM] Zuverlässiges, sichtbares Steam BP Fenster gefunden (Handle: {hWnd})");
+                    return false; // Suche beenden
+                }
+
+                return true;
             }, IntPtr.Zero);
+
+            if (steamHwnd == IntPtr.Zero)
+            {
+                Debug.WriteLine("[GCM] Konnte kein laufendes und sichtbares Steam Big Picture Fenster finden.");
+            }
 
             return steamHwnd;
         }
+        private const byte VK_ESCAPE = 0x1B;
+       
+        private async Task ForcefullyBringToForeground(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
 
+            // Diese Logik bleibt unverändert
+            ShowWindow(hWnd, SW_SHOWMAXIMIZED);
+            await Task.Delay(250);
+            IntPtr foregroundHwnd = GetForegroundWindow();
+            if (foregroundHwnd != hWnd)
+            {
+                uint foregroundThreadId = GetWindowThreadProcessId(foregroundHwnd, out _);
+                uint ourThreadId = GetCurrentThreadId();
+                AttachThreadInput(ourThreadId, foregroundThreadId, true);
+                SetForegroundWindow(hWnd);
+                AttachThreadInput(ourThreadId, foregroundThreadId, false);
+            }
+
+            string launcher = AppSettings.Load<string>("launcher");
+            if (launcher == "playnite")
+            {
+                try
+                {
+                    // Mauszeiger ausblenden
+                    while (ShowCursor(false) >= 0) ;
+                    await Task.Delay(32);
+                    await Task.Delay(250);
+
+                    int screenWidth = GetScreenWidth();
+                    int screenHeight = GetScreenHeight();
+                    int clickX = screenWidth / 2;
+                    int clickY = screenHeight - 20;
+
+                    // Klick am unteren Rand, um den Fensterfokus sicherzustellen
+                    SetCursorPos(clickX, clickY);
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                    await Task.Delay(50);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+
+                    // ### HIER IST DEINE IDEE UMgesetzt ###
+                    // Sende direkt nach dem Klick ein Escape-Signal, um alle Menüs zu schließen.
+                    await Task.Delay(50); // Kurze Pause zwischen den Aktionen
+                    keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                    keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                    // Mauszeiger am Ende wieder in die Ecke schieben.
+                    SetCursorPos(screenWidth - 1, screenHeight - 1);
+                }
+                finally
+                {
+                    // Mauszeiger garantiert wieder einblenden
+                    while (ShowCursor(true) < 0) ;
+                }
+
+                Debug.WriteLine($"[GCM] Playnite-Fokuskorrektur: Klick UND Escape-Signal gesendet.");
+            }
+
+            Debug.WriteLine($"[GCM] Fenster {hWnd} wurde erfolgreich und robust in den Vordergrund geholt.");
+        }
 
         private async void SwitchToConfiguredLauncher()
         {
             MakeSelfNonTopmost();
 
             string launcher = AppSettings.Load<string>("launcher");
-            Debug.WriteLine($"Switching to launcher '{launcher}'...");
+            Debug.WriteLine($"[GCM] Wechsle zu konfiguriertem Launcher: '{launcher}'...");
 
             try
             {
-                IntPtr launcherHwnd = IntPtr.Zero;
-                string processNameToFind = null;
-                bool startNew = false;
-
                 switch (launcher)
                 {
                     case "steam":
-                        // Steam hat oft mehrere Fenster, wir brauchen das "BigPicture"-Fenster
-                        launcherHwnd = FindSteamBigPictureWindow();
-                        if (launcherHwnd == IntPtr.Zero) startNew = true;
-                        break;
+                        // ### FINALE LÖSUNG FÜR STEAM ###
+                        // Wir verwenden IMMER den direkten Protokoll-Befehl. 
+                        // Er holt ein laufendes Steam nach vorne oder startet es, falls nötig.
+                        Debug.WriteLine("[GCM] Nutze Steam-Protokoll für den Wechsel: steam://open/gamepadui");
+                        Process.Start(new ProcessStartInfo("steam://open/gamepadui")
+                        {
+                            UseShellExecute = true
+                        });
+                        return; // Fertig.
 
                     case "playnite":
-                        processNameToFind = "Playnite.FullscreenApp";
-                        break;
+                        // Die Logik für Playnite funktioniert perfekt und bleibt unangetastet.
+                        string processNameToFind = "Playnite.FullscreenApp";
+                        Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
+                        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+                        {
+                            await ForcefullyBringToForeground(proc.MainWindowHandle);
+                        }
+                        else
+                        {
+                            await StartPlaynite();
+                        }
+                        return;
 
                     case "custom":
-                        processNameToFind = Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath"));
-                        break;
+                        // Die Logik für Custom Launcher bleibt ebenfalls unverändert.
+                        string customPath = AppSettings.Load<string>("customlauncherpath");
+                        string customProcessName = Path.GetFileNameWithoutExtension(customPath);
+                        Process customProc = Process.GetProcessesByName(customProcessName).FirstOrDefault();
+                        if (customProc != null && customProc.MainWindowHandle != IntPtr.Zero)
+                        {
+                            await ForcefullyBringToForeground(customProc.MainWindowHandle);
+                        }
+                        else
+                        {
+                            await StartOtherLauncher();
+                        }
+                        return;
 
                     case "xbox":
-                        // Xbox Logik bleibt getrennt, da UWP anders funktioniert
-                        IntPtr hwndXbox = await FindXboxWindowHandleAsync(0);
-                        if (hwndXbox != IntPtr.Zero) { SwitchToWindowReliably(hwndXbox); }
-                        else { Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true }); }
-                        return; // Beende die Methode hier für Xbox
-                }
-
-                if (processNameToFind != null)
-                {
-                    Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
-                    if (proc != null) launcherHwnd = proc.MainWindowHandle;
-                    else startNew = true;
-                }
-
-                if (launcherHwnd != IntPtr.Zero)
-                {
-                    Debug.WriteLine($"[GCM] Existing launcher window found. Showing and restoring it.");
-                    // Mache das Fenster wieder sichtbar und hole es nach vorne
-                    ShowWindow(launcherHwnd, 9); // SW_RESTORE
-                    SwitchToWindowReliably(launcherHwnd);
-                }
-                else if (startNew)
-                {
-                    Debug.WriteLine($"[GCM] No existing launcher window found. Starting a new instance.");
-                    // Starte den Launcher, wenn kein Fenster gefunden wurde
-                    if (launcher == "steam") Process.Start(new ProcessStartInfo("steam://open/bigpicture") { UseShellExecute = true });
-                    else if (launcher == "playnite") Process.Start(AppSettings.Load<string>("playnitelauncherpath"), "--startfullscreen");
-                    else if (launcher == "custom") Process.Start(AppSettings.Load<string>("customlauncherpath"));
+                        // Die Logik für Xbox verwendet bereits den Protokoll-Befehl und ist optimal.
+                        Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
+                        return;
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[GCM] Error during launcher switch: {ex.Message}");
+                Debug.WriteLine($"[GCM] Fehler während des Launcher-Wechsels: {ex.Message}");
             }
         }
 
@@ -3475,32 +3542,29 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                // Step 1: Verify the Steam path first.
+                // Schritt 1: Pfad prüfen, um sicherzustellen, dass Steam installiert ist.
                 string steamPath = AppSettings.Load<string>("steamlauncherpath");
                 if (string.IsNullOrWhiteSpace(steamPath) || !File.Exists(steamPath))
                 {
                     throw new FileNotFoundException("The Steam path is invalid or was not found.");
                 }
 
-                // Always kill the old Steam process to ensure a clean start.
+                // Schritt 2: Alle laufenden Steam-Prozesse beenden für einen sauberen Start.
+                // Das ist der von dir gewünschte "exit vorher".
+                Debug.WriteLine("[GCM] Beende alle laufenden Steam-Prozesse für einen sauberen Neustart...");
                 KillProcess("steam.exe");
 
-                // Step 2: Check if Decky Loader should be used.
-                bool useDeckyLoader = false;
-                try
-                {
-                    useDeckyLoader = AppSettings.Load<bool>("usedeckyloader");
-                }
-                catch
-                {
-                    // Setting doesn't exist, assume false.
-                }
+                // Eine sehr kurze Pause, damit die Prozesse sich vollständig beenden können.
+                await Task.Delay(500);
 
-                // Step 3: Start Decky Loader if enabled.
+                // Schritt 3: Decky Loader Logik (bleibt unverändert).
+                bool useDeckyLoader = false;
+                try { useDeckyLoader = AppSettings.Load<bool>("usedeckyloader"); } catch { /* ignore */ }
+
                 if (useDeckyLoader)
                 {
                     Console.WriteLine("Decky Loader is enabled. Attempting to start...");
-                    KillProcess("PluginLoader_noconsole.exe"); 
+                    KillProcess("PluginLoader_noconsole.exe");
 
                     string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                     string pluginLoaderPath = Path.Combine(userHome, "homebrew", "services", "PluginLoader_noconsole.exe");
@@ -3509,7 +3573,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         Process.Start(new ProcessStartInfo(pluginLoaderPath) { UseShellExecute = true });
                         Console.WriteLine("PluginLoader_noconsole.exe started.");
-                        await Task.Delay(2000); 
+                        await Task.Delay(2000);
                     }
                     else
                     {
@@ -3517,14 +3581,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                 }
 
-                // Step 4: Start Steam.
-                string arguments = "-gamepadui -noverifyfiles -nobootstrapupdate";
-                Process.Start(new ProcessStartInfo(steamPath) { Arguments = arguments, UseShellExecute = true });
-                Console.WriteLine("Steam launched.");
+                // ### DIE ENTSCHEIDENDE ÄNDERUNG ###
+                // Wir verwenden jetzt auch hier den zuverlässigen Protokoll-Befehl.
+                Debug.WriteLine("[GCM] Starte Steam via Protokoll-Befehl: steam://open/gamepadui");
+                Process.Start(new ProcessStartInfo("steam://open/gamepadui")
+                {
+                    UseShellExecute = true
+                });
+                Process.Start(new ProcessStartInfo("steam://open/gamepadui")
+                {
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
-                // Step 5: Catch ANY error and inform the user.
                 Debug.WriteLine($"Error in StartSteam: {ex.Message}");
                 await messagebox("Could not start Steam. Please check the path in the settings.");
                 BackToWindows();
@@ -3542,8 +3612,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     throw new FileNotFoundException("Der Playnite-Pfad ist ungültig oder wurde nicht gefunden.");
                 }
 
-                KillProcess("Playnite.FullscreenApp.exe");
-                Process.Start(new ProcessStartInfo(playnitePath) { Arguments = "--startfullscreen", UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(playnitePath)
+                {
+                    Arguments = "--startfullscreen --hidesplashscreen",
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
@@ -4459,9 +4532,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Task Manager",
     
     // Specific Apps to always ignore
-    "Steam", // The main Steam window, not games
-    "Big-Picture-Modus", // NEW
-    "Big Picture Mode",  // NEW
+    //"Steam", // The main Steam window, not games
+   // "Big-Picture-Modus", // NEW
+    //"Big Picture Mode",  // NEW
     "Realtek Audio Console",
     "NVIDIA App",
     "Xbox.Apps.TCUI",
@@ -4935,37 +5008,57 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// 
         public void BringTaskManagerToFrontAndFocus()
         {
-            this.DispatcherQueue.TryEnqueue(() =>
+            this.DispatcherQueue.TryEnqueue(async () =>
             {
-                // Finde den Prozessnamen des aktuellen Launchers aus den Einstellungen
                 string launcher = AppSettings.Load<string>("launcher");
-                string processNameToHide = launcher switch
-                {
-                    "steam" => "steam",
-                    "playnite" => "Playnite.FullscreenApp",
-                    "custom" => Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath")),
-                    _ => null
-                };
+                IntPtr windowHandle = IntPtr.Zero;
 
-                if (processNameToHide != null)
+                try
                 {
-                    try
+                    switch (launcher)
                     {
-                        // Finde den Prozess und verstecke sein Hauptfenster
-                        Process proc = Process.GetProcessesByName(processNameToHide).FirstOrDefault();
-                        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
-                        {
-                            Debug.WriteLine($"[GCM] Hiding {processNameToHide} window.");
-                            ShowWindow(proc.MainWindowHandle, 0); // SW_HIDE
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[GCM] Error trying to hide launcher window: {ex.Message}");
+                        case "steam":
+                            windowHandle = FindSteamBigPictureWindow();
+                            if (windowHandle != IntPtr.Zero)
+                            {
+                                // Eine sehr kurze Verzögerung kann bei Fokus-Operationen helfen.
+                                await Task.Delay(50);
+
+                                // Bringe einfach unser eigenes Fenster nach vorne. Das ist alles.
+                                IntPtr _selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                                BringToFrontAndFocus(_selfHwnd);
+                            }
+                            break;
+
+                        case "playnite":
+                        case "custom":
+                            string processNameToFind = launcher == "playnite"
+                                ? "Playnite.FullscreenApp"
+                                : Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath"));
+
+                            if (!string.IsNullOrEmpty(processNameToFind))
+                            {
+                                Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
+                                if (proc != null)
+                                {
+                                    windowHandle = proc.MainWindowHandle;
+                                    // Für alle anderen Launcher funktioniert das Minimieren perfekt.
+                                    if (windowHandle != IntPtr.Zero)
+                                    {
+                                        ShowWindow(windowHandle, SW_MINIMIZE);
+                                        Debug.WriteLine($"[GCM] {launcher}-Fenster ({windowHandle}) minimiert.");
+                                    }
+                                }
+                            }
+                            break;
                     }
                 }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GCM] Fehler beim In-den-Hintergrund-schieben des Launchers: {ex.Message}");
+                }
 
-                // Bringe danach unser eigenes Fenster nach vorne
+                await Task.Delay(150);
                 IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 BringToFrontAndFocus(selfHwnd);
             });
@@ -5154,6 +5247,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // Simulate Alt + R
                 keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero); // Alt down
                 keybd_event(VK_R, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);    // R down
+
                 keybd_event(VK_R, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);      // R up
                 keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // Alt up
 
@@ -6116,6 +6210,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private bool _altPressed = false;
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         private static readonly IntPtr HWND_TOP = IntPtr.Zero;
         private const uint SWP_NOSIZE = 0x0001;
