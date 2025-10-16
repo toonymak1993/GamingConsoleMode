@@ -64,10 +64,52 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+
+        #region mousecontrol 
+        private const uint MOUSEEVENTF_WHEEL = 0x0800;
+        private DateTime _lastScrollTime = DateTime.MinValue;
+        // Add these with your other User32 P/Invoke declarations
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(POINT Point);
+
+        [DllImport("user32.dll")]
+        private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+        // Add these Windows Message constants
+        private const uint WM_LBUTTONDOWN = 0x0201;
+        private const uint WM_LBUTTONUP = 0x0202;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr CreateWindowEx(
+           uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
+           int x, int y, int nWidth, int nHeight,
+           IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool DestroyWindow(IntPtr hWnd);
+
+        private bool _isMouseModeActive = false;
+        private DateTime? _backButtonPressTime = null;    
+        private bool _mouseModeToggledThisPress = false;
+        private bool _isKeyboardVisible = false;
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out POINT lpPoint);
+
+        // Note: You might already have a POINT struct, if not, add this one.
+        // If you do, ensure it's public or accessible.
+        [StructLayout(LayoutKind.Sequential)]
+        public struct POINT { public int X; public int Y; }
+
+        // Add these mouse event constants if they are missing
+        private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+        #endregion mousecontrol
+
         // FÜGE DIESEN NEUEN BEREICH HINZU
         #region App Launcher
 
-         bool isAppListLoaded = false;
+        bool isAppListLoaded = false;
 
         [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         internal interface IShellLinkW
@@ -1530,8 +1572,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         TaskbarVisibility.HideTaskbar();
                         try
                         {
-                            // Check and hide 4 times per second.
-                            await Task.Delay(250, _taskbarHiderCts.Token);
+                            // Check and hide 4 times per second.x
+                            await Task.Delay(50, _taskbarHiderCts.Token);
                         }
                         catch (TaskCanceledException)
                         {
@@ -3356,7 +3398,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     ("Spooler", null),                       // Druckerwarteschlange
     ("dmwappushservice", null),              // Push Notifications
     ("ConnectedUserExperiencesAndTelemetry", null), // Feedback & Telemetrie :contentReference[oaicite:2]{index=2}
-    ("AppXSvc", null),                       // AppX Deployment :contentReference[oaicite:3]{index=3}
     ("MessagingService", null),              // App-Nachrichten
     ("ContactDataSvc", null),                // Kontakte Synchronisation
     ("IpOverUsbSvc", null)                   // USB IP-Geräte
@@ -3609,9 +3650,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 if (string.IsNullOrWhiteSpace(playnitePath) || !File.Exists(playnitePath))
                 {
-                    throw new FileNotFoundException("Der Playnite-Pfad ist ungültig oder wurde nicht gefunden.");
+                    // The exception message is now in English.
+                    throw new FileNotFoundException("The Playnite path is invalid or was not found.");
                 }
 
+                // ### THIS IS YOUR REQUESTED CHANGE ###
+                // Step 1: First, kill any running Playnite Fullscreen process.
+                Debug.WriteLine("[GCM] Killing running Playnite Fullscreen instance for a clean restart...");
+                KillProcess("Playnite.FullscreenApp.exe");
+
+                // Step 2: Give the system a moment to fully terminate the process.
+                await Task.Delay(500);
+
+                // Step 3: Now, start Playnite cleanly.
                 Process.Start(new ProcessStartInfo(playnitePath)
                 {
                     Arguments = "--startfullscreen --hidesplashscreen",
@@ -3620,8 +3671,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Fehler in StartPlaynite: {ex.Message}");
-                await messagebox("Playnite konnte nicht gestartet werden. Bitte den Pfad in den Einstellungen prüfen.");
+                // The debug message remains, but the user message is now in English.
+                Debug.WriteLine($"Error in StartPlaynite: {ex.Message}");
+                await messagebox("Could not start Playnite. Please check the path in the settings.");
                 BackToWindows();
             }
         }
@@ -3802,6 +3854,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             await Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
             IsJoyxoffInstalledAndStart();
+            EnsureTouchKeyboardServiceIsRunning();
             SetupWingamepadTask();
             await Showwinpartandlauncher();
             cssloader();
@@ -4532,9 +4585,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Task Manager",
     
     // Specific Apps to always ignore
-    //"Steam", // The main Steam window, not games
-   // "Big-Picture-Modus", // NEW
-    //"Big Picture Mode",  // NEW
+    "Steam", // The main Steam window, not games
+   "Big-Picture-Modus", // NEW
+    "Big Picture Mode",
+    "Playnite",// NEW
     "Realtek Audio Console",
     "NVIDIA App",
     "Xbox.Apps.TCUI",
@@ -5367,37 +5421,236 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             return null;
         }
 
+        /// <summary>
+        /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
+        /// </summary>
+        private void HandleMouseControl(State controllerState)
+        {
+            var gamepad = controllerState.Gamepad;
+            var currentButtons = gamepad.Buttons;
+
+            // --- Cursor Movement (Left Stick) ---
+            const int deadzone = 4000;
+            float thumbX = gamepad.LeftThumbX;
+            float thumbY = gamepad.LeftThumbY;
+
+            if (Math.Abs(thumbX) > deadzone || Math.Abs(thumbY) > deadzone)
+            {
+                GetCursorPos(out POINT currentPos);
+
+                // ### SPEED INCREASED HERE ###
+                // Changed from 1.0f to 2.0f to double the speed again.
+                float speedMultiplier = 2.0f;
+
+                int newX = currentPos.X + (int)(thumbX / 32767.0f * 25 * speedMultiplier);
+                int newY = currentPos.Y - (int)(thumbY / 32767.0f * 25 * speedMultiplier); // Y is inverted
+
+                SetCursorPos(newX, newY);
+            }
+
+            // --- Scrolling Logic (Right Stick) ---
+            float thumbRy = gamepad.RightThumbY;
+            if ((DateTime.UtcNow - _lastScrollTime).TotalMilliseconds > 50)
+            {
+                // Scroll Down
+                if (thumbRy < -deadzone)
+                {
+                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)-120), UIntPtr.Zero);
+                    _lastScrollTime = DateTime.UtcNow;
+                }
+                // Scroll Up
+                else if (thumbRy > deadzone)
+                {
+                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 120, UIntPtr.Zero);
+                    _lastScrollTime = DateTime.UtcNow;
+                }
+            }
+
+            // --- Button Actions ---
+            var newPresses = currentButtons & ~_lastButtonState;
+
+            // Left Click (A button) - Supports holding
+            if ((newPresses & GamepadButtonFlags.A) != 0) { mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero); }
+            else if (((_lastButtonState & GamepadButtonFlags.A) != 0) && ((currentButtons & GamepadButtonFlags.A) == 0)) { mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero); }
+
+            // Right Click (X button)
+            if ((newPresses & GamepadButtonFlags.X) != 0)
+            {
+                mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, UIntPtr.Zero);
+            }
+
+            // On-Screen Keyboard Toggle (Y button)
+            if ((newPresses & GamepadButtonFlags.Y) != 0)
+            {
+                SendOverlayNotification("Opening Keyboard");
+                ShowModernKeyboard();
+            }
+        }
+
+        /// <summary>
+        /// Shows the modern Windows 11 Touch Keyboard by starting its process.
+        /// This method is safe to call even if the keyboard is already open.
+        /// </summary>
+        /// <summary>
+        /// Hides (kills) the modern Windows Touch Keyboard process. This remains the same.
+        /// </summary>
+        private void HideOnScreenKeyboard()
+        {
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName("TabTip"))
+                {
+                    proc.Kill();
+                }
+                Debug.WriteLine("[GCM] Closed modern Touch Keyboard process.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Failed to close modern Touch Keyboard: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Shows the modern keyboard using a robust multi-step approach.
+        /// </summary>
+        private async void ShowModernKeyboard()
+        {
+            IntPtr tempFocusWindow = IntPtr.Zero;
+            try
+            {
+                // Step 1: Identify the target window BEFORE showing the keyboard.
+                GetCursorPos(out POINT lastCursorPos);
+                IntPtr targetWindowHandle = WindowFromPoint(lastCursorPos);
+                if (targetWindowHandle == IntPtr.Zero) return; // Abort if no window is under the cursor.
+
+                // Step 2: Forcefully restart the keyboard process.
+                HideOnScreenKeyboard();
+                await Task.Delay(100);
+
+                // Step 3: Create a temporary window to help with focus management.
+                tempFocusWindow = CreateWindowEx(0, "Static", "TempFocus", 0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                SetForegroundWindow(tempFocusWindow);
+                await Task.Delay(50);
+
+                // Step 4: Launch the keyboard using the most reliable method.
+                string keyboardPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), @"microsoft shared\ink\TabTip.exe");
+                if (File.Exists(keyboardPath))
+                {
+                    var psi = new ProcessStartInfo(keyboardPath) { UseShellExecute = true };
+                    Process.Start(psi);
+                }
+                else
+                {
+                    Debug.WriteLine("[GCM] ERROR: Modern Touch Keyboard (TabTip.exe) not found.");
+                    return;
+                }
+
+                // Step 5: Wait for the keyboard to fully appear.
+                await Task.Delay(750);
+
+                // ### THE FINAL FIX: SEND A DIRECT CLICK MESSAGE ###
+
+                // Convert the screen coordinates to coordinates relative to the target window.
+                POINT clientPoint = lastCursorPos;
+                ScreenToClient(targetWindowHandle, ref clientPoint);
+
+                // Pack the X and Y coordinates into a single value for the message.
+                IntPtr lParam = (IntPtr)((clientPoint.Y << 16) | (clientPoint.X & 0xFFFF));
+
+                // Send the "mouse down" and "mouse up" messages directly to the target window.
+                // This bypasses the keyboard or any other window on top.
+                PostMessage(targetWindowHandle, WM_LBUTTONDOWN, (IntPtr)1, lParam);
+                PostMessage(targetWindowHandle, WM_LBUTTONUP, IntPtr.Zero, lParam);
+
+                Debug.WriteLine($"[GCM] Sent direct click message to window {targetWindowHandle} to restore focus.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] An error occurred in the keyboard launch strategy: {ex.Message}");
+            }
+            finally
+            {
+                // Step 6: Clean up the temporary window.
+                if (tempFocusWindow != IntPtr.Zero)
+                {
+                    DestroyWindow(tempFocusWindow);
+                }
+            }
+        }
 
         private void SetupGamepad()
         {
-            // Timer für Gamepad-Abfrage
-            DispatcherTimer gamepadInputTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(50)
-            };
+            // Start the dedicated input loop on a background thread.
+            Task.Run(() => GamepadInputLoop());
+        }
 
-            gamepadInputTimer.Tick += (s, e) =>
+        private async Task GamepadInputLoop()
+        {
+            while (true) // This loop runs continuously in the background.
             {
                 if (_xinputController == null || !_xinputController.IsConnected)
                 {
                     _xinputController = GetConnectedController();
                     _controllerConnected = _xinputController != null;
-
-                    if (_controllerConnected)
-                    {
-                        Debug.WriteLine($"Controller connected on index: {_xinputController.UserIndex}");
-                    }
                 }
 
                 if (_controllerConnected)
                 {
-                    GamepadButtonCheck();
-                }
-            };
+                    var state = _xinputController.GetState();
+                    var currentButtons = state.Gamepad.Buttons;
 
-            gamepadInputTimer.Start();
+                    // --- Non-Blocking Mouse Mode Toggle Logic ---
+                    bool backButtonPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
+                    bool backButtonWasPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
+
+                    if (backButtonPressed && !backButtonWasPressed)
+                    {
+                        _backButtonPressTime = DateTime.UtcNow;
+                        _mouseModeToggledThisPress = false;
+                    }
+                    if (backButtonPressed && _backButtonPressTime.HasValue && !_mouseModeToggledThisPress)
+                    {
+                        if ((DateTime.UtcNow - _backButtonPressTime.Value).TotalSeconds >= 5.0)
+                        {
+                            _isMouseModeActive = !_isMouseModeActive;
+                            SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated");
+                            _mouseModeToggledThisPress = true;
+                            // The automatic HideOnScreenKeyboard() call has been removed.
+                        }
+                    }
+                    if (!backButtonPressed && backButtonWasPressed)
+                    {
+                        _backButtonPressTime = null;
+                    }
+
+                    // --- Main Input Logic Branch ---
+                    if (_isMouseModeActive)
+                    {
+                        HandleMouseControl(state);
+                        _lastButtonState = currentButtons;
+                    }
+                    else
+                    {
+                        HandleShortcuts(currentButtons);
+                        if (IsWindowInForeground())
+                        {
+                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(currentButtons));
+                        }
+                        else
+                        {
+                            _lastButtonState = currentButtons;
+                        }
+                    }
+                }
+                else
+                {
+                    _lastButtonState = GamepadButtonFlags.None;
+                }
+
+                await Task.Delay(16);
+            }
         }
-        
 
         //Taskmanager
         private GamepadButtonFlags _lastButtonState = GamepadButtonFlags.None;
@@ -5534,29 +5787,45 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        private bool IsNewButtonPress(GamepadButtonFlags button, GamepadButtonFlags currentButtons)
-        {
-            // If the button is currently pressed AND was not already held → allow
-            if ((currentButtons & button) != 0)
-            {
-                if (!_pressedButtons.Contains(button))
-                {
-                    _pressedButtons.Add(button);
-                    return true;
-                }
-                return false;
-            }
-            else
-            {
-                // Button is released → clear from pressed list
-                _pressedButtons.Remove(button);
-                return false;
-            }
-        }
+
 
         // ########## ANFANG DES KOMPLETTEN CODE-BLOCKS ##########
 
         #region Gamepad Navigation
+
+        private void EnsureTouchKeyboardServiceIsRunning()
+        {
+            const string serviceName = "TabletInputService";
+            try
+            {
+                // Get a controller for the service.
+                using (ServiceController service = new ServiceController(serviceName))
+                {
+                    // Check if the service is stopped.
+                    if (service.Status == ServiceControllerStatus.Stopped)
+                    {
+                        Debug.WriteLine($"[GCM] Touch Keyboard service ('{serviceName}') is stopped. Starting it now...");
+
+                        // Start the service and wait for it to be running.
+                        service.Start();
+                        service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
+
+                        Debug.WriteLine($"[GCM] Service '{serviceName}' started successfully.");
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[GCM] Touch Keyboard service ('{serviceName}') is already running.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log an error if the service cannot be found or started (e.g., due to permissions).
+                Debug.WriteLine($"[GCM] ERROR: Could not start the touch keyboard service ('{serviceName}'). On-screen keyboard may not be available. Details: {ex.Message}");
+            }
+        }
+
+
 
         // --- Zustandsvariablen, um den vorherigen Fokus zu speichern (für Performance) ---
         private FocusArea _previousFocusArea = FocusArea.Cards;
@@ -5621,134 +5890,37 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Der Parameter /r steht für "restart"
             Process.Start("shutdown", "/r /t 0");
         }
-        private void GamepadButtonCheck()
+        // Renamed from GamepadButtonCheck. This now ONLY handles UI logic on the UI thread.
+        // This is the new, fully corrected version.
+        // This is the new, fully corrected version.
+        // This is the new, fully corrected, and restructured version.
+        // This method now ONLY handles UI navigation when the window is in focus.
+        // This is the final, fully corrected version with the AppLauncher fix.
+        // This is the final, fully corrected version with the AppLauncher fix.
+        private void HandleGamepadInput(GamepadButtonFlags currentButtons)
         {
-            if (!_controllerConnected || !_xinputController.IsConnected) return;
-
-            var state = _xinputController.GetState();
-            var currentButtons = state.Gamepad.Buttons;
-
-            HandleShortcuts(currentButtons);
-
+            // Safety check: Do nothing if the window is not in focus.
             if (!IsWindowInForeground())
+            {
+                _lastButtonState = currentButtons; // Still update the state to prevent false presses on refocus.
+                return;
+            }
+
+            // Calculate which buttons are newly pressed in this frame.
+            var newPresses = currentButtons & ~_lastButtonState;
+
+            // If no new buttons were pressed, there's nothing to do for the UI.
+            if (newPresses == GamepadButtonFlags.None)
             {
                 _lastButtonState = currentButtons;
                 return;
             }
 
-            // --- Logik für das geöffnete Power-Menü ---
-            if (_currentFocusArea == FocusArea.PowerMenu)
-            {
-                if (IsNewButtonPress(GamepadButtonFlags.DPadDown, currentButtons))
-                {
-                    _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.DPadUp, currentButtons))
-                {
-                    _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
-                {
-                    var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                    if (selectedButton == ShutdownMenuItem) { ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs()); }
-                    else if (selectedButton == RestartMenuItem) { RestartMenuItem_Click(selectedButton, new RoutedEventArgs()); }
-                    else if (selectedButton == LogOffMenuItem) { LogOffMenuItem_Click(selectedButton, new RoutedEventArgs()); }
-                    else if (selectedButton == SleepMenuItem) { SleepMenuItem_Click(selectedButton, new RoutedEventArgs()); }
-                    PlayActivationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
-                {
-                    PowerMenu.Visibility = Visibility.Collapsed;
-                    _currentFocusArea = FocusArea.TopButtons;
-                    UpdateVisualFocus();
-                    PlaydeactivationSound();
-                }
-                _lastButtonState = currentButtons;
-                return; // Verhindert, dass die restliche Navigation ausgeführt wird
-            }
-            // --- Logik für den geöffneten App Launcher (KOMPLETT KORRIGIERT) ---
-            else if (_currentFocusArea == FocusArea.AppLauncher)
-            {
-                if (AppGridView.Items.Count > 0)
-                {
-                    // Anzahl der Spalten dynamisch berechnen für korrekte Hoch/Runter-Navigation
-                    int columns = 4; // Standard-Fallback-Wert
-                    if (AppGridView.ActualWidth > 0)
-                    {
-                        var container = AppGridView.ContainerFromIndex(0) as GridViewItem;
-                        if (container != null && container.ActualWidth > 0)
-                        {
-                            columns = (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth);
-                            if (columns == 0) columns = 1; // Verhindert Division durch Null
-                        }
-                    }
+            // Global shortcuts are handled in the background loop.
 
-                    if (IsNewButtonPress(GamepadButtonFlags.DPadDown, currentButtons))
-                    {
-                        var newIndex = AppGridView.SelectedIndex + columns; // Springe eine ganze Zeile nach unten
-                        if (newIndex >= AppGridView.Items.Count) newIndex = AppGridView.Items.Count - 1;
-                        AppGridView.SelectedIndex = newIndex;
-                        AppGridView.ScrollIntoView(AppGridView.SelectedItem);
-                        PlayNavigationSound();
-                    }
-                    else if (IsNewButtonPress(GamepadButtonFlags.DPadUp, currentButtons))
-                    {
-                        var newIndex = AppGridView.SelectedIndex - columns; // Springe eine ganze Zeile nach oben
-                        if (newIndex < 0) newIndex = 0;
-                        AppGridView.SelectedIndex = newIndex;
-                        AppGridView.ScrollIntoView(AppGridView.SelectedItem);
-                        PlayNavigationSound();
-                    }
-                    else if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
-                    {
-                        AppGridView.SelectedIndex = (AppGridView.SelectedIndex + 1) % AppGridView.Items.Count;
-                        AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Sorgt für automatisches Scrollen
-                        PlayNavigationSound();
-                    }
-                    else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
-                    {
-                        AppGridView.SelectedIndex = (AppGridView.SelectedIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count;
-                        AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Sorgt für automatisches Scrollen
-                        PlayNavigationSound();
-                    }
-                }
-
-                if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
-                {
-                    if (AppGridView.SelectedItem is AppInfo app)
-                    {
-                        // Korrekte Start-Logik, die den "schreibgeschützt"-Fehler behebt
-                        try
-                        {
-                            var psi = new ProcessStartInfo(app.FilePath) { UseShellExecute = true };
-                            Process.Start(psi);
-
-                            AppLauncher.Visibility = Visibility.Collapsed;
-                            _currentFocusArea = FocusArea.Cards;
-                            UpdateVisualFocus();
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"[AppLauncher] Failed to launch shortcut '{app.FilePath}': {ex.Message}");
-                        }
-                    }
-                    PlayActivationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
-                {
-                    ToggleAppLauncher_Click(null, null);
-                }
-
-                _lastButtonState = currentButtons;
-                return; // Wichtig: Verhindert, dass die restliche Navigation ausgeführt wird
-            }
-
-            // --- Hauptnavigation mit Schultertasten ---
-            if (IsNewButtonPress(GamepadButtonFlags.RightShoulder, currentButtons))
+            // --- High Priority: Area Switching with Shoulder Buttons ---
+            bool areaSwitched = false;
+            if ((newPresses & GamepadButtonFlags.RightShoulder) != 0)
             {
                 switch (_currentFocusArea)
                 {
@@ -5756,13 +5928,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
                 }
-                _selectedCardIndex = 0;
-                _selectedTopButtonIndex = 0;
-                _selectedLauncherAreaIndex = 0;
-                UpdateVisualFocus();
-                PlayNavigationSound();
+                areaSwitched = true;
             }
-            else if (IsNewButtonPress(GamepadButtonFlags.LeftShoulder, currentButtons))
+            else if ((newPresses & GamepadButtonFlags.LeftShoulder) != 0)
             {
                 switch (_currentFocusArea)
                 {
@@ -5770,96 +5938,106 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;
                 }
+                areaSwitched = true;
+            }
+
+            if (areaSwitched)
+            {
+                // If we switched areas, reset all selection indexes and update the visuals.
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
                 _selectedLauncherAreaIndex = 0;
                 UpdateVisualFocus();
                 PlayNavigationSound();
             }
-
-            // --- D-Pad Navigation in den Hauptbereichen ---
-            else if (_currentFocusArea == FocusArea.Launcher)
+            else
             {
-                if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
+                // --- Contextual Navigation (D-Pad, A, B) ---
+                // This code only runs if no area switch happened.
+                switch (_currentFocusArea)
                 {
-                    if (_launcherAreaButtons.Any())
-                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
-                {
-                    if (_launcherAreaButtons.Any())
-                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-            }
-            else if (_currentFocusArea == FocusArea.TopButtons)
-            {
-                if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
-                {
-                    if (_topButtons.Any())
-                        _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
-                {
-                    if (_topButtons.Any())
-                        _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-            }
-            else if (_currentFocusArea == FocusArea.Cards)
-            {
-                if (IsNewButtonPress(GamepadButtonFlags.DPadRight, currentButtons))
-                {
-                    if (ProgramCardPanel.Children.Any())
-                        _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-                else if (IsNewButtonPress(GamepadButtonFlags.DPadLeft, currentButtons))
-                {
-                    if (ProgramCardPanel.Children.Any())
-                        _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
-                    UpdateVisualFocus();
-                    PlayNavigationSound();
-                }
-            }
-
-            // --- A/B-Button Aktionen in den Hauptbereichen ---
-            if (IsNewButtonPress(GamepadButtonFlags.A, currentButtons))
-            {
-                if (_currentFocusArea == FocusArea.Launcher)
-                {
-                    if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count)
-                    {
-                        var selectedCard = _launcherAreaButtons[_selectedLauncherAreaIndex];
-                        if (selectedCard.Tag is LauncherCardItem item)
+                    case FocusArea.PowerMenu:
+                        if ((newPresses & GamepadButtonFlags.DPadDown) != 0) { _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0) { _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
                         {
-                            item.TapAction?.Invoke(selectedCard, null);
+                            var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
+                            if (selectedButton == ShutdownMenuItem) ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
+                            else if (selectedButton == RestartMenuItem) RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
+                            else if (selectedButton == LogOffMenuItem) LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
+                            else if (selectedButton == SleepMenuItem) SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
+                            PlayActivationSound();
                         }
-                    }
+                        else if ((newPresses & GamepadButtonFlags.B) != 0)
+                        {
+                            PowerMenu.Visibility = Visibility.Collapsed;
+                            _currentFocusArea = FocusArea.TopButtons;
+                            UpdateVisualFocus(); PlaydeactivationSound();
+                        }
+                        break;
+
+                    case FocusArea.AppLauncher:
+                        if (AppGridView.Items.Count > 0)
+                        {
+                            int columns = 4;
+                            if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
+                            {
+                                columns = (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth);
+                                if (columns == 0) columns = 1;
+                            }
+
+                            if ((newPresses & GamepadButtonFlags.DPadDown) != 0) { var newIndex = AppGridView.SelectedIndex + columns; if (newIndex >= AppGridView.Items.Count) newIndex = AppGridView.Items.Count - 1; AppGridView.SelectedIndex = newIndex; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
+                            else if ((newPresses & GamepadButtonFlags.DPadUp) != 0) { var newIndex = AppGridView.SelectedIndex - columns; if (newIndex < 0) newIndex = 0; AppGridView.SelectedIndex = newIndex; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
+                            else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { AppGridView.SelectedIndex = (AppGridView.SelectedIndex + 1) % AppGridView.Items.Count; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
+                            else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { AppGridView.SelectedIndex = (AppGridView.SelectedIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
+                        }
+
+                        // ### HIER IST DIE KORREKTUR ###
+                        if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            // Wir benutzen den zuverlässigen SelectedIndex, um das Item direkt zu holen.
+                            int selectedIndex = AppGridView.SelectedIndex;
+                            if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count)
+                            {
+                                if (AppGridView.Items[selectedIndex] is AppInfo app)
+                                {
+                                    LaunchApp(app);
+                                }
+                            }
+                            PlayActivationSound();
+                        }
+                        else if ((newPresses & GamepadButtonFlags.B) != 0)
+                        {
+                            ToggleAppLauncher_Click(null, null);
+                        }
+                        break;
+
+                    case FocusArea.Launcher:
+                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (_launcherAreaButtons.Any()) _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (_launcherAreaButtons.Any()) _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item) item.TapAction?.Invoke(null, null);
+                            PlayActivationSound();
+                        }
+                        break;
+
+                    case FocusArea.TopButtons:
+                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (_topButtons.Any()) _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (_topButtons.Any()) _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0) { ClickSelectedTopButton(); PlayActivationSound(); }
+                        break;
+
+                    case FocusArea.Cards:
+                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (ProgramCardPanel.Children.Any()) _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (ProgramCardPanel.Children.Any()) _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0) { TriggerCardAction(_selectedCardIndex, true); PlayActivationSound(); }
+                        else if ((newPresses & GamepadButtonFlags.B) != 0) { TriggerCardAction(_selectedCardIndex, false); PlaydeactivationSound(); }
+                        break;
                 }
-                else if (_currentFocusArea == FocusArea.Cards)
-                {
-                    TriggerCardAction(_selectedCardIndex, true);
-                }
-                else if (_currentFocusArea == FocusArea.TopButtons)
-                {
-                    ClickSelectedTopButton();
-                }
-                PlayActivationSound();
-            }
-            else if (IsNewButtonPress(GamepadButtonFlags.B, currentButtons))
-            {
-                if (_currentFocusArea == FocusArea.Cards) TriggerCardAction(_selectedCardIndex, false);
-                PlaydeactivationSound();
             }
 
+            // This must be the VERY LAST line to correctly track the state for the next frame.
             _lastButtonState = currentButtons;
         }
 
@@ -6547,10 +6725,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             try
             {
-                // Deine ursprüngliche Start-Logik ist jetzt hier zentralisiert
-                Process.Start(app.FilePath);
+                // ### THIS IS THE FIX ###
+                // We now handle .lnk files correctly, just like the mouse click does.
+                if (app.FilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Use ShellExecute to let Windows handle the shortcut file.
+                    Process.Start(new ProcessStartInfo(app.FilePath) { UseShellExecute = true });
+                }
+                else
+                {
+                    // For regular .exe files, the direct start is fine.
+                    Process.Start(app.FilePath);
+                }
 
-                // UI aufräumen
+                // Clean up the UI after launching.
                 AppLauncher.Visibility = Visibility.Collapsed;
                 _currentFocusArea = FocusArea.Cards;
                 UpdateVisualFocus();
