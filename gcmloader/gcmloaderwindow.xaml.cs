@@ -66,6 +66,21 @@ namespace gcmloader
         #region needed
 
         #region mousecontrol 
+
+        // NEW: COM Interface definitions to control the touch keyboard directly.
+        // This translates the AutoHotKey script's logic into C#.
+        [ComImport, Guid("4CE576FA-83DC-4F88-951C-9D0782B4E376")]
+        class UIHostNoLaunch
+        {
+        }
+
+        [ComImport, Guid("37c994e7-432b-4834-a2f7-dce1f13b834b")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface ITipInvocation
+        {
+            void Toggle(IntPtr desktopWindow);
+        }
+
         private const uint MOUSEEVENTF_WHEEL = 0x0800;
         private DateTime _lastScrollTime = DateTime.MinValue;
         // Add these with your other User32 P/Invoke declarations
@@ -89,7 +104,7 @@ namespace gcmloader
         private static extern bool DestroyWindow(IntPtr hWnd);
 
         private bool _isMouseModeActive = false;
-        private DateTime? _backButtonPressTime = null;    
+        private DateTime? _comboPressTime = null;
         private bool _mouseModeToggledThisPress = false;
         private bool _isKeyboardVisible = false;
         [DllImport("user32.dll")]
@@ -2737,12 +2752,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             return steamHwnd;
         }
         private const byte VK_ESCAPE = 0x1B;
-       
+        // Add these with your other GDI32 constants
+        private const int LOGPIXELSX = 88; // Horizontal DPI
+        private const int LOGPIXELSY = 90; // Vertical DPI
+        private int GetDpiX()
+        {
+            IntPtr hdc = GetDC(IntPtr.Zero);
+            int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+            ReleaseDC(IntPtr.Zero, hdc);
+            return dpi;
+        }
+
+        private int GetDpiY()
+        {
+            IntPtr hdc = GetDC(IntPtr.Zero);
+            int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+            ReleaseDC(IntPtr.Zero, hdc);
+            return dpi;
+        }
+        /// <summary>
+        /// Brings a window robustly to the foreground and performs a focus correction
+        /// for Playnite by clicking in the top-right and sending an Escape signal.
+        /// </summary>
         private async Task ForcefullyBringToForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
-            // Diese Logik bleibt unverändert
+            // This logic to maximize and focus the window remains unchanged.
             ShowWindow(hWnd, SW_SHOWMAXIMIZED);
             await Task.Delay(250);
             IntPtr foregroundHwnd = GetForegroundWindow();
@@ -2760,41 +2796,49 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 try
                 {
-                    // Mauszeiger ausblenden
+                    // Make the cursor invisible for the operation.
                     while (ShowCursor(false) >= 0) ;
                     await Task.Delay(32);
-                    await Task.Delay(250);
 
+                    // Wait for the Playnite window to fully render.
+                    await Task.Delay(300);
+
+                    // ### NEW: DPI-AWARE CLICK POSITION ###
                     int screenWidth = GetScreenWidth();
-                    int screenHeight = GetScreenHeight();
-                    int clickX = screenWidth / 2;
-                    int clickY = screenHeight - 20;
+                    int dpiX = GetDpiX();
+                    int dpiY = GetDpiY();
 
-                    // Klick am unteren Rand, um den Fensterfokus sicherzustellen
+                    // Convert 0.5 cm to pixels for X and Y axes. (1 inch = 2.54 cm)
+                    int offsetX = (int)((0.5 / 2.54) * dpiX);
+                    int offsetY = (int)((0.5 / 2.54) * dpiY);
+
+                    // Calculate the click position: top-right corner, offset by 0.5 cm.
+                    int clickX = screenWidth - offsetX;
+                    int clickY = offsetY;
+
+                    // Move the (invisible) cursor to the calculated position.
                     SetCursorPos(clickX, clickY);
+
+                    // Simulate the left mouse click.
                     mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
                     await Task.Delay(50);
                     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
 
-                    // ### HIER IST DEINE IDEE UMgesetzt ###
-                    // Sende direkt nach dem Klick ein Escape-Signal, um alle Menüs zu schließen.
-                    await Task.Delay(50); // Kurze Pause zwischen den Aktionen
+                    // Send the Escape signal immediately after to close any menus.
+                    await Task.Delay(50);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
-                    // Mauszeiger am Ende wieder in die Ecke schieben.
-                    SetCursorPos(screenWidth - 1, screenHeight - 1);
+                    Debug.WriteLine($"[GCM] Playnite focus correction: Clicked at ({clickX},{clickY}) and sent Escape signal.");
                 }
                 finally
                 {
-                    // Mauszeiger garantiert wieder einblenden
+                    // No matter what happens, make the cursor visible again.
                     while (ShowCursor(true) < 0) ;
                 }
-
-                Debug.WriteLine($"[GCM] Playnite-Fokuskorrektur: Klick UND Escape-Signal gesendet.");
             }
 
-            Debug.WriteLine($"[GCM] Fenster {hWnd} wurde erfolgreich und robust in den Vordergrund geholt.");
+            Debug.WriteLine($"[GCM] Window {hWnd} was brought to the foreground successfully.");
         }
 
         private async void SwitchToConfiguredLauncher()
@@ -3849,7 +3893,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             uac("off");
             // ===================================
             SettingsVerify();
-            
+            KeyboardRedirector.EnableRedirect();
             await StartOverlayAsync();
             await Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
@@ -5484,7 +5528,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             if ((newPresses & GamepadButtonFlags.Y) != 0)
             {
                 SendOverlayNotification("Opening Keyboard");
-                ShowModernKeyboard();
+                ToggleTouchKeyboard();
             }
         }
 
@@ -5514,71 +5558,121 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Shows the modern keyboard using a robust multi-step approach.
         /// </summary>
-        private async void ShowModernKeyboard()
+
+
+        // Add this new class to your project
+        public static class KeyboardRedirector
         {
-            IntPtr tempFocusWindow = IntPtr.Zero;
-            try
+            // The registry key that allows us to intercept an executable launch.
+            private const string KeyPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\osk.exe";
+            private const string DebuggerValueName = "Debugger";
+
+            /// <summary>
+            /// Redirects the osk.exe shortcut (Ctrl+Win+O) to the modern touch keyboard.
+            /// NOTE: This requires administrator privileges to write to HKEY_LOCAL_MACHINE.
+            /// </summary>
+            public static void EnableRedirect()
             {
-                // Step 1: Identify the target window BEFORE showing the keyboard.
-                GetCursorPos(out POINT lastCursorPos);
-                IntPtr targetWindowHandle = WindowFromPoint(lastCursorPos);
-                if (targetWindowHandle == IntPtr.Zero) return; // Abort if no window is under the cursor.
-
-                // Step 2: Forcefully restart the keyboard process.
-                HideOnScreenKeyboard();
-                await Task.Delay(100);
-
-                // Step 3: Create a temporary window to help with focus management.
-                tempFocusWindow = CreateWindowEx(0, "Static", "TempFocus", 0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-                SetForegroundWindow(tempFocusWindow);
-                await Task.Delay(50);
-
-                // Step 4: Launch the keyboard using the most reliable method.
-                string keyboardPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), @"microsoft shared\ink\TabTip.exe");
-                if (File.Exists(keyboardPath))
+                try
                 {
-                    var psi = new ProcessStartInfo(keyboardPath) { UseShellExecute = true };
-                    Process.Start(psi);
+                    // The path to the modern keyboard executable.
+                    string targetPath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+                        @"microsoft shared\ink\TabTip.exe");
+
+                    if (!File.Exists(targetPath))
+                    {
+                        Debug.WriteLine("[KeyboardRedirect] TabTip.exe not found. Cannot create redirect.");
+                        return;
+                    }
+
+                    // Create the registry key if it doesn't exist.
+                    using (RegistryKey key = Registry.LocalMachine.CreateSubKey(KeyPath))
+                    {
+                        // Set the "Debugger" value to our target path. This is the Windows mechanism for redirection.
+                        key.SetValue(DebuggerValueName, targetPath, RegistryValueKind.String);
+                    }
+                    Debug.WriteLine("[KeyboardRedirect] osk.exe is now redirected to TabTip.exe.");
                 }
-                else
+                catch (UnauthorizedAccessException)
                 {
-                    Debug.WriteLine("[GCM] ERROR: Modern Touch Keyboard (TabTip.exe) not found.");
-                    return;
+                    Debug.WriteLine("[KeyboardRedirect] ERROR: Administrator privileges are required to set up the keyboard redirect.");
                 }
-
-                // Step 5: Wait for the keyboard to fully appear.
-                await Task.Delay(750);
-
-                // ### THE FINAL FIX: SEND A DIRECT CLICK MESSAGE ###
-
-                // Convert the screen coordinates to coordinates relative to the target window.
-                POINT clientPoint = lastCursorPos;
-                ScreenToClient(targetWindowHandle, ref clientPoint);
-
-                // Pack the X and Y coordinates into a single value for the message.
-                IntPtr lParam = (IntPtr)((clientPoint.Y << 16) | (clientPoint.X & 0xFFFF));
-
-                // Send the "mouse down" and "mouse up" messages directly to the target window.
-                // This bypasses the keyboard or any other window on top.
-                PostMessage(targetWindowHandle, WM_LBUTTONDOWN, (IntPtr)1, lParam);
-                PostMessage(targetWindowHandle, WM_LBUTTONUP, IntPtr.Zero, lParam);
-
-                Debug.WriteLine($"[GCM] Sent direct click message to window {targetWindowHandle} to restore focus.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[GCM] An error occurred in the keyboard launch strategy: {ex.Message}");
-            }
-            finally
-            {
-                // Step 6: Clean up the temporary window.
-                if (tempFocusWindow != IntPtr.Zero)
+                catch (Exception ex)
                 {
-                    DestroyWindow(tempFocusWindow);
+                    Debug.WriteLine($"[KeyboardRedirect] An unexpected error occurred: {ex.Message}");
+                }
+            }
+
+            /// <summary>
+            /// Removes the redirect, restoring the default behavior of osk.exe.
+            /// NOTE: This requires administrator privileges.
+            /// </summary>
+            public static void DisableRedirect()
+            {
+                try
+                {
+                    // Check if the key exists before trying to delete it.
+                    using (RegistryKey parentKey = Registry.LocalMachine.OpenSubKey(Path.GetDirectoryName(KeyPath), true))
+                    {
+                        if (parentKey?.OpenSubKey(Path.GetFileName(KeyPath)) != null)
+                        {
+                            parentKey.DeleteSubKey(Path.GetFileName(KeyPath));
+                            Debug.WriteLine("[KeyboardRedirect] osk.exe redirect has been removed.");
+                        }
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    Debug.WriteLine("[KeyboardRedirect] ERROR: Administrator privileges are required to remove the keyboard redirect.");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[KeyboardRedirect] An unexpected error occurred while removing the redirect: {ex.Message}");
                 }
             }
         }
 
+
+        /// <summary>
+        /// The most reliable method to toggle the modern touch keyboard.
+        /// It uses the same undocumented COM interface as the AHK script.
+        /// </summary>
+        private void ToggleTouchKeyboard()
+        {
+            try
+            {
+                // 1. Create an instance of the COM object.
+                var uiHostNoLaunch = (ITipInvocation)new UIHostNoLaunch();
+
+                // 2. Call the 'Toggle' method, passing the handle of the desktop window.
+                uiHostNoLaunch.Toggle(GetDesktopWindow());
+
+                // 3. Release the COM object to prevent memory leaks.
+                Marshal.ReleaseComObject(uiHostNoLaunch);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Keyboard] COM Toggle failed: {ex.Message}. Falling back to starting TabTip.exe.");
+                // Fallback: If the COM call fails for any reason, try starting the process.
+                try { Process.Start(@"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe"); } catch { }
+            }
+        }
+
+        // Make sure you have this P/Invoke declaration in your class if you don't already.
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDesktopWindow();
+
+
+        /// <summary>
+        /// Shows the redirected keyboard by simulating the Ctrl+Win+O shortcut.
+        /// </summary>
+        /// 
+        // Add these with your other virtual-key constants like VK_MENU, VK_TAB, etc.
+        // The virtual key code for the Control key.
+        private const byte VK_CONTROL = 0x11;
+        // The virtual key code for the 'O' key.
+        private const byte O_KEY = 0x47;
         private void SetupGamepad()
         {
             // Start the dedicated input loop on a background thread.
@@ -5600,31 +5694,48 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     var state = _xinputController.GetState();
                     var currentButtons = state.Gamepad.Buttons;
 
-                    // --- Non-Blocking Mouse Mode Toggle Logic ---
-                    bool backButtonPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
-                    bool backButtonWasPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
+                    // ### NEW: Mouse Mode Toggle Logic (Back + Start for 3 seconds) ###
 
-                    if (backButtonPressed && !backButtonWasPressed)
+                    // 1. Check if both buttons are currently pressed.
+                    bool backPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
+                    bool startPressed = (currentButtons & GamepadButtonFlags.Start) != 0;
+                    bool comboIsPressed = backPressed && startPressed;
+
+                    bool lastBackPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
+                    bool lastStartPressed = (_lastButtonState & GamepadButtonFlags.Start) != 0;
+                    bool comboWasPressed = lastBackPressed && lastStartPressed;
+
+                    // 2. If the combo has just been initiated, start the timer.
+                    if (comboIsPressed && !comboWasPressed)
                     {
-                        _backButtonPressTime = DateTime.UtcNow;
+                        _comboPressTime = DateTime.UtcNow;
                         _mouseModeToggledThisPress = false;
                     }
-                    if (backButtonPressed && _backButtonPressTime.HasValue && !_mouseModeToggledThisPress)
+
+                    // 3. While the combo is held, check if 3 seconds have passed.
+                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress)
                     {
-                        if ((DateTime.UtcNow - _backButtonPressTime.Value).TotalSeconds >= 5.0)
+                        if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0)
                         {
                             _isMouseModeActive = !_isMouseModeActive;
                             SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated");
                             _mouseModeToggledThisPress = true;
-                            // The automatic HideOnScreenKeyboard() call has been removed.
+
+                            // If we are deactivating mouse mode, ensure the keyboard is hidden.
+                            if (!_isMouseModeActive && Process.GetProcessesByName("TabTip").Any())
+                            {
+                               
+                            }
                         }
                     }
-                    if (!backButtonPressed && backButtonWasPressed)
+
+                    // 4. If the combo is released, reset the timer.
+                    if (!comboIsPressed && comboWasPressed)
                     {
-                        _backButtonPressTime = null;
+                        _comboPressTime = null;
                     }
 
-                    // --- Main Input Logic Branch ---
+                    // --- Main Input Logic Branch (remains unchanged) ---
                     if (_isMouseModeActive)
                     {
                         HandleMouseControl(state);
@@ -5645,6 +5756,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 else
                 {
+                    if (_isKeyboardVisible) HideOnScreenKeyboard();
                     _lastButtonState = GamepadButtonFlags.None;
                 }
 
