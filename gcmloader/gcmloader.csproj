@@ -26,10 +26,14 @@
     <Content Remove="Assets\logo.ico" />
     <Content Remove="Assets\logo_gcm.png" />
     <Content Remove="Assets\nav.wav" />
+    <Content Remove="Assets\ownlauncher.png" />
     <Content Remove="Assets\pause.wav" />
     <Content Remove="Assets\play.wav" />
+    <Content Remove="Assets\playnite_logo.png" />
     <Content Remove="Assets\shortcut.wav" />
+    <Content Remove="Assets\steam_logo.png" />
     <Content Remove="Assets\xbox-controller.png" />
+    <Content Remove="Assets\xbox_logo.png" />
   </ItemGroup>
   <ItemGroup>
     <None Remove="asforally.exe" />
@@ -37,9 +41,11 @@
     <None Remove="Assets\game.png" />
     <None Remove="Assets\GCM_Startup_Video.webm" />
     <None Remove="Assets\nav.wav" />
+    <None Remove="Assets\ownlauncher.png" />
     <None Remove="Assets\pause.wav" />
     <None Remove="Assets\play.wav" />
     <None Remove="Assets\shortcut.wav" />
+    <None Remove="Assets\xbox_logo.png" />
     <None Remove="logo.ico" />
     <None Remove="nircmd.exe" />
     <None Remove="Settings.xml" />
@@ -77,16 +83,28 @@
     <EmbeddedResource Include="Assets\nav.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\ownlauncher.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\pause.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="Assets\play.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\playnite_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\shortcut.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\steam_logo.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\xbox-controller.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\xbox_logo.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
     <EmbeddedResource Include="logo.ico">

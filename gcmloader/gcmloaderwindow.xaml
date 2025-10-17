@@ -2,11 +2,9 @@
     x:Class="gcmloader.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:gcmloader"
     Title="GCM TaskManager">
 
-
-    
-    
     <Grid x:Name="RootGrid">
         <Grid.Resources>
             <Style x:Key="PowerMenuStyle" TargetType="Button">
@@ -18,14 +16,17 @@
                 <Setter Property="HorizontalContentAlignment" Value="Left"/>
             </Style>
         </Grid.Resources>
+
         <Grid x:Name="MainContent" Visibility="Collapsed">
+            <!-- This Grid contains the main UI that is visible by default -->
 
             <Button x:Name="FocusSink" Width="0" Height="0" IsTabStop="True"/>
+
+            <!-- HIER WURDEN DIE FEHLENDEN LAUNCHER TILES WIEDER EINGEFÜGT -->
             <StackPanel x:Name="LauncherTileRow"
                         Orientation="Horizontal"
                         Visibility="Collapsed"
                         HorizontalAlignment="Center"
-                        Loaded="LauncherTileRow_Loaded"
                         VerticalAlignment="Top"
                         Margin="0,40,0,0"
                         Spacing="20">
@@ -36,82 +37,64 @@
                 <Border Width="120" Height="140" x:Name="LauncherTile4"/>
             </StackPanel>
 
-            <Image x:Name="BackgroundImage"
-                   Stretch="UniformToFill"
-                   IsHitTestVisible="False"/>
+            <Image x:Name="BackgroundImage" Stretch="UniformToFill" IsHitTestVisible="False"/>
 
-            <Border x:Name="infopanelright"
-        Background="#88000000"
-        CornerRadius="10"
-        HorizontalAlignment="Right"
-        VerticalAlignment="Top"
-        Margin="20" Padding="10">
-                <Grid ColumnSpacing="15" VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
-
+            <!-- Top Right Info Panel -->
+            <Border x:Name="infopanelright" Background="#88000000" CornerRadius="10" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="20" Padding="10">
+                <StackPanel Orientation="Horizontal" Spacing="15" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon x:Name="NetworkStatusIcon" Glyph="&#xE701;" FontSize="16" Foreground="White"/>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon x:Name="BatteryIcon" Glyph="&#xE83F;" FontSize="16" Foreground="White"/>
+                            <TextBlock x:Name="BatteryPercentageText" Text="100%" FontSize="14" Foreground="White" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
                         <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1">
                             <ToolTipService.ToolTip>
-                                <TextBlock Text="Zurück zum Desktop"/>
+                                <TextBlock Text="Back to Desktop"/>
                             </ToolTipService.ToolTip>
                             <FontIcon Glyph="&#xf1cb;" FontSize="18"/>
                         </Button>
-
-                        <Button x:Name="ShutdownButton" Width="50" Height="40" Click="ShutdownButton_Click_1">
+                        <Button x:Name="SettingsButton" Width="50" Height="40" Click="SettingsButton_Click">
                             <ToolTipService.ToolTip>
-                                <TextBlock Text="Power-Menü"/>
+                                <TextBlock Text="Open Windows Settings"/>
                             </ToolTipService.ToolTip>
-                            <FontIcon Glyph="&#xe7e8;" FontSize="18"/>
+                            <FontIcon Glyph="&#xE713;" FontSize="18"/>
                         </Button>
-
+                        <Button x:Name="AppLauncherButton" Width="50" Height="40" Click="ToggleAppLauncher_Click">
+                            <ToolTipService.ToolTip>
+                                <TextBlock Text="Open App Launcher"/>
+                            </ToolTipService.ToolTip>
+                            <FontIcon Glyph="&#xE71E;" FontSize="18"/>
+                        </Button>
+                        <Button x:Name="ShutdownButton" Width="50" Height="40" Click="PowerButton_Click">
+                            <ToolTipService.ToolTip>
+                                <TextBlock Text="Power Menu"/>
+                            </ToolTipService.ToolTip>
+                            <FontIcon Glyph="&#xE7E8;" FontSize="18"/>
+                        </Button>
                     </StackPanel>
-                    <TextBlock x:Name="ClockText" Grid.Column="1" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
-                </Grid>
+                    <TextBlock x:Name="ClockText" FontSize="24" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" FontFamily="Consolas"/>
+                </StackPanel>
             </Border>
 
-            <Grid VerticalAlignment="Bottom"      
-      Height="420"
-      HorizontalAlignment="Stretch">
+            <!-- Bottom Content (Launcher Area and Cards) -->
+            <Grid VerticalAlignment="Bottom" Height="420" HorizontalAlignment="Stretch">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition x:Name="LauncherColumn" Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition x:Name="CardsColumn" Width="*"/>
                 </Grid.ColumnDefinitions>
-
-                <StackPanel x:Name="LauncherAreaPanel" 
-                Grid.Column="0" 
-                Orientation="Horizontal"
-                Spacing="10"
-                VerticalAlignment="Center" 
-                HorizontalAlignment="Left" 
-                Margin="60,0,0,0">
-                </StackPanel>
-
-                <Rectangle x:Name="ColumnSeparator" Grid.Column="1"
-               Width="2"
-               Fill="#55FFFFFF"
-               Height="200"
-               RadiusX="1" RadiusY="1"
-               VerticalAlignment="Center"
-               Margin="40,0,40,0"/>
-
-                <ScrollViewer x:Name="ProgramScrollViewer"
-                  Grid.Column="2"
-                  VerticalScrollBarVisibility="Disabled"
-                  VerticalAlignment="Center"
-                  Padding="0,0,60,0"
-                  HorizontalScrollMode="Enabled"    
-                  HorizontalScrollBarVisibility="Hidden">
+                <StackPanel x:Name="LauncherAreaPanel" Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="60,0,0,0"/>
+                <Rectangle x:Name="ColumnSeparator" Grid.Column="1" Width="2" Fill="#55FFFFFF" Height="200" RadiusX="1" RadiusY="1" VerticalAlignment="Center" Margin="40,0,40,0"/>
+                <ScrollViewer x:Name="ProgramScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Disabled" VerticalAlignment="Center" Padding="0,0,60,0" HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Hidden">
                     <StackPanel x:Name="ProgramCardPanel" Orientation="Horizontal"/>
                 </ScrollViewer>
             </Grid>
 
-            <Border Height="60"
-                    VerticalAlignment="Bottom"
-                    HorizontalAlignment="Stretch">
+            <!-- Bottom Help Bar -->
+            <Border Height="60" VerticalAlignment="Bottom" HorizontalAlignment="Stretch">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
                         <GradientStop Color="#CC000000" Offset="0.0"/>
@@ -121,64 +104,142 @@
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="40">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
                         <TextBlock Text="A" FontSize="22" FontWeight="Bold" Foreground="#FFA5D952"/>
-                        <TextBlock Text="Start" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="Start / Select" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
                         <TextBlock Text="B" FontSize="22" FontWeight="Bold" Foreground="#FFDB4E4E"/>
-                        <TextBlock Text="Close" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="Close / Back" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                        <TextBlock Text="LB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                        <TextBlock Text="Previous Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                        <TextBlock Text="RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                        <TextBlock Text="Next Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text="LB/RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
+                        <TextBlock Text="Change Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>
-        <Border x:Name="FocusLossOverlay"
-        Background="#D8000000" Visibility="Collapsed"
-        Canvas.ZIndex="99">
+
+        <!-- Overlays that appear on top of MainContent -->
+        <Border x:Name="FocusLossOverlay" Background="#D8000000" Visibility="Collapsed" Canvas.ZIndex="99">
             <Grid>
-                <Image Source="/Assets/gcm_ui_logo.png"
-               HorizontalAlignment="Center"
-               VerticalAlignment="Center"
-               Width="200"
-               Height="200"
-               Stretch="Uniform"/>
+                <Image Source="/Assets/gcm_ui_logo.png" HorizontalAlignment="Center" VerticalAlignment="Center" Width="200" Height="200" Stretch="Uniform"/>
             </Grid>
         </Border>
 
-        <MediaPlayerElement x:Name="StartupVideoPlayer"
-                              AreTransportControlsEnabled="False"
-                              Stretch="Uniform"
-                              HorizontalAlignment="Stretch"
-                              VerticalAlignment="Stretch"
-                              Background="Black"/>
+        <!-- NEUER APP LAUNCHER ALS OVERLAY -->
+        <Grid x:Name="AppLauncher" 
+      Visibility="Collapsed" 
+      Background="#D8000000" 
+      Canvas.ZIndex="90"
+      Tapped="AppLauncher_Tapped">
 
-        <!-- POWERMENU -->
-        <Border x:Name="PowerMenu"
-                Visibility="Collapsed"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Background="#CC1C1C1C"
-                CornerRadius="8"
-                BorderBrush="#55FFFFFF"
-                BorderThickness="1"
-                Canvas.ZIndex="100">
+            <Border VerticalAlignment="Center" 
+            HorizontalAlignment="Center" 
+            Width="800" Height="600" 
+            Background="#E51C1C1C" 
+            CornerRadius="12" 
+            BorderBrush="#55FFFFFF" 
+            BorderThickness="1"
+            Tapped="AppLauncherContent_Tapped">
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Height="45" Margin="20,15,20,10" Background="#22FFFFFF" CornerRadius="22">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE721;" FontFamily="Segoe Fluent Icons" VerticalAlignment="Center" Margin="15,0,0,0" Foreground="White"/>
+                            <TextBox x:Name="AppSearchBox" Grid.Column="1" Margin="10,0,15,0" PlaceholderText="Search for app..." TextChanged="AppSearchBox_TextChanged" Background="Transparent" BorderThickness="0" VerticalAlignment="Center" FontSize="16" Foreground="White"/>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <GridView Grid.Row="0" x:Name="AppGridView" 
+                          ItemsSource="{x:Bind AllInstalledApps}" IsItemClickEnabled="True" 
+                          ItemClick="AppGridView_ItemClick" 
+                          SelectionMode="Single" 
+                          Padding="20,0,20,10">
+                            <GridView.ItemContainerStyle>
+                                <Style TargetType="GridViewItem">
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="GridViewItem">
+                                                <Border x:Name="RootBorder" Background="Transparent" CornerRadius="8" BorderBrush="Transparent" BorderThickness="2" Margin="4">
+                                                    <ContentPresenter />
+                                                    <VisualStateManager.VisualStateGroups>
+                                                        <VisualStateGroup x:Name="CommonStates">
+                                                            <VisualState x:Name="Normal" />
+                                                            <VisualState x:Name="Selected">
+                                                                <Storyboard>
+                                                                    <ColorAnimation Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)" To="#44FFFFFF" Duration="0:0:0.2"/>
+                                                                    <ColorAnimation Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)" To="White" Duration="0:0:0.2"/>
+                                                                </Storyboard>
+                                                            </VisualState>
+                                                            <VisualState x:Name="PointerOver">
+                                                                <Storyboard>
+                                                                    <ColorAnimation Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)" To="#22FFFFFF" Duration="0:0:0.2"/>
+                                                                </Storyboard>
+                                                            </VisualState>
+                                                        </VisualStateGroup>
+                                                    </VisualStateManager.VisualStateGroups>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </GridView.ItemContainerStyle>
+                            <GridView.ItemTemplate>
+                                <DataTemplate x:DataType="local:AppInfo">
+                                    <StackPanel Width="170" Height="150" Padding="10" HorizontalAlignment="Center">
+                                        <Image Source="{x:Bind Icon}" Width="80" Height="80" Stretch="Uniform"/>
+                                        <TextBlock Text="{x:Bind Name}" Margin="0,10,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxLines="2"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GridView.ItemTemplate>
+                        </GridView>
+
+                        <ProgressRing Grid.RowSpan="2" x:Name="AppLoadingRing" IsActive="False" Visibility="Collapsed" Width="80" Height="80" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.RowSpan="2" x:Name="NoAppsFoundText" Text="No applications found." Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="18" Foreground="Gray"/>
+                        <TextBlock Grid.RowSpan="2" x:Name="NoSearchResultsText" Text="No results found for your search." Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="18" Foreground="Gray"/>
+
+                        <Border Grid.Row="1" VerticalAlignment="Bottom" Height="50" CornerRadius="0,0,12,12">
+                            <Border.Background>
+                                <SolidColorBrush Color="Black" Opacity="0.5"/>
+                            </Border.Background>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="40">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                                    <TextBlock Text="A" FontSize="22" FontWeight="Bold" Foreground="#FFA5D952"/>
+                                    <TextBlock Text="Start App" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                                    <TextBlock Text="B" FontSize="22" FontWeight="Bold" Foreground="#FFDB4E4E"/>
+                                    <TextBlock Text="Close App Launcher" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <MediaPlayerElement x:Name="StartupVideoPlayer" AreTransportControlsEnabled="False" Stretch="Uniform" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Black"/>
+
+        <Border x:Name="PowerMenu" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Top" Background="#CC1C1C1C" CornerRadius="8" BorderBrush="#55FFFFFF" BorderThickness="1" Canvas.ZIndex="100">
             <StackPanel Spacing="5" Margin="5">
                 <Button x:Name="ShutdownMenuItem" Style="{StaticResource PowerMenuStyle}" Click="ShutdownMenuItem_Click">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xe7e8;" FontSize="16"/>
                         <TextBlock Text="Shutdown"/>
-                    </StackPanel>
-                </Button>
-                <Button x:Name="SleepMenuItem" Style="{StaticResource PowerMenuStyle}" Click="SleepMenuItem_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xe740;" FontSize="16"/>
-                        <TextBlock Text="Sleep"/>
                     </StackPanel>
                 </Button>
                 <Button x:Name="RestartMenuItem" Style="{StaticResource PowerMenuStyle}" Click="RestartMenuItem_Click">
@@ -187,8 +248,19 @@
                         <TextBlock Text="Restart"/>
                     </StackPanel>
                 </Button>
+                <Button x:Name="SleepMenuItem" Style="{StaticResource PowerMenuStyle}" Click="SleepMenuItem_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xe740;" FontSize="16"/>
+                        <TextBlock Text="Sleep"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="LogOffMenuItem" Style="{StaticResource PowerMenuStyle}" Click="LogOffMenuItem_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xe77b;" FontSize="16"/>
+                        <TextBlock Text="Log Off"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Border>
-
     </Grid>
 </Window>
