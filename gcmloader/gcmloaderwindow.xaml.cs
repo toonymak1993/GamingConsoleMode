@@ -108,8 +108,6 @@ namespace gcmloader
         private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
         private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
         #endregion mousecontrol
-
-        // FÜGE DIESEN NEUEN BEREICH HINZU
         #region App Launcher
 
         bool isAppListLoaded = false;
@@ -154,7 +152,12 @@ namespace gcmloader
         private int _selectedLauncherResultIndex = 0;
         private ObservableCollection<AppInfo> AllInstalledApps { get; } = new ObservableCollection<AppInfo>();
         #endregion
-
+        #region playnite launcher window
+        // Add these with your other window style constants
+        private const long WS_BORDER = 0x00800000L;
+        private const long WS_SYSMENU = 0x00080000L;
+        private const long WS_MINIMIZEBOX = 0x00020000L;
+        #endregion playnite launcher window
         #region ui status
         private DispatcherTimer _statusUpdateTimer;
         #endregion ui status
@@ -1798,53 +1801,65 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion methodes for code
         #region functions
         #region lossless
-        public static void StartLosslessScaling()
+        private const int SW_MINIMIZEE = 6;
+
+        // NOTE: This method is now 'async Task'
+        public static async Task StartLosslessScaling()
         {
             try
             {
-                // 1. Check if the feature is enabled in the settings.
+                // 1. Your existing checks remain the same - this is good practice.
                 if (!AppSettings.Load<bool>("lossless"))
                 {
                     Console.WriteLine("Lossless Scaling auto-start is disabled. Skipping.");
-                    return; // Exit the method if the setting is false.
-                }
-
-                // 2. Load the application path from the settings.
-                string losslessPath = AppSettings.Load<string>("losslesspath");
-
-                // 3. Validate the path and check if the file exists.
-                if (string.IsNullOrEmpty(losslessPath) || !File.Exists(losslessPath))
-                {
-                    Console.WriteLine($"Error: The path to Lossless Scaling is invalid or the file was not found: {losslessPath}");
                     return;
                 }
 
-                // 4. Extract the process name from the file path (e.g., "Lossless Scaling" from "Lossless Scaling.exe").
-                string processName = Path.GetFileNameWithoutExtension(losslessPath);
+                string losslessPath = AppSettings.Load<string>("losslesspath");
+                if (string.IsNullOrEmpty(losslessPath) || !File.Exists(losslessPath))
+                {
+                    Console.WriteLine($"Error: The path to Lossless Scaling is invalid: {losslessPath}");
+                    return;
+                }
 
-                // 5. Check if the process is already running to avoid launching a duplicate instance.
-                if (Process.GetProcessesByName(processName).Length > 0)
+                string processName = Path.GetFileNameWithoutExtension(losslessPath);
+                if (Process.GetProcessesByName(processName).Any())
                 {
                     Console.WriteLine("Lossless Scaling is already running.");
                     return;
                 }
 
-                // 6. Start the application with the specified settings.
-                Console.WriteLine("Starting Lossless Scaling minimized...");
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = losslessPath,
-                    // This line ensures that the application starts minimized.
-                    WindowStyle = ProcessWindowStyle.Minimized
-                };
+                // 2. Start the process WITHOUT the WindowStyle suggestion.
+                Console.WriteLine("Starting Lossless Scaling...");
+                Process process = Process.Start(losslessPath);
 
-                Process.Start(startInfo);
-                Console.WriteLine("Lossless Scaling started successfully.");
+                // 3. Wait for the process to create its main window.
+                // We give it up to 5 seconds to appear.
+                for (int i = 0; i < 50; i++)
+                {
+                    // The Refresh() is important to get the latest process details.
+                    process.Refresh();
+                    if (process.MainWindowHandle != IntPtr.Zero)
+                    {
+                        break; // Window found, exit the loop.
+                    }
+                    await Task.Delay(100);
+                }
+
+                // 4. Forcefully minimize the window.
+                if (process.MainWindowHandle != IntPtr.Zero)
+                {
+                    Console.WriteLine("Lossless Scaling window found. Forcing it to minimize.");
+                    ShowWindow(process.MainWindowHandle, SW_MINIMIZEE);
+                }
+                else
+                {
+                    Console.WriteLine("Could not find the main window for Lossless Scaling after starting it.");
+                }
             }
             catch (Exception ex)
             {
-                // Catch any exceptions that might occur during startup (e.g., permission issues).
-                Console.WriteLine($"An unexpected error occurred while starting Lossless Scaling or deaktivated {ex.Message}");
+                Console.WriteLine($"An unexpected error occurred while starting Lossless Scaling: {ex.Message}");
             }
         }
         #endregion lossless
@@ -2781,30 +2796,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Brings a window robustly to the foreground using a two-step approach:
         /// 1. Maximize reliably. 2. Force to true fullscreen to cover the taskbar.
         /// </summary>
+        /// <summary>
+        /// Brings a window robustly to the foreground. For Playnite, it forces a true
+        /// borderless fullscreen mode by manipulating the window style.
+        /// </summary>
         private async Task ForcefullyBringToForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
-            string launcher = AppSettings.Load<string>("launcher");
-
-            // ### THE FINAL FIX: A TWO-STEP APPROACH ###
-
-            // Step 1: Reliably bring the window to focus and maximize it to the work area.
-            // This is the most stable way to ensure the window is active and on top.
-            ShowWindow(hWnd, SW_SHOWMAXIMIZED);
-
-            // Give Windows a brief moment to process the state change.
-            await Task.Delay(100);
-
-            // Step 2: Now that the window is active, force it to true fullscreen.
-            // This second call stretches it over the taskbar area, removing the black bar.
-            if (launcher == "playnite" || launcher == "steam")
-            {
-                ForceWindowToTrueFullscreen(hWnd);
-            }
-
-            // The focus logic remains the same.
-            await Task.Delay(150); // A bit more delay to ensure everything is settled.
+            // --- Step 1: Reliably bring the window to the front ---
+            // This part remains the most stable way to gain focus.
             IntPtr foregroundHwnd = GetForegroundWindow();
             if (foregroundHwnd != hWnd)
             {
@@ -2815,12 +2816,46 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AttachThreadInput(ourThreadId, foregroundThreadId, false);
             }
 
-            // The specific focus correction for Playnite also remains exactly the same.
+            // Restore if minimized, otherwise just show it.
+            if (IsIconic(hWnd)) { ShowWindow(hWnd, SW_RESTORE); }
+            else { ShowWindow(hWnd, 5); } // SW_SHOW
+
+            string launcher = AppSettings.Load<string>("launcher");
             if (launcher == "playnite")
             {
+                // Give the window a moment to become fully active.
+                await Task.Delay(250);
+
+                // --- Step 2: Aggressively force true borderless fullscreen ---
                 try
                 {
-                    // ... (Your complete, working logic for the invisible click and Escape key) ...
+                    Debug.WriteLine($"[GCM] Forcing true borderless fullscreen for Playnite (Handle: {hWnd}).");
+
+                    // Get the current window style.
+                    long style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+
+                    // Remove all border, caption, and menu styles.
+                    style &= ~(WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+
+                    // Apply the new, borderless style.
+                    SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)style);
+
+                    // Get absolute screen dimensions.
+                    int screenWidth = GetScreenWidth();
+                    int screenHeight = GetScreenHeight();
+
+                    // Resize and position the now-borderless window to cover the entire screen.
+                    SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GCM] Failed to apply borderless style: {ex.Message}");
+                }
+
+                // --- Step 3: Perform the focus correction (Click + Escape) ---
+                // This logic remains unchanged as it was working perfectly.
+                try
+                {
                     while (ShowCursor(false) >= 0) ;
                     await Task.Delay(32);
                     await Task.Delay(300);
@@ -3916,7 +3951,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ConsoleModeToShell();
             preaudio(true, false);
             prestartlist();
-            StartLosslessScaling();
+            await StartLosslessScaling();
             SwitchToConfiguredLauncher();
             await Task.Delay(500); // Gibt dem Launcher kurz Zeit zu starten
             AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
@@ -4093,24 +4128,47 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void LoadDynamicLauncherCards()
         {
-            // First, we initialize the list for gamepad navigation
+            // First, initialize the list for gamepad navigation.
             _launcherAreaButtons = new List<Border>();
 
-            // 1. Create and add the main launcher card (Steam, Playnite, etc.)
+            // 1. Get the configured launcher from settings to determine the main icon.
+            string launcher = AppSettings.Load<string>("launcher");
+            string mainLauncherIconPath = null;
+
+            // 2. Select the correct icon path based on the setting.
+            switch (launcher)
+            {
+                case "steam":
+                    mainLauncherIconPath = "ms-appx:///Assets/steam_logo.png";
+                    break;
+                case "playnite":
+                    mainLauncherIconPath = "ms-appx:///Assets/playnite_logo.png";
+                    break;
+                case "xbox":
+                    mainLauncherIconPath = "ms-appx:///Assets/xbox_logo.png";
+                    break;
+
+                default:
+                    mainLauncherIconPath = "ms-appx:///Assets/ownlauncher.png";
+                    break;
+            }
+
+            // 3. Create the main launcher card item WITH the icon path.
             var mainLauncherItem = new LauncherCardItem
             {
                 Name = "Main Launcher",
+                ImagePath = mainLauncherIconPath, // This will be null for the default icon.
                 TapAction = (s, e) => SwitchToConfiguredLauncher()
             };
             var mainLauncherCard = CreateLauncherCard(mainLauncherItem);
             LauncherAreaPanel.Children.Add(mainLauncherCard);
             _launcherAreaButtons.Add(mainLauncherCard);
 
-            // 2. Create and add the Discord card
+            // 4. Create and add the Discord card.
             var discordItem = new LauncherCardItem
             {
                 Name = "Discord",
-                ImagePath = "ms-appx:///Assets/discord.png", // Make sure this icon is in your Assets folder!
+                ImagePath = "ms-appx:///Assets/discord.png",
                 TapAction = (s, e) =>
                 {
                     MakeSelfNonTopmost();
@@ -4122,7 +4180,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             LauncherAreaPanel.Children.Add(discordCard);
             _launcherAreaButtons.Add(discordCard);
 
-            // 3. Load and add the 5 custom app slots from settings.toml
+            // 5. Load and add the 5 custom app slots from settings.toml.
             for (int i = 1; i <= 5; i++)
             {
                 try
@@ -4131,7 +4189,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     string imagePath = AppSettings.Load<string>($"button{i}image");
                     string args = AppSettings.Load<string>($"button{i}args") ?? "";
 
-                    // Only add if EXE and image are valid and exist
+                    // Only add if EXE and image are valid and exist.
                     if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath) &&
                         !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                     {
@@ -4146,7 +4204,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 MakeSelfNonTopmost();
                                 try
                                 {
-                                    // ZURÜCK ZUM EINFACHEN PROCESS.START
                                     Process.Start(new ProcessStartInfo(exePath)
                                     {
                                         Arguments = args,
@@ -4176,43 +4233,71 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         /// <summary>
         /// Creates a single, clickable launcher card based on the provided data.
+        /// Now handles a custom image for the Main Launcher card with a "LAUNCHER" label.
         /// </summary>
-        /// <param name="item">The data for the card to be created.</param>
-        /// <returns>A Border element representing the final card.</returns>
         private Border CreateLauncherCard(LauncherCardItem item)
         {
-            // Determine the card size based on its name
             double cardWidth = (item.Name == "Main Launcher") ? 300 : 150;
             double cardHeight = (item.Name == "Main Launcher") ? 250 : 180;
-
-            // Create the card's content (icon and text)
             UIElement cardContent;
+
             if (item.Name == "Main Launcher")
             {
-                cardContent = new StackPanel
+                // If an ImagePath is provided, create a StackPanel with the Image and a TextBlock.
+                if (!string.IsNullOrEmpty(item.ImagePath))
                 {
-                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Spacing = 15,
-                    Children = {
-                new FontIcon { Glyph = "\uE80F", FontSize = 48, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) },
-                new TextBlock { Text = "Launcher", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) }
+                    cardContent = new StackPanel
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Spacing = 15,
+                        Children = {
+                    new Image
+                    {
+                        Source = new BitmapImage(new Uri(item.ImagePath)),
+                        Width = 128,
+                        Height = 128,
+                        Stretch = Stretch.Uniform
+                    },
+                    new TextBlock
+                    {
+                        Text = "LAUNCHER",
+                        FontSize = 22,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Colors.White),
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    }
+                }
+                    };
+                }
+                else // Otherwise, fall back to the default home icon and text.
+                {
+                    cardContent = new StackPanel
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Spacing = 15,
+                        Children = {
+                    new FontIcon { Glyph = "\uE80F", FontSize = 48, Foreground = new SolidColorBrush(Colors.White) },
+                    new TextBlock { Text = "Launcher", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Colors.White) }
+                }
+                    };
+                }
             }
-                };
-            }
-            else
+            else // For all other cards (Discord, custom apps)
             {
                 cardContent = new Image
                 {
                     Source = new BitmapImage(new Uri(item.ImagePath)),
-                    Width = 80, // Adjusted size for a uniform look
+                    Width = 80,
                     Height = 80,
                     Stretch = Stretch.Uniform,
-                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center
                 };
             }
 
+            // This part of the method remains exactly the same
             var cardBorder = new Border
             {
                 Width = cardWidth,
@@ -4220,12 +4305,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Background = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), // #33FFFFFF
                 CornerRadius = new CornerRadius(20),
                 BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray),
+                BorderBrush = new SolidColorBrush(Colors.Gray),
                 Child = cardContent,
-                Tag = item // *** THIS IS THE KEY CHANGE *** We store the item data directly on the card.
+                Tag = item
             };
 
-            // Add the Tapped event handler for mouse/touch
             if (item.TapAction != null)
             {
                 cardBorder.Tapped += (s, e) => item.TapAction(s, e);
@@ -5479,56 +5563,66 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
         /// </summary>
-        /// <summary>
-        /// Handles all controller-as-a-mouse logic with smooth, sub-pixel movement.
-        /// </summary>
+       
         private void HandleMouseControl(State controllerState)
         {
             var gamepad = controllerState.Gamepad;
             var currentButtons = gamepad.Buttons;
 
-            // ### NEW: SMOOTH CURSOR MOVEMENT LOGIC ###
+            // --- Smooth Cursor Movement (Left Stick) ---
             const int deadzone = 4000;
             float thumbX = gamepad.LeftThumbX;
             float thumbY = gamepad.LeftThumbY;
 
             if (Math.Abs(thumbX) > deadzone || Math.Abs(thumbY) > deadzone)
             {
-                // Get current cursor position.
                 GetCursorPos(out POINT currentPos);
+                float speedMultiplier = 45.0f; // This is the high speed you wanted.
 
-                // This speed value is now much more sensitive.
-                float speedMultiplier = 45.0f;
-
-                // 1. Calculate the precise desired movement for this frame as a float.
                 float moveX = (thumbX / 32767.0f) * speedMultiplier;
                 float moveY = (thumbY / 32767.0f) * speedMultiplier;
 
-                // 2. Add the leftover fractions from the previous frame.
                 moveX += _cursorXRemainder;
                 moveY += _cursorYRemainder;
 
-                // 3. Determine the whole number of pixels to move this frame.
                 int pixelsToMoveX = (int)moveX;
                 int pixelsToMoveY = (int)moveY;
 
-                // 4. Update the cursor position with the whole pixels.
                 int newX = currentPos.X + pixelsToMoveX;
-                int newY = currentPos.Y - pixelsToMoveY; // Y is inverted.
+                int newY = currentPos.Y - pixelsToMoveY; // Y is inverted for screen coordinates.
                 SetCursorPos(newX, newY);
 
-                // 5. Save the new leftover fractions for the next frame.
                 _cursorXRemainder = moveX - pixelsToMoveX;
                 _cursorYRemainder = moveY - pixelsToMoveY;
             }
             else
             {
-                // Reset remainders when the stick is centered to prevent drift.
                 _cursorXRemainder = 0f;
                 _cursorYRemainder = 0f;
             }
 
-            // --- Button Actions (remain unchanged) ---
+            // ### SCROLLING LOGIC RE-ADDED HERE (Right Stick) ###
+            float thumbRy = gamepad.RightThumbY;
+            // Check if enough time has passed since the last scroll to ensure a smooth speed.
+            if ((DateTime.UtcNow - _lastScrollTime).TotalMilliseconds > 50)
+            {
+                // Scroll Down
+                if (thumbRy < -deadzone)
+                {
+                    // The 'dwData' parameter controls the wheel. -120 is one "tick" down.
+                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)-120), UIntPtr.Zero);
+                    _lastScrollTime = DateTime.UtcNow; // Reset the timer
+                }
+                // Scroll Up
+                else if (thumbRy > deadzone)
+                {
+                    // 120 is one "tick" up.
+                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 120, UIntPtr.Zero);
+                    _lastScrollTime = DateTime.UtcNow; // Reset the timer
+                }
+            }
+
+            // --- Button Actions ---
             var newPresses = currentButtons & ~_lastButtonState;
 
             // Left Click (A button) - Supports holding
