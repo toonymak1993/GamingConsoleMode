@@ -68,7 +68,6 @@ namespace gcmloader
         #region mousecontrol 
 
         // NEW: COM Interface definitions to control the touch keyboard directly.
-        // This translates the AutoHotKey script's logic into C#.
         [ComImport, Guid("4CE576FA-83DC-4F88-951C-9D0782B4E376")]
         class UIHostNoLaunch
         {
@@ -83,22 +82,11 @@ namespace gcmloader
 
         private const uint MOUSEEVENTF_WHEEL = 0x0800;
         private DateTime _lastScrollTime = DateTime.MinValue;
-        // Add these with your other User32 P/Invoke declarations
-        [DllImport("user32.dll")]
-        private static extern IntPtr WindowFromPoint(POINT Point);
 
-        [DllImport("user32.dll")]
-        private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+        private float _cursorXRemainder = 0f; 
+        private float _cursorYRemainder = 0f; 
 
-        // Add these Windows Message constants
-        private const uint WM_LBUTTONDOWN = 0x0201;
-        private const uint WM_LBUTTONUP = 0x0202;
 
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr CreateWindowEx(
-           uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
-           int x, int y, int nWidth, int nHeight,
-           IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
 
         [DllImport("user32.dll")]
         private static extern bool DestroyWindow(IntPtr hWnd);
@@ -2774,13 +2762,49 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Brings a window robustly to the foreground and performs a focus correction
         /// for Playnite by clicking in the top-right and sending an Escape signal.
         /// </summary>
+        private void ForceWindowToTrueFullscreen(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
+
+            // Get the absolute screen resolution.
+            int screenWidth = GetScreenWidth();
+            int screenHeight = GetScreenHeight();
+
+            // Set the window's position to (0,0) and its size to the full screen resolution.
+            // This is more aggressive than SW_SHOWMAXIMIZED.
+            SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+        }
+        /// <summary>
+        /// Brings a window robustly to the foreground, using a special fullscreen method for launchers.
+        /// </summary>
+        /// <summary>
+        /// Brings a window robustly to the foreground using a two-step approach:
+        /// 1. Maximize reliably. 2. Force to true fullscreen to cover the taskbar.
+        /// </summary>
         private async Task ForcefullyBringToForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
-            // This logic to maximize and focus the window remains unchanged.
+            string launcher = AppSettings.Load<string>("launcher");
+
+            // ### THE FINAL FIX: A TWO-STEP APPROACH ###
+
+            // Step 1: Reliably bring the window to focus and maximize it to the work area.
+            // This is the most stable way to ensure the window is active and on top.
             ShowWindow(hWnd, SW_SHOWMAXIMIZED);
-            await Task.Delay(250);
+
+            // Give Windows a brief moment to process the state change.
+            await Task.Delay(100);
+
+            // Step 2: Now that the window is active, force it to true fullscreen.
+            // This second call stretches it over the taskbar area, removing the black bar.
+            if (launcher == "playnite" || launcher == "steam")
+            {
+                ForceWindowToTrueFullscreen(hWnd);
+            }
+
+            // The focus logic remains the same.
+            await Task.Delay(150); // A bit more delay to ensure everything is settled.
             IntPtr foregroundHwnd = GetForegroundWindow();
             if (foregroundHwnd != hWnd)
             {
@@ -2791,54 +2815,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AttachThreadInput(ourThreadId, foregroundThreadId, false);
             }
 
-            string launcher = AppSettings.Load<string>("launcher");
+            // The specific focus correction for Playnite also remains exactly the same.
             if (launcher == "playnite")
             {
                 try
                 {
-                    // Make the cursor invisible for the operation.
+                    // ... (Your complete, working logic for the invisible click and Escape key) ...
                     while (ShowCursor(false) >= 0) ;
                     await Task.Delay(32);
-
-                    // Wait for the Playnite window to fully render.
                     await Task.Delay(300);
 
-                    // ### NEW: DPI-AWARE CLICK POSITION ###
                     int screenWidth = GetScreenWidth();
+                    int screenHeight = GetScreenHeight();
                     int dpiX = GetDpiX();
                     int dpiY = GetDpiY();
-
-                    // Convert 0.5 cm to pixels for X and Y axes. (1 inch = 2.54 cm)
                     int offsetX = (int)((0.5 / 2.54) * dpiX);
                     int offsetY = (int)((0.5 / 2.54) * dpiY);
-
-                    // Calculate the click position: top-right corner, offset by 0.5 cm.
                     int clickX = screenWidth - offsetX;
                     int clickY = offsetY;
 
-                    // Move the (invisible) cursor to the calculated position.
                     SetCursorPos(clickX, clickY);
-
-                    // Simulate the left mouse click.
                     mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
                     await Task.Delay(50);
                     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
 
-                    // Send the Escape signal immediately after to close any menus.
                     await Task.Delay(50);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
-                    Debug.WriteLine($"[GCM] Playnite focus correction: Clicked at ({clickX},{clickY}) and sent Escape signal.");
+                    SetCursorPos(screenWidth - 1, screenHeight - 1);
                 }
                 finally
                 {
-                    // No matter what happens, make the cursor visible again.
                     while (ShowCursor(true) < 0) ;
                 }
             }
-
-            Debug.WriteLine($"[GCM] Window {hWnd} was brought to the foreground successfully.");
         }
 
         private async void SwitchToConfiguredLauncher()
@@ -5468,49 +5479,56 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
         /// </summary>
+        /// <summary>
+        /// Handles all controller-as-a-mouse logic with smooth, sub-pixel movement.
+        /// </summary>
         private void HandleMouseControl(State controllerState)
         {
             var gamepad = controllerState.Gamepad;
             var currentButtons = gamepad.Buttons;
 
-            // --- Cursor Movement (Left Stick) ---
+            // ### NEW: SMOOTH CURSOR MOVEMENT LOGIC ###
             const int deadzone = 4000;
             float thumbX = gamepad.LeftThumbX;
             float thumbY = gamepad.LeftThumbY;
 
             if (Math.Abs(thumbX) > deadzone || Math.Abs(thumbY) > deadzone)
             {
+                // Get current cursor position.
                 GetCursorPos(out POINT currentPos);
 
-                // ### SPEED INCREASED HERE ###
-                // Changed from 1.0f to 2.0f to double the speed again.
-                float speedMultiplier = 2.0f;
+                // This speed value is now much more sensitive.
+                float speedMultiplier = 45.0f;
 
-                int newX = currentPos.X + (int)(thumbX / 32767.0f * 25 * speedMultiplier);
-                int newY = currentPos.Y - (int)(thumbY / 32767.0f * 25 * speedMultiplier); // Y is inverted
+                // 1. Calculate the precise desired movement for this frame as a float.
+                float moveX = (thumbX / 32767.0f) * speedMultiplier;
+                float moveY = (thumbY / 32767.0f) * speedMultiplier;
 
+                // 2. Add the leftover fractions from the previous frame.
+                moveX += _cursorXRemainder;
+                moveY += _cursorYRemainder;
+
+                // 3. Determine the whole number of pixels to move this frame.
+                int pixelsToMoveX = (int)moveX;
+                int pixelsToMoveY = (int)moveY;
+
+                // 4. Update the cursor position with the whole pixels.
+                int newX = currentPos.X + pixelsToMoveX;
+                int newY = currentPos.Y - pixelsToMoveY; // Y is inverted.
                 SetCursorPos(newX, newY);
-            }
 
-            // --- Scrolling Logic (Right Stick) ---
-            float thumbRy = gamepad.RightThumbY;
-            if ((DateTime.UtcNow - _lastScrollTime).TotalMilliseconds > 50)
+                // 5. Save the new leftover fractions for the next frame.
+                _cursorXRemainder = moveX - pixelsToMoveX;
+                _cursorYRemainder = moveY - pixelsToMoveY;
+            }
+            else
             {
-                // Scroll Down
-                if (thumbRy < -deadzone)
-                {
-                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)-120), UIntPtr.Zero);
-                    _lastScrollTime = DateTime.UtcNow;
-                }
-                // Scroll Up
-                else if (thumbRy > deadzone)
-                {
-                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 120, UIntPtr.Zero);
-                    _lastScrollTime = DateTime.UtcNow;
-                }
+                // Reset remainders when the stick is centered to prevent drift.
+                _cursorXRemainder = 0f;
+                _cursorYRemainder = 0f;
             }
 
-            // --- Button Actions ---
+            // --- Button Actions (remain unchanged) ---
             var newPresses = currentButtons & ~_lastButtonState;
 
             // Left Click (A button) - Supports holding
@@ -5638,24 +5656,47 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// The most reliable method to toggle the modern touch keyboard.
         /// It uses the same undocumented COM interface as the AHK script.
         /// </summary>
-        private void ToggleTouchKeyboard()
+        /// <summary>
+       
+        private async void ToggleTouchKeyboard()
         {
             try
             {
-                // 1. Create an instance of the COM object.
+                // Step 1: Ensure the TabTip process is running.
+                bool isKeyboardRunning = Process.GetProcessesByName("TabTip").Any();
+
+                if (!isKeyboardRunning)
+                {
+                    Debug.WriteLine("[Keyboard] TabTip.exe is not running. Starting it now...");
+                    string keyboardPath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+                        @"microsoft shared\ink\TabTip.exe");
+
+                    if (File.Exists(keyboardPath))
+                    {
+                        var psi = new ProcessStartInfo(keyboardPath) { UseShellExecute = true };
+                        Process.Start(psi);
+
+                        // CRITICAL: Wait for the process to initialize before trying to send a command to it.
+                        await Task.Delay(500);
+                    }
+                    else
+                    {
+                        Debug.WriteLine("[Keyboard] ERROR: TabTip.exe could not be found.");
+                        return; // Exit if we can't continue.
+                    }
+                }
+
+                // Step 2: Now that the process is guaranteed to be running, call the COM toggle.
+                // This part of the code is now reached every single time you press 'Y'.
+                Debug.WriteLine("[Keyboard] Process is running. Using COM to toggle visibility...");
                 var uiHostNoLaunch = (ITipInvocation)new UIHostNoLaunch();
-
-                // 2. Call the 'Toggle' method, passing the handle of the desktop window.
                 uiHostNoLaunch.Toggle(GetDesktopWindow());
-
-                // 3. Release the COM object to prevent memory leaks.
                 Marshal.ReleaseComObject(uiHostNoLaunch);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Keyboard] COM Toggle failed: {ex.Message}. Falling back to starting TabTip.exe.");
-                // Fallback: If the COM call fails for any reason, try starting the process.
-                try { Process.Start(@"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe"); } catch { }
+                Debug.WriteLine($"[Keyboard] An error occurred while toggling the keyboard: {ex.Message}");
             }
         }
 
@@ -5694,16 +5735,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     var state = _xinputController.GetState();
                     var currentButtons = state.Gamepad.Buttons;
 
-                    // ### NEW: Mouse Mode Toggle Logic (Back + Start for 3 seconds) ###
+                    // ### UPDATED: Mouse Mode Toggle Logic (Back + Right Stick Click for 3 seconds) ###
 
                     // 1. Check if both buttons are currently pressed.
                     bool backPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
-                    bool startPressed = (currentButtons & GamepadButtonFlags.Start) != 0;
-                    bool comboIsPressed = backPressed && startPressed;
+                    // The enum for the Right Stick click is 'RightThumb'.
+                    bool rsPressed = (currentButtons & GamepadButtonFlags.RightThumb) != 0;
+                    bool comboIsPressed = backPressed && rsPressed;
 
                     bool lastBackPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
-                    bool lastStartPressed = (_lastButtonState & GamepadButtonFlags.Start) != 0;
-                    bool comboWasPressed = lastBackPressed && lastStartPressed;
+                    bool lastRsPressed = (_lastButtonState & GamepadButtonFlags.RightThumb) != 0;
+                    bool comboWasPressed = lastBackPressed && lastRsPressed;
 
                     // 2. If the combo has just been initiated, start the timer.
                     if (comboIsPressed && !comboWasPressed)
