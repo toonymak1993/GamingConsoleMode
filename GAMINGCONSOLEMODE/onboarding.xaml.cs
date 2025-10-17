@@ -376,7 +376,7 @@ namespace GAMINGCONSOLEMODE
 
                 Child = new Image
                 {
-                    Source = new BitmapImage(new Uri("ms-appx:///Assets/onboarding/mousecontroll.gif")),
+                    Source = new BitmapImage(new Uri("ms-appx:///Assets/onboarding/mousecontrol.png")),
                     Stretch = Stretch.Uniform
                 }
             };
@@ -389,7 +389,7 @@ namespace GAMINGCONSOLEMODE
 
             stack.Children.Add(new TextBlock
             {
-                Text = "If you use Steam, you have the option to use the Steam Guide Control.\r\nYou can find the settings for this under Steam → Controller. This feature allows you to control your mouse with your controller and also open the Steam keyboard.\r\nIf you use something else, you can also use JoyXoff, which is supported by GCM.\r\nOn your handheld, this is mostly irrelevant, as most side panels have built-in mouse control, or you can simply use touch input.",
+                Text = "Use the GCM mouse and keyboard controls. Hold the combination shown above for 3 seconds. \r\n A is a left click, X is a right click, RS is for scrolling, and Y brings up the Gamebar keyboard.",
                 FontSize = 16,
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 24,

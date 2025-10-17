@@ -154,6 +154,7 @@ namespace gcmloader
         #endregion
         #region playnite launcher window
         // Add these with your other window style constants
+        private bool _isSendingKeys = false;
         private const long WS_BORDER = 0x00800000L;
         private const long WS_SYSMENU = 0x00080000L;
         private const long WS_MINIMIZEBOX = 0x00020000L;
@@ -850,12 +851,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // NEU: Starte einen einmaligen Timer, der die Gnadenfrist beendet.
             var gracePeriodTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(15) 
+                Interval = TimeSpan.FromSeconds(10) 
             };
             gracePeriodTimer.Tick += (s, e) =>
             {
                 _isStartupGracePeriod = false; // Gnadenfrist beenden
-                gracePeriodTimer.Stop();       // Timer stoppen, da er nur einmal laufen soll
+                gracePeriodTimer.Stop();
             };
             gracePeriodTimer.Start();
 
@@ -2789,23 +2790,23 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // This is more aggressive than SW_SHOWMAXIMIZED.
             SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
         }
-        /// <summary>
-        /// Brings a window robustly to the foreground, using a special fullscreen method for launchers.
-        /// </summary>
-        /// <summary>
-        /// Brings a window robustly to the foreground using a two-step approach:
-        /// 1. Maximize reliably. 2. Force to true fullscreen to cover the taskbar.
-        /// </summary>
-        /// <summary>
-        /// Brings a window robustly to the foreground. For Playnite, it forces a true
-        /// borderless fullscreen mode by manipulating the window style.
-        /// </summary>
         private async Task ForcefullyBringToForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
-            // --- Step 1: Reliably bring the window to the front ---
-            // This part remains the most stable way to gain focus.
+            // Step 1: Reliably bring the window to focus and maximize it to the work area.
+            ShowWindow(hWnd, SW_SHOWMAXIMIZED);
+            await Task.Delay(100);
+
+            string launcher = AppSettings.Load<string>("launcher");
+            if (launcher == "playnite" || launcher == "steam")
+            {
+                // Step 2: Force it to true fullscreen to cover any taskbar remnants.
+                ForceWindowToTrueFullscreen(hWnd);
+            }
+
+            // Step 3: Ensure the window is truly the foreground window.
+            await Task.Delay(150);
             IntPtr foregroundHwnd = GetForegroundWindow();
             if (foregroundHwnd != hWnd)
             {
@@ -2816,57 +2817,27 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AttachThreadInput(ourThreadId, foregroundThreadId, false);
             }
 
-            // Restore if minimized, otherwise just show it.
-            if (IsIconic(hWnd)) { ShowWindow(hWnd, SW_RESTORE); }
-            else { ShowWindow(hWnd, 5); } // SW_SHOW
-
-            string launcher = AppSettings.Load<string>("launcher");
+            // Step 4: Perform the specific focus correction for Playnite.
             if (launcher == "playnite")
             {
-                // Give the window a moment to become fully active.
-                await Task.Delay(250);
-
-                // --- Step 2: Aggressively force true borderless fullscreen ---
                 try
                 {
-                    Debug.WriteLine($"[GCM] Forcing true borderless fullscreen for Playnite (Handle: {hWnd}).");
-
-                    // Get the current window style.
-                    long style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
-
-                    // Remove all border, caption, and menu styles.
-                    style &= ~(WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
-
-                    // Apply the new, borderless style.
-                    SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)style);
-
-                    // Get absolute screen dimensions.
-                    int screenWidth = GetScreenWidth();
-                    int screenHeight = GetScreenHeight();
-
-                    // Resize and position the now-borderless window to cover the entire screen.
-                    SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[GCM] Failed to apply borderless style: {ex.Message}");
-                }
-
-                // --- Step 3: Perform the focus correction (Click + Escape) ---
-                // This logic remains unchanged as it was working perfectly.
-                try
-                {
+                    // Make the cursor invisible for the operation.
                     while (ShowCursor(false) >= 0) ;
                     await Task.Delay(32);
+
+                    // Wait for the Playnite UI to settle.
                     await Task.Delay(300);
 
+                    // --- 4.1: CLICK FIRST to secure focus ---
                     int screenWidth = GetScreenWidth();
                     int screenHeight = GetScreenHeight();
-                    int dpiX = GetDpiX();
                     int dpiY = GetDpiY();
-                    int offsetX = (int)((0.5 / 2.54) * dpiX);
                     int offsetY = (int)((0.5 / 2.54) * dpiY);
-                    int clickX = screenWidth - offsetX;
+
+                    // ### THE CHANGE IS HERE ###
+                    // Calculate the click position: top-CENTER, offset by 0.5 cm down.
+                    int clickX = screenWidth / 2;
                     int clickY = offsetY;
 
                     SetCursorPos(clickX, clickY);
@@ -2874,14 +2845,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     await Task.Delay(50);
                     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
 
+                    // --- 4.2: SEND ESCAPE SECOND to close any open menus ---
                     await Task.Delay(50);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
+                    // --- 4.3: Move the cursor away to a corner ---
                     SetCursorPos(screenWidth - 1, screenHeight - 1);
+                    Debug.WriteLine($"[GCM] Playnite focus correction: Clicked at ({clickX},{clickY}), sent Escape, and hid cursor.");
                 }
                 finally
                 {
+                    // No matter what, make the cursor visible again.
                     while (ShowCursor(true) < 0) ;
                 }
             }
@@ -5543,6 +5518,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             BackToWindows();
         }
         #endregion backtowin
+        #region gamebarkeyboard
+
+        #endregion gamebarkeyboard
         #endregion shortcuts
 
 
@@ -6027,7 +6005,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _shortcutActions["show overlay"] = showoverlay;
                 _shortcutActions["xbox bar"] = xboxbar;
                 _shortcutActions["lossless scaling"] = LosslessScaling;
-                _shortcutActions["winmodechange"] = Triggerbacktowin; 
+                _shortcutActions["winmodechange"] = Triggerbacktowin;
+                _shortcutActions["xbox keyboard"] = ToggleTouchKeyboard;
             }
             catch (Exception ex)
             {
