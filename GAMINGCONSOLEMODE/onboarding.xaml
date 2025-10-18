@@ -5,7 +5,7 @@
     xmlns:local="using:GAMINGCONSOLEMODE">
 
     <Grid>
-        <!-- Hintergrund Steam Gradient -->
+        <!-- Backround Steam Gradient -->
         <Grid.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                 <GradientStop Color="#171A21" Offset="0.0"/>

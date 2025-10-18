@@ -5,110 +5,94 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Animation;
 using System;
 using System.IO;
-using System.Linq;
-using Windows.Graphics;
-using System.Management;
-using WinRT.Interop;
-using GAMINGCONSOLEMODE;
-using Windows.UI.ApplicationSettings;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Net.Http;
-using System.Text.RegularExpressions;
 using System.Diagnostics;
-using System.DirectoryServices.ActiveDirectory;
-using gcmloader;
 using System.Runtime.InteropServices;
-using Microsoft.Win32;
 using System.Reflection;
-using Newtonsoft.Json.Linq;
-using Windows.Media.Capture;
-using System.Collections.Generic;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using System.Text.Json;
+using WinRT.Interop;
+using Windows.Graphics;
 
 namespace GAMINGCONSOLEMODE
 {
-    
-    /// <summary>
-    /// An empty window that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class MainWindow : Window
     {
-
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 
-        string owner = "toonymak1993";  // Repository owner
-    string repo = "GameConsoleMode";   // Repository name
-    string currentVersion = "2.3.8";  // Your current version // <change when new Verison
+        string owner = "toonymak1993";      // The owner of the GitHub repository.
+        string repo = "GameConsoleMode";    // The name of the repository.
+        string currentVersion = "2.3.8";    // The current version of this application. Remember to change this for new releases.
+
         public MainWindow()
         {
             this.InitializeComponent();
-            // Set the window size
+
+            // Set a good default size for the window on startup.
             SetWindowSize(1500, 1100);
-            // 1. First Start: Create folder and default config file if needed
+
+            // On the very first launch, we need to create the settings folder and a default config file.
             AppSettings.FirstStart(this);
+
             versioninfopanel(currentVersion);
-            #region onboarding
+
+            #region Onboarding
+            // Check if the user has completed the onboarding process before.
             try
+            {
+                if (AppSettings.Load<bool>("onboarding") == true)
                 {
-
-                    if (AppSettings.Load<bool>("onboarding") == true)
-                    {
-                        // Navigate to the 'startup' page on app launch
-                        contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
-                        {
-                            Effect = SlideNavigationTransitionEffect.FromRight
-                        });
-                    }
-                    else
-                    {
-                        //navigate to the onboarding page
-                        // Navigate to the 'startup' page on app launch
-                        contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
-                        {
-                            Effect = SlideNavigationTransitionEffect.FromRight
-                        });
-                        AppSettings.Save("onboarding", true);
-
-                    }
-                }
-                catch
-                {
-                    //navigate to the onboarding page
-                    // Navigate to the 'startup' page on app launch
+                    // They have, so let's go straight to the main content.
                     contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
                     {
                         Effect = SlideNavigationTransitionEffect.FromRight
                     });
+                }
+                else
+                {
+                    // This seems to be their first time, so let's show them the onboarding page.
+                    contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
+                    {
+                        Effect = SlideNavigationTransitionEffect.FromRight
+                    });
+                    // And we'll save the fact that they've now seen it.
                     AppSettings.Save("onboarding", true);
                 }
-                #endregion onboarding
+            }
+            catch
+            {
+                // If loading the setting fails (e.g., the file doesn't exist yet),
+                // we'll assume it's the first launch and show the onboarding.
+                contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
+                {
+                    Effect = SlideNavigationTransitionEffect.FromRight
+                });
+                AppSettings.Save("onboarding", true);
+            }
+            #endregion
+
+            // Check for new updates in the background.
             _ = UpdateCheck(this);
+
             Updateui();
-           
         }
 
-        #region programm start
+        #region Program Startup & Navigation
         private void NavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
         {
             if (args.SelectedItemContainer != null)
             {
-
                 if (args.IsSettingsSelected)
                 {
-                    // Logik for settings
+                    // Logic for the settings page.
                     contentFrame.Navigate(typeof(settings));
-
                 }
                 else
                 {
-
                     string selectedTag = args.SelectedItemContainer.Tag.ToString();
 
-                    // Determine the target page based on the tag
+                    // Figure out which page to navigate to based on the item's tag.
                     Type pageType = selectedTag switch
                     {
                         "OnboardingPage" => typeof(onboarding),
@@ -123,13 +107,13 @@ namespace GAMINGCONSOLEMODE
 
                     if (pageType != null && contentFrame.CurrentSourcePageType != pageType)
                     {
-                        // Use SlideNavigationTransitionInfo to specify the transition direction
+                        // Use a nice sliding animation for the page transition.
                         var transitionInfo = new SlideNavigationTransitionInfo
                         {
                             Effect = SlideNavigationTransitionEffect.FromRight
                         };
 
-                        // Navigate with transition info
+                        // Navigate to the new page.
                         contentFrame.Navigate(pageType, null, transitionInfo);
                     }
                 }
@@ -138,18 +122,14 @@ namespace GAMINGCONSOLEMODE
 
         private void SetWindowSize(int width, int height)
         {
-            // Get the native HWND for the current window
+            // We need to get the window's native handle (HWND) to resize it.
             var hWnd = WindowNative.GetWindowHandle(this);
-
-            // Get the WindowId for the HWND
             var windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
-
-            // Get the AppWindow using the WindowId
-            var appWindow = AppWindow.GetFromWindowId(windowId); // Korrekt aufgerufen mit dem Typnamen AppWindow
+            var appWindow = AppWindow.GetFromWindowId(windowId);
 
             if (appWindow != null)
             {
-                // Set the window size
+                // Now we can set the size.
                 appWindow.Resize(new SizeInt32(width, height));
             }
         }
@@ -158,12 +138,12 @@ namespace GAMINGCONSOLEMODE
         {
             throw new NotImplementedException();
         }
-        #endregion programm start
+        #endregion
 
-        #region Update
+        #region Update Logic
         public async Task UpdateCheck(MainWindow mainWindow)
         {
-            string latestVersion = await GetLatestReleaseVersion(owner, repo); // Await the async call
+            string latestVersion = await GetLatestReleaseVersion(owner, repo);
 
             if (!string.IsNullOrEmpty(latestVersion))
             {
@@ -172,6 +152,7 @@ namespace GAMINGCONSOLEMODE
                 if (IsNewerVersion(currentVersion, latestVersion))
                 {
                     Console.WriteLine("An update is available!");
+                    // Make the update notification bar visible.
                     mainWindow.UpdateBar.Visibility = Visibility.Visible;
                 }
                 else
@@ -188,7 +169,8 @@ namespace GAMINGCONSOLEMODE
         static async Task<string> GetLatestReleaseVersion(string owner, string repo)
         {
             using HttpClient client = new();
-            client.DefaultRequestHeaders.Add("User-Agent", "C# App"); // Required for GitHub API
+            // The GitHub API requires a User-Agent header, so we'll add one.
+            client.DefaultRequestHeaders.Add("User-Agent", "C# App");
 
             string url = $"https://api.github.com/repos/{owner}/{repo}/releases/latest";
 
@@ -200,7 +182,7 @@ namespace GAMINGCONSOLEMODE
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Error fetching latest version: {ex.Message}");
                 return null;
             }
         }
@@ -215,15 +197,14 @@ namespace GAMINGCONSOLEMODE
         private void UpdateButton_Click(object sender, RoutedEventArgs e)
         {
             UpdateButton.IsEnabled = false;
-             _ = DownloadLatestRelease(owner, repo, UpdateProgressBar);
-          
+            _ = DownloadLatestRelease(owner, repo, UpdateProgressBar);
         }
 
         private void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // Starte die Update.exe aus dem AppData\gcmsettings Ordner
+                // Start the Update.exe from our settings folder in AppData.
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
                     FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "Update.exe"),
@@ -231,12 +212,12 @@ namespace GAMINGCONSOLEMODE
                 };
                 Process.Start(startInfo);
 
-                // Schließe die aktuelle Anwendung
+                // Close the current application so the updater can do its job.
                 Application.Current.Exit();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"problem in updates");
+                Console.WriteLine($"Problem during update process: {ex.Message}");
             }
         }
 
@@ -287,7 +268,6 @@ namespace GAMINGCONSOLEMODE
                     progressBar.Value = percent;
 
                     double downloadedMB = totalBytesRead / 1024d / 1024d;
-
                     double speed = totalBytesRead / stopwatch.Elapsed.TotalSeconds; // bytes/sec
                     double secondsLeft = (totalBytes - totalBytesRead) / speed;
 
@@ -308,7 +288,6 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-
         private string ExtractDownloadUrl(string jsonResponse)
         {
             using JsonDocument doc = JsonDocument.Parse(jsonResponse);
@@ -325,46 +304,39 @@ namespace GAMINGCONSOLEMODE
             }
             return string.Empty;
         }
-        #endregion Update
+        #endregion
 
-        #region filter
-        #endregion filter
-
-        #region Versioninfos
+        #region Version Info Panel
         private void versioninfopanel(string newversion)
         {
-            
             try
             {
                 var savedVersion = AppSettings.Load<string>("version")?.Trim();
                 var current = currentVersion?.Trim();
+
                 if (string.Equals(savedVersion, current, StringComparison.OrdinalIgnoreCase))
                 {
-                    //Verison is identical, not show
+                    // The version is the same as last time, so no need to show the "what's new" panel.
                 }
                 else
                 {
-                  
+                    // It's a new version! Let's save it and show the panel.
                     AppSettings.Save("version", newversion);
-                    //show Verison Panel
                     var versionpanel = new version_news();
                     versionpanel.ShowCenteredTo(this, 420, 600);
                 }
-
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //first Time not Version Implement
+                // This probably means it's the first time running, so the "version" setting doesn't exist yet.
                 AppSettings.Save("version", newversion);
-                //show Verison Panel
                 var versionpanel = new version_news();
                 versionpanel.ShowCenteredTo(this, 420, 600);
             }
         }
-        #endregion Versioninfos
+        #endregion
 
-        #region topbarbutton
-
+        #region Top Bar Button
         private static string exeFolder()
         {
             string exePath = Assembly.GetExecutingAssembly().Location;
@@ -376,75 +348,63 @@ namespace GAMINGCONSOLEMODE
         {
             try
             {
-                // Navigiere zum Unterordner "gcmloader" und starte die EXE darin
-                string fullExePath = Path.Combine(exeFolder(),"gcmloader", "gcmloader.exe");
-
+                // Navigate to the "gcmloader" subfolder and start the executable inside it.
+                string fullExePath = Path.Combine(exeFolder(), "gcmloader", "gcmloader.exe");
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = fullExePath,
                     UseShellExecute = true
                 });
             }
-            catch (Exception ex) // Catch all exceptions, including process start errors
+            catch (Exception ex)
             {
                 ContentDialog dialog = new ContentDialog();
-
                 dialog.XamlRoot = (this.Content as FrameworkElement)?.XamlRoot;
                 dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
                 dialog.Title = "Error starting Game Console Mode";
                 dialog.Content = ex.Message;
                 dialog.CloseButtonText = "OK";
-
                 _ = dialog.ShowAsync();
             }
         }
+        #endregion
 
-
-        #endregion topbarbutton
-
-        #region start gcm
-
+        #region UI Update Placeholder
         private void Updateui()
-        {   
-            
+        {
+            // This method is a placeholder for any future UI updates that might be needed.
         }
-        
-        #endregion start
+        #endregion
 
-        #region discord
+        #region Social Links
         private void DiscordImageButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // Erstellt einen neuen Prozess, um den Link im Standard-Webbrowser zu öffnen.
+                // Creates a new process to open the link in the user's default web browser.
                 Process.Start(new ProcessStartInfo("https://discord.gg/FbjYDeEJce") { UseShellExecute = true });
             }
             catch (Exception ex)
             {
-                // Schreibt eine Fehlermeldung in die Konsole, falls das Öffnen des Links fehlschlägt.
-                Debug.WriteLine($"Fehler beim Öffnen des Discord-Links: {ex.Message}");
+                // If opening the link fails, write an error message to the debug console.
+                Debug.WriteLine($"Error opening Discord link: {ex.Message}");
             }
         }
-        #endregion discord
 
-        #region patreon
         private void patreonButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // Erstellt einen neuen Prozess, um den Link im Standard-Webbrowser zu öffnen.
+                // Opens the Patreon link in the default browser.
                 Process.Start(new ProcessStartInfo("https://patreon.com/GAMINGCONSOLEMODE") { UseShellExecute = true });
-            }   
+            }
             catch (Exception ex)
             {
-                // Schreibt eine Fehlermeldung in die Konsole, falls das Öffnen des Links fehlschlägt.
-                Debug.WriteLine($"Fehler beim Öffnen des Discord-Links: {ex.Message}");
+                Debug.WriteLine($"Error opening Patreon link: {ex.Message}");
             }
         }
-        #endregion patreon
+        #endregion
     }
-
-
 
     public static class WindowExtensions
     {
@@ -479,10 +439,10 @@ namespace GAMINGCONSOLEMODE
 
             child.Activate();
 
-            // Kurze Verzögerung, damit Fensterhandle gültig und sichtbar ist
+            // A short delay helps ensure the window handle is valid and visible before we try to show it.
             await Task.Delay(100);
             ShowWindow(hwndChild, SW_SHOWNORMAL);
             SetForegroundWindow(hwndChild);
         }
     }
-    }
+}

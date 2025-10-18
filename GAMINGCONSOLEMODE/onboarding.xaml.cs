@@ -51,7 +51,7 @@ namespace GAMINGCONSOLEMODE
                     SlideContainer.Children.Add(BuildSlide_3());
                     break;
                 case 8:
-                    Frame.Navigate(typeof(startup)); // oder Finale Seite
+                    Frame.Navigate(typeof(startup)); // or navigate to the final page
                     break;
             }
         }
@@ -102,17 +102,17 @@ namespace GAMINGCONSOLEMODE
 
         private UIElement BuildSlide_4()
         {
-            // 1. Erstelle ein Haupt-StackPanel, das alles untereinander anordnet.
+            // 1. Create a main StackPanel to arrange everything vertically.
             var mainStack = new StackPanel
             {
                 Spacing = 20,
                 Padding = new Thickness(20),
-                MaxWidth = 800, // Sorgt für gute Lesbarkeit auf breiten Bildschirmen
+                MaxWidth = 800, // This helps keep it readable on wide screens.
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
 
-            // 2. Füge einen Titel hinzu (konsistent mit den anderen Seiten)
+            // 2. Add a title (keeping it consistent with the other pages).
             mainStack.Children.Add(new TextBlock
             {
                 Text = "Autostart Management",
@@ -124,7 +124,7 @@ namespace GAMINGCONSOLEMODE
                 Margin = new Thickness(0, 0, 0, 10)
             });
 
-            // 3. Dein Code für den ToggleSwitch-Kasten (leicht angepasst)
+            // 3. Your code for the ToggleSwitch box (slightly adjusted).
             var toggleSwitch = new ToggleSwitch
             {
                 Name = "UsewinpartStartapps",
@@ -145,28 +145,28 @@ namespace GAMINGCONSOLEMODE
             var border = new Border
             {
                 CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(15, 10, 15, 10), // Etwas mehr Padding
-                HorizontalAlignment = HorizontalAlignment.Center, // Zentriert den Kasten
+                Padding = new Thickness(15, 10, 15, 10), // A little more padding.
+                HorizontalAlignment = HorizontalAlignment.Center, // Center the box.
                 Background = gradientBrush,
                 Child = toggleSwitch
             };
 
-            // Füge den Kasten zum Haupt-StackPanel hinzu
+            // Add the box to the main StackPanel.
             mainStack.Children.Add(border);
 
-            // 4. Füge den neuen Erklärungstext unter dem Kasten hinzu
+            // 4. Add the new explanation text under the box.
             mainStack.Children.Add(new TextBlock
             {
                 Text = "You can choose to let GCM disable the default autostart applications to ensure you're not interrupted. Alternatively, you can manage this yourself by making sure no apps pop up that might interfere with GCM. This setting is optional.",
                 FontSize = 16,
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 24,
-                Foreground = new SolidColorBrush(Colors.LightGray), // Etwas unauffälliger als Weiß
+                Foreground = new SolidColorBrush(Colors.LightGray), // A little more subtle than pure white.
                 TextAlignment = TextAlignment.Center,
                 Margin = new Thickness(0, 10, 0, 0)
             });
 
-            // 5. Gib das gesamte StackPanel als UI-Element zurück
+            // 5. Return the entire StackPanel as the UI element.
             return mainStack;
         }
 
@@ -195,7 +195,7 @@ namespace GAMINGCONSOLEMODE
             var imageBorder = new Border
             {
                 CornerRadius = new CornerRadius(15),
-                
+
                 Child = new Image
                 {
                     Source = new BitmapImage(new Uri("ms-appx:///Assets/onboarding/onscreenkeyboard.png")),
@@ -237,7 +237,8 @@ namespace GAMINGCONSOLEMODE
 
             return stack;
         }
-        //shortcut GCM Overlay
+
+        // Slide: GCM Overlay
         private UIElement BuildSlide_2()
         {
             var stack = new StackPanel { Spacing = 20, Padding = new Thickness(20) };
@@ -275,8 +276,6 @@ namespace GAMINGCONSOLEMODE
             stack.Children.Add(imageContainer);
 
 
-           
-
             stack.Children.Add(new TextBlock
             {
                 Text = "You can use the shown key combination on your controller or handheld to display the GCM overlay.\r\nCurrently, it can only list your shortcuts, but it will be expanded in the future.\r\nYou can adjust the combination at any time in the Shortcuts settings.",
@@ -287,12 +286,10 @@ namespace GAMINGCONSOLEMODE
                 TextAlignment = TextAlignment.Center
             });
 
-
-          
-
             return stack;
         }
-        //shortcut GCM Taskmanager
+
+        // Slide: GCM Task Manager
         private UIElement BuildSlide_5()
         {
             var stack = new StackPanel { Spacing = 20, Padding = new Thickness(20) };
@@ -330,8 +327,6 @@ namespace GAMINGCONSOLEMODE
             stack.Children.Add(imageContainer);
 
 
-
-
             stack.Children.Add(new TextBlock
             {
                 Text = "GCM includes a task manager that allows you to switch between apps, as well as jump to the launcher, Discord, and more.\r\nPlease note: If the launcher is not visible, it has automatically minimized itself. Simply use the shortcut to bring it back.\r\nYou can also open the task manager at any time, even while playing.",
@@ -342,12 +337,10 @@ namespace GAMINGCONSOLEMODE
                 TextAlignment = TextAlignment.Center
             });
 
-
-
-
             return stack;
         }
-        //mousecontroll
+
+        // Slide: Mouse Control
         private UIElement BuildSlide_6()
         {
             var stack = new StackPanel { Spacing = 20, Padding = new Thickness(20) };
@@ -385,8 +378,6 @@ namespace GAMINGCONSOLEMODE
             stack.Children.Add(imageContainer);
 
 
-
-
             stack.Children.Add(new TextBlock
             {
                 Text = "Use the GCM mouse and keyboard controls. Hold the combination shown above for 3 seconds. \r\n A is a left click, X is a right click, RS is for scrolling, and Y brings up the Gamebar keyboard.",
@@ -397,12 +388,10 @@ namespace GAMINGCONSOLEMODE
                 TextAlignment = TextAlignment.Center
             });
 
-
-
-
             return stack;
         }
-        //rog ally gamepad modus
+
+        // Slide: ROG Ally Gamepad Mode
         private UIElement BuildSlide_allygamepad()
         {
             var stack = new StackPanel { Spacing = 20, Padding = new Thickness(20) };
@@ -440,8 +429,6 @@ namespace GAMINGCONSOLEMODE
             stack.Children.Add(imageContainer);
 
 
-
-
             stack.Children.Add(new TextBlock
             {
                 Text = "Always set your ROG Ally, or any handheld, to Gamepad Mode.\r\nGCM does not work with keyboards, but primarily with Xbox controllers.\r\nYour handheld mainly uses the XInput API, which tells the system it is an Xbox controller, making the entire controller mapping standard across most handheld devices.",
@@ -452,17 +439,15 @@ namespace GAMINGCONSOLEMODE
                 TextAlignment = TextAlignment.Center
             });
 
-
-
-
             return stack;
         }
-        //Discord
+
+        // Slide: Discord
         private UIElement BuildSlide_3()
         {
             var stack = new StackPanel { Spacing = 20, Padding = new Thickness(20) };
 
-            // Titel
+            // Title
             stack.Children.Add(new TextBlock
             {
                 Text = "Join Our Discord Community",
@@ -472,7 +457,7 @@ namespace GAMINGCONSOLEMODE
                 TextAlignment = TextAlignment.Center
             });
 
-            // Discord Logo oder Banner mit runden Ecken
+            // Discord logo/banner with rounded corners.
             var imageContainer = new Viewbox
             {
                 MaxHeight = 200,
@@ -486,7 +471,7 @@ namespace GAMINGCONSOLEMODE
                 CornerRadius = new CornerRadius(10),
                 Child = new Image
                 {
-                    Source = new BitmapImage(new Uri("ms-appx:///Assets/onboarding/discord.jpg")), // <-- dein Bild
+                    Source = new BitmapImage(new Uri("ms-appx:///Assets/onboarding/discord.jpg")), // <-- Your image path here
                     Stretch = Stretch.Uniform
                 }
             };
@@ -494,7 +479,7 @@ namespace GAMINGCONSOLEMODE
             imageContainer.Child = imageBorder;
             stack.Children.Add(imageContainer);
 
-            // Beschreibung
+            // Description text
             stack.Children.Add(new TextBlock
             {
                 Text = "Want to connect with other GCM users, get support, share feedback, or stay updated?\n\nJoin our official Discord server and become part of the community.",
@@ -517,7 +502,7 @@ namespace GAMINGCONSOLEMODE
             {
                 try
                 {
-                    // DEIN EINLADUNGS-LINK HIER EINTRAGEN
+                    // YOUR INVITE LINK GOES HERE
                     Process.Start(new ProcessStartInfo("https://discord.gg/FbjYDeEJce") { UseShellExecute = true });
                 }
                 catch { }
@@ -527,8 +512,6 @@ namespace GAMINGCONSOLEMODE
 
             return stack;
         }
-
-
 
         private void BackButton_Click(object sender, RoutedEventArgs e)
         {
@@ -545,27 +528,26 @@ namespace GAMINGCONSOLEMODE
             LoadSlide(currentStep);
         }
 
-        #region methodes for onboarding
+        #region Methods for Onboarding
         private void UsewinpartStartapps_Toggled(object sender, RoutedEventArgs e)
         {
-            // Wir prüfen, ob der "sender" tatsächlich ein ToggleSwitch ist, 
-            // und erstellen dabei direkt eine benannte Variable dafür.
+            // Let's check if the "sender" is actually a ToggleSwitch.
+            // This 'is' pattern also creates a variable 'toggleSwitch' for us.
             if (sender is ToggleSwitch toggleSwitch)
             {
-                // Jetzt können wir die "IsOn"-Eigenschaft abfragen, die true oder false ist.
+                // Now we can safely check its "IsOn" property.
                 if (toggleSwitch.IsOn)
                 {
                     AppSettings.Save("usewinpartstartapps", true);
-                    Debug.WriteLine("Einstellung 'usewinpartstartapps' wurde auf AN gesetzt.");
+                    Debug.WriteLine("Setting 'usewinpartstartapps' was set to ON.");
                 }
                 else
                 {
                     AppSettings.Save("usewinpartstartapps", false);
-                    Debug.WriteLine("Einstellung 'usewinpartstartapps' wurde auf AUS gesetzt.");
+                    Debug.WriteLine("Setting 'usewinpartstartapps' was set to OFF.");
                 }
             }
         }
-
-        #endregion methodes for onboarding
+        #endregion Methods for Onboarding
     }
 }

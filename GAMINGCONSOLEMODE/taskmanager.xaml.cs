@@ -9,16 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media.Imaging;
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
+
 
 namespace GAMINGCONSOLEMODE
 {

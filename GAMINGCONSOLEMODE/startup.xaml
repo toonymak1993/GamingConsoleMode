@@ -24,7 +24,7 @@
                     <LinearGradientBrush StartPoint="0,1" EndPoint="0.5,0.5">
                         <GradientStop Color="#FF2D2D30" Offset="0.2"/>
                         <GradientStop Color="#FF3E3E42" Offset="0.6"/>
-                        <!-- Wieder wegblendend -->
+                        <!-- Fade out again -->
                     </LinearGradientBrush>
 
 
@@ -142,7 +142,7 @@
                 <Grid.Background>
                     <LinearGradientBrush StartPoint="1,0" EndPoint="0.5,0.5">
                         <GradientStop Color="Transparent" Offset="0.0"/>
-                        <!-- Unsichtbar -->
+                        <!-- Unvisible -->
                     </LinearGradientBrush>
 
 
@@ -704,7 +704,7 @@
 
 
 
-                                            <!-- Installationsanleitung -->
+                                            <!-- Installation instructions -->
 
                                         </StackPanel>
 

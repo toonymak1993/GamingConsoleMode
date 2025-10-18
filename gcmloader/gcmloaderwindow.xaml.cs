@@ -323,48 +323,6 @@ namespace gcmloader
             }
         }
 
-        private void ResizeWindowToFillScreen(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return;
-
-            try
-            {
-                // Get the size of the entire window, including any invisible borders
-                GetWindowRect(hwnd, out RECT windowRect);
-                // Get the size of the client area (the visible content inside the borders)
-                GetClientRect(hwnd, out RECT clientRect);
-
-                // Calculate the total size of the non-client area (the borders)
-                int nonClientWidth = (windowRect.Right - windowRect.Left) - clientRect.Right;
-                int nonClientHeight = (windowRect.Bottom - windowRect.Top) - clientRect.Bottom;
-
-                // Get the target screen dimensions
-                int screenWidth = GetScreenWidth();
-                int screenHeight = GetScreenHeight();
-
-                // Calculate the new size and position. We make the window larger than the screen
-                // and move it slightly off-screen to hide the invisible borders.
-                int newWidth = screenWidth + nonClientWidth;
-                int newHeight = screenHeight + nonClientHeight;
-                int newX = -(nonClientWidth / 2);
-                int newY = -(nonClientHeight / 2);
-
-                Debug.WriteLine($"Resizing window to {newWidth}x{newHeight} at ({newX},{newY}) to perfectly fill the screen.");
-
-                // Apply the new position and size
-                SetWindowPos(hwnd, IntPtr.Zero, newX, newY, newWidth, newHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed to force-resize window: {ex.Message}");
-            }
-        }
-
-        /// Wird jede Sekunde vom Timer aufgerufen.
-        /// </summary>
-        /// <summary>
-        /// 
-
         private void AnimateOverlayOpacity(UIElement element, double toOpacity, bool hideWhenDone = false)
         {
             var storyboard = new Storyboard();

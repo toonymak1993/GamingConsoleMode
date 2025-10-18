@@ -11,7 +11,7 @@
 
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20" Spacing="20">
 
-        <!-- Modusauswahl -->
+        <!-- Mode -->
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20">
             <RadioButton Content="Handheld Companion" GroupName="Modes" IsEnabled="False"/>
             <RadioButton Content="Armoury Create" GroupName="Modes" IsEnabled="False"/>
@@ -21,7 +21,7 @@
             <TextBlock Text="Nothing to see here yet - but soon..." FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
 
         </StackPanel>
-        <!-- Bild oben zentriert -->
+        <!-- picture -->
         <Image Source="ms-appx:///Assets/rogally/allyfrontside.png" Width="500" Height= "400" HorizontalAlignment="Center"/>
 
       

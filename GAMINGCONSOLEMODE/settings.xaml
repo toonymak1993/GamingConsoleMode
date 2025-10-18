@@ -150,8 +150,8 @@
         <!-- Header section -->
         <StackPanel Grid.Row="0" Background="#111" Padding="15" Spacing="5">
             <TextBlock Text="GAMING CONSOLE MODE - GCM" FontSize="20" FontWeight="Bold" Foreground="White"/>
-            <TextBlock Text="Developed by Luis Antonio Garcia Roque" FontSize="14" Foreground="LightGray"/>
-            <TextBlock Text="Developed by Thanh Phi Cao" FontSize="14" Foreground="LightGray"/>
+            <TextBlock Text="Developed by the GCM Team" FontSize="14" Foreground="LightGray"/>
+            
         </StackPanel>
 
         <!-- License info section -->
