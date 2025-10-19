@@ -4,15 +4,17 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Animation;
 using System;
-using System.IO;
-using System.Threading.Tasks;
-using System.Net.Http;
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.IO;
+using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
-using WinRT.Interop;
+using System.Threading.Tasks;
 using Windows.Graphics;
+using WinRT.Interop;
+using static GAMINGCONSOLEMODE.WindowExtensions;
 
 namespace GAMINGCONSOLEMODE
 {
@@ -35,8 +37,6 @@ namespace GAMINGCONSOLEMODE
             // On the very first launch, we need to create the settings folder and a default config file.
             AppSettings.FirstStart(this);
 
-            versioninfopanel(currentVersion);
-
             #region Onboarding
             // Check if the user has completed the onboarding process before.
             try
@@ -44,7 +44,7 @@ namespace GAMINGCONSOLEMODE
                 if (AppSettings.Load<bool>("onboarding") == true)
                 {
                     // They have, so let's go straight to the main content.
-                    contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
+                    contentFrame.Navigate(typeof(Onboarding), null, new SlideNavigationTransitionInfo()
                     {
                         Effect = SlideNavigationTransitionEffect.FromRight
                     });
@@ -52,7 +52,7 @@ namespace GAMINGCONSOLEMODE
                 else
                 {
                     // This seems to be their first time, so let's show them the onboarding page.
-                    contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
+                    contentFrame.Navigate(typeof(Onboarding), null, new SlideNavigationTransitionInfo()
                     {
                         Effect = SlideNavigationTransitionEffect.FromRight
                     });
@@ -64,7 +64,7 @@ namespace GAMINGCONSOLEMODE
             {
                 // If loading the setting fails (e.g., the file doesn't exist yet),
                 // we'll assume it's the first launch and show the onboarding.
-                contentFrame.Navigate(typeof(onboarding), null, new SlideNavigationTransitionInfo()
+                contentFrame.Navigate(typeof(Onboarding), null, new SlideNavigationTransitionInfo()
                 {
                     Effect = SlideNavigationTransitionEffect.FromRight
                 });
@@ -95,14 +95,14 @@ namespace GAMINGCONSOLEMODE
                     // Figure out which page to navigate to based on the item's tag.
                     Type pageType = selectedTag switch
                     {
-                        "OnboardingPage" => typeof(onboarding),
+                        "OnboardingPage" => typeof(Onboarding),
                         "LauncherPage" => typeof(launcher),
                         "shortcuts" => typeof(shortcuts),
                         "StartupPage" => typeof(startup),
                         "LinksPage" => typeof(Links),
                         "RogAllyPage" => typeof(rogally),
                         "TaskManagerPage" => typeof(taskmanager),
-                        _ => null
+                        _ => null   
                     };
 
                     if (pageType != null && contentFrame.CurrentSourcePageType != pageType)
@@ -154,6 +154,12 @@ namespace GAMINGCONSOLEMODE
                     Console.WriteLine("An update is available!");
                     // Make the update notification bar visible.
                     mainWindow.UpdateBar.Visibility = Visibility.Visible;
+
+                    //startnews panel
+
+                    string newsUrl = "https://www.gameconsolemode.com/news";
+                    WebBrowserLauncher.OpenUrlInBrowser(newsUrl);
+
                 }
                 else
                 {
@@ -164,6 +170,12 @@ namespace GAMINGCONSOLEMODE
             {
                 Console.WriteLine("Could not retrieve the version.");
             }
+        }
+
+        private void newsButton_Click(object sender, RoutedEventArgs e)
+        {
+            string newsUrl = "https://www.gameconsolemode.com/news";
+            WebBrowserLauncher.OpenUrlInBrowser(newsUrl);
         }
 
         static async Task<string> GetLatestReleaseVersion(string owner, string repo)
@@ -198,6 +210,7 @@ namespace GAMINGCONSOLEMODE
         {
             UpdateButton.IsEnabled = false;
             _ = DownloadLatestRelease(owner, repo, UpdateProgressBar);
+            newsButton.Visibility = Visibility.Collapsed;
         }
 
         private void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
@@ -306,35 +319,7 @@ namespace GAMINGCONSOLEMODE
         }
         #endregion
 
-        #region Version Info Panel
-        private void versioninfopanel(string newversion)
-        {
-            try
-            {
-                var savedVersion = AppSettings.Load<string>("version")?.Trim();
-                var current = currentVersion?.Trim();
-
-                if (string.Equals(savedVersion, current, StringComparison.OrdinalIgnoreCase))
-                {
-                    // The version is the same as last time, so no need to show the "what's new" panel.
-                }
-                else
-                {
-                    // It's a new version! Let's save it and show the panel.
-                    AppSettings.Save("version", newversion);
-                    var versionpanel = new version_news();
-                    versionpanel.ShowCenteredTo(this, 420, 600);
-                }
-            }
-            catch (Exception)
-            {
-                // This probably means it's the first time running, so the "version" setting doesn't exist yet.
-                AppSettings.Save("version", newversion);
-                var versionpanel = new version_news();
-                versionpanel.ShowCenteredTo(this, 420, 600);
-            }
-        }
-        #endregion
+       
 
         #region Top Bar Button
         private static string exeFolder()
@@ -404,6 +389,8 @@ namespace GAMINGCONSOLEMODE
             }
         }
         #endregion
+
+       
     }
 
     public static class WindowExtensions
@@ -444,5 +431,44 @@ namespace GAMINGCONSOLEMODE
             ShowWindow(hwndChild, SW_SHOWNORMAL);
             SetForegroundWindow(hwndChild);
         }
-    }
+
+        public class WebBrowserLauncher
+        {
+            /// <summary>
+            /// Opens the specified URL in the system's default web browser.
+            /// This will typically open in a new tab or window, depending on the browser's settings.
+            /// The user can close this browser window/tab normally.
+            /// </summary>
+            /// <param name="url">The URL to open.</param>
+            public static void OpenUrlInBrowser(string url)
+            {
+                try
+                {
+                    // Create a ProcessStartInfo object
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true // IMPORTANT: UseShellExecute must be true to open URLs in the default browser
+                    };
+
+                    // Start the process (which will be the default browser)
+                    Process.Start(psi);
+
+                    Console.WriteLine($"Successfully requested to open URL: {url}");
+                }
+                catch (Win32Exception ex)
+                {
+                    // Handle potential errors, e.g., no default browser is set or protocol is unknown
+                    Console.WriteLine($"Error opening URL (Win32Exception): {ex.Message}");
+                    // Consider showing a user-friendly error message here
+                }
+                catch (Exception ex)
+                {
+                    // Handle other potential errors
+                    Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                    // Consider showing a user-friendly error message here
+                }
+            }
+        }
+        }
 }

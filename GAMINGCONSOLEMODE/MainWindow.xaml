@@ -209,6 +209,20 @@ Margin="0,0,20,0">
                        Margin="10"/>
                 </AppBarElementContainer>
 
+
+                <!-- News Trigger Button -->
+                <AppBarButton x:Name="newsButton"
+Background="White"
+Foreground="Green"
+Visibility="Visible"
+Icon="PostUpdate"
+Label="News"
+Click="newsButton_Click">
+                    <AppBarButton.RenderTransform>
+                        <ScaleTransform x:Name="newsButtonScale" ScaleX="1" ScaleY="1"/>
+                    </AppBarButton.RenderTransform>
+                </AppBarButton>
+                
                 <!-- Update Trigger Button -->
                 <AppBarButton x:Name="UpdateButton"
               Background="White"
@@ -222,6 +236,7 @@ Margin="0,0,20,0">
                     </AppBarButton.RenderTransform>
                 </AppBarButton>
 
+               
 
                 <!-- Install Trigger Button -->
                 <AppBarButton x:Name="InstallUpdateButton"

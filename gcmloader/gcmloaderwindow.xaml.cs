@@ -30,31 +30,26 @@ using System.Net.Http.Headers;
 using System.Numerics; 
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Tomlyn;
 using Tomlyn.Model;
-using Windows.ApplicationModel;
 using Windows.Devices.Power;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Networking.Connectivity;
 using Windows.System;
-using static System.Net.Mime.MediaTypeNames;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
 using Application = Microsoft.UI.Xaml.Application;
 using Button = Microsoft.UI.Xaml.Controls.Button;
 using Color = Windows.UI.Color;
 using Image = Microsoft.UI.Xaml.Controls.Image;
-using Point = System.Drawing.Point;
 using Process = System.Diagnostics.Process;
 using Task = System.Threading.Tasks.Task;
 
@@ -2736,35 +2731,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Brings a window robustly to the foreground and performs a focus correction
         /// for Playnite by clicking in the top-right and sending an Escape signal.
         /// </summary>
-        private void ForceWindowToTrueFullscreen(IntPtr hWnd)
-        {
-            if (hWnd == IntPtr.Zero) return;
-
-            // Get the absolute screen resolution.
-            int screenWidth = GetScreenWidth();
-            int screenHeight = GetScreenHeight();
-
-            // Set the window's position to (0,0) and its size to the full screen resolution.
-            // This is more aggressive than SW_SHOWMAXIMIZED.
-            SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
-        }
+        /// 
         private async Task ForcefullyBringToForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
-            // Step 1: Reliably bring the window to focus and maximize it to the work area.
-            ShowWindow(hWnd, SW_SHOWMAXIMIZED);
-            await Task.Delay(100);
-
-            string launcher = AppSettings.Load<string>("launcher");
-            if (launcher == "playnite" || launcher == "steam")
-            {
-                // Step 2: Force it to true fullscreen to cover any taskbar remnants.
-                ForceWindowToTrueFullscreen(hWnd);
-            }
-
-            // Step 3: Ensure the window is truly the foreground window.
-            await Task.Delay(150);
+            // --- Step 1: Reliably bring the window to the front ---
+            // (This remains the most stable way to gain focus)
             IntPtr foregroundHwnd = GetForegroundWindow();
             if (foregroundHwnd != hWnd)
             {
@@ -2775,26 +2748,57 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AttachThreadInput(ourThreadId, foregroundThreadId, false);
             }
 
-            // Step 4: Perform the specific focus correction for Playnite.
+            // Ensure the window is visible before we manipulate it
+            if (IsIconic(hWnd)) { ShowWindow(hWnd, SW_RESTORE); }
+            else { ShowWindow(hWnd, 5); } // SW_SHOW
+
+            string launcher = AppSettings.Load<string>("launcher");
             if (launcher == "playnite")
             {
+                // Give the window a moment to become active
+                await Task.Delay(250);
+
+                // --- Step 2: Aggressively force true borderless fullscreen ---
                 try
                 {
-                    // Make the cursor invisible for the operation.
+                    Debug.WriteLine($"[GCM] Forcing true borderless fullscreen for Playnite (Handle: {hWnd}).");
+
+                    // Get the current window style
+                    long style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+
+                    // Remove all border, caption, and menu styles
+                    style &= ~(WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+
+                    // Apply the new, "naked" style
+                    SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)style);
+
+                    // Get the absolute screen resolution
+                    int screenWidth = GetScreenWidth();
+                    int screenHeight = GetScreenHeight();
+
+                    // Resize and position the now-borderless window to cover the entire screen
+                    SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GCM] Failed to apply borderless style: {ex.Message}");
+                }
+
+                // Give the UI a moment to settle after resizing
+                await Task.Delay(300);
+
+                // --- Step 3: The physical focus correction (Click THEN Escape) ---
+                try
+                {
+                    // Make the cursor invisible
                     while (ShowCursor(false) >= 0) ;
                     await Task.Delay(32);
 
-                    // Wait for the Playnite UI to settle.
-                    await Task.Delay(300);
-
-                    // --- 4.1: CLICK FIRST to secure focus ---
+                    // 3.1: CLICK FIRST (Top Center)
                     int screenWidth = GetScreenWidth();
                     int screenHeight = GetScreenHeight();
                     int dpiY = GetDpiY();
                     int offsetY = (int)((0.5 / 2.54) * dpiY);
-
-                    // ### THE CHANGE IS HERE ###
-                    // Calculate the click position: top-CENTER, offset by 0.5 cm down.
                     int clickX = screenWidth / 2;
                     int clickY = offsetY;
 
@@ -2803,18 +2807,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     await Task.Delay(50);
                     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
 
-                    // --- 4.2: SEND ESCAPE SECOND to close any open menus ---
+                    // 3.2: ESCAPE SECOND
                     await Task.Delay(50);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
-                    // --- 4.3: Move the cursor away to a corner ---
+                    // 3.3: Move cursor away
                     SetCursorPos(screenWidth - 1, screenHeight - 1);
                     Debug.WriteLine($"[GCM] Playnite focus correction: Clicked at ({clickX},{clickY}), sent Escape, and hid cursor.");
                 }
                 finally
                 {
-                    // No matter what, make the cursor visible again.
+                    // No matter what happens, make the cursor visible again
                     while (ShowCursor(true) < 0) ;
                 }
             }
@@ -2832,9 +2836,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 switch (launcher)
                 {
                     case "steam":
-                        // ### FINALE LÖSUNG FÜR STEAM ###
-                        // Wir verwenden IMMER den direkten Protokoll-Befehl. 
-                        // Er holt ein laufendes Steam nach vorne oder startet es, falls nötig.
+                        //Steam in foreground
                         Debug.WriteLine("[GCM] Nutze Steam-Protokoll für den Wechsel: steam://open/gamepadui");
                         Process.Start(new ProcessStartInfo("steam://open/gamepadui")
                         {
@@ -2843,7 +2845,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         return; // Fertig.
 
                     case "playnite":
-                        // Die Logik für Playnite funktioniert perfekt und bleibt unangetastet.
+                        // Playnite in foreground
                         string processNameToFind = "Playnite.FullscreenApp";
                         Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
                         if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
@@ -2857,7 +2859,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         return;
 
                     case "custom":
-                        // Die Logik für Custom Launcher bleibt ebenfalls unverändert.
+                       
                         string customPath = AppSettings.Load<string>("customlauncherpath");
                         string customProcessName = Path.GetFileNameWithoutExtension(customPath);
                         Process customProc = Process.GetProcessesByName(customProcessName).FirstOrDefault();
@@ -2872,7 +2874,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         return;
 
                     case "xbox":
-                        // Die Logik für Xbox verwendet bereits den Protokoll-Befehl und ist optimal.
+                        // over xbox protokoll
                         Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
                         return;
                 }
@@ -2882,9 +2884,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine($"[GCM] Fehler während des Launcher-Wechsels: {ex.Message}");
             }
         }
-
-
-
         private static void MaximizeXboxWindow(IntPtr hwnd)
         {
             // Prüft, ob ein gültiges Fenster-Handle übergeben wurde
@@ -3669,34 +3668,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
+                // Load the configured path for the Playnite executable from settings.
                 string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
 
+                // Validate the path.
                 if (string.IsNullOrWhiteSpace(playnitePath) || !File.Exists(playnitePath))
                 {
-                    // The exception message is now in English.
+                    // Throw an exception if the path is invalid or the file doesn't exist.
                     throw new FileNotFoundException("The Playnite path is invalid or was not found.");
                 }
 
-                // ### THIS IS YOUR REQUESTED CHANGE ###
-                // Step 1: First, kill any running Playnite Fullscreen process.
-                Debug.WriteLine("[GCM] Killing running Playnite Fullscreen instance for a clean restart...");
-                KillProcess("Playnite.FullscreenApp.exe");
-
-                // Step 2: Give the system a moment to fully terminate the process.
-                await Task.Delay(500);
-
-                // Step 3: Now, start Playnite cleanly.
+                // Start Playnite in fullscreen mode and hide the splash screen.
                 Process.Start(new ProcessStartInfo(playnitePath)
                 {
-                    Arguments = "--startfullscreen --hidesplashscreen",
-                    UseShellExecute = true
+                    Arguments = "--startfullscreen --hidesplashscreen", // Arguments to launch directly into fullscreen
+                    UseShellExecute = true // UseShellExecute allows Windows to handle the process start (recommended for .exe)
                 });
+                Debug.WriteLine("[GCM] Playnite started with --startfullscreen --hidesplashscreen.");
             }
             catch (Exception ex)
             {
-                // The debug message remains, but the user message is now in English.
+                // Log any error that occurs during the process.
                 Debug.WriteLine($"Error in StartPlaynite: {ex.Message}");
+                // Show an error message to the user.
                 await messagebox("Could not start Playnite. Please check the path in the settings.");
+                // Attempt to return the user to a usable desktop state if Playnite fails to start.
                 BackToWindows();
             }
         }
