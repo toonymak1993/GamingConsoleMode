@@ -5745,9 +5745,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Start the dedicated input loop on a background thread.
             Task.Run(() => GamepadInputLoop());
         }
-
+      
+      
+        
         private async Task GamepadInputLoop()
         {
+            // Define the deadzone for the analog stick
+            const int deadzone = 12000; // Adjust as needed
+
             while (true) // This loop runs continuously in the background.
             {
                 if (_xinputController == null || !_xinputController.IsConnected)
@@ -5759,76 +5764,95 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (_controllerConnected)
                 {
                     var state = _xinputController.GetState();
-                    var currentButtons = state.Gamepad.Buttons;
+                    var gamepadState = state.Gamepad; // More convenient alias
+                    var currentButtons = gamepadState.Buttons;
 
-                    // ### UPDATED: Mouse Mode Toggle Logic (Back + Right Stick Click for 3 seconds) ###
+                    // Get Left Thumbstick values
+                    var thumbX = gamepadState.LeftThumbX;
+                    var thumbY = gamepadState.LeftThumbY; // *** Get Y-axis value ***
 
-                    // 1. Check if both buttons are currently pressed.
+                    // ### Mouse Mode Toggle Logic (remains the same) ###
                     bool backPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
-                    // The enum for the Right Stick click is 'RightThumb'.
                     bool rsPressed = (currentButtons & GamepadButtonFlags.RightThumb) != 0;
                     bool comboIsPressed = backPressed && rsPressed;
-
                     bool lastBackPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
                     bool lastRsPressed = (_lastButtonState & GamepadButtonFlags.RightThumb) != 0;
                     bool comboWasPressed = lastBackPressed && lastRsPressed;
+                    // ... (rest of the mouse mode toggle logic is unchanged) ...
+                    if (comboIsPressed && !comboWasPressed) { _comboPressTime = DateTime.UtcNow; _mouseModeToggledThisPress = false; }
+                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress) { if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0) { _isMouseModeActive = !_isMouseModeActive; DispatcherQueue.TryEnqueue(() => SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated")); _mouseModeToggledThisPress = true; /* Optional keyboard hide */ } }
+                    if (!comboIsPressed && comboWasPressed) { _comboPressTime = null; }
 
-                    // 2. If the combo has just been initiated, start the timer.
-                    if (comboIsPressed && !comboWasPressed)
-                    {
-                        _comboPressTime = DateTime.UtcNow;
-                        _mouseModeToggledThisPress = false;
-                    }
 
-                    // 3. While the combo is held, check if 3 seconds have passed.
-                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress)
-                    {
-                        if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0)
-                        {
-                            _isMouseModeActive = !_isMouseModeActive;
-                            SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated");
-                            _mouseModeToggledThisPress = true;
-
-                            // If we are deactivating mouse mode, ensure the keyboard is hidden.
-                            if (!_isMouseModeActive && Process.GetProcessesByName("TabTip").Any())
-                            {
-                               
-                            }
-                        }
-                    }
-
-                    // 4. If the combo is released, reset the timer.
-                    if (!comboIsPressed && comboWasPressed)
-                    {
-                        _comboPressTime = null;
-                    }
-
-                    // --- Main Input Logic Branch (remains unchanged) ---
+                    // --- Main Input Logic Branch ---
                     if (_isMouseModeActive)
                     {
                         HandleMouseControl(state);
                         _lastButtonState = currentButtons;
+                        _lastStickXDirection = 0; // Reset stick directions when entering mouse mode
+                        _lastStickYDirection = 0;
                     }
-                    else
+                    else // --- UI Navigation and Shortcut Mode ---
                     {
-                        HandleShortcuts(currentButtons);
+                        HandleShortcuts(currentButtons); // Handle global shortcuts first
+
+                        // --- NEW: Left Stick Navigation Logic (X and Y axis) ---
+                        int currentStickXDirection = 0;
+                        int currentStickYDirection = 0; // *** Add Y direction ***
+                        bool stickMovedLeft = false;
+                        bool stickMovedRight = false;
+                        bool stickMovedUp = false;    // *** Add Up flag ***
+                        bool stickMovedDown = false;  // *** Add Down flag ***
+
+                        // Determine current stick X direction
+                        if (thumbX < -deadzone) { currentStickXDirection = -1; } // Left
+                        else if (thumbX > deadzone) { currentStickXDirection = 1; } // Right
+                        else { currentStickXDirection = 0; } // Center
+
+                        // Determine current stick Y direction (Inverted: Positive Y is UP on stick)
+                        if (thumbY > deadzone) { currentStickYDirection = 1; } // Up
+                        else if (thumbY < -deadzone) { currentStickYDirection = -1; } // Down
+                        else { currentStickYDirection = 0; } // Center
+
+                        // Check for horizontal movement changes
+                        if (currentStickXDirection == -1 && _lastStickXDirection != -1) { stickMovedLeft = true; }
+                        else if (currentStickXDirection == 1 && _lastStickXDirection != 1) { stickMovedRight = true; }
+
+                        // Check for vertical movement changes
+                        if (currentStickYDirection == 1 && _lastStickYDirection != 1) { stickMovedUp = true; }
+                        else if (currentStickYDirection == -1 && _lastStickYDirection != -1) { stickMovedDown = true; }
+
+                        // Update the last stick direction states *after* checking
+                        _lastStickXDirection = currentStickXDirection;
+                        _lastStickYDirection = currentStickYDirection; // *** Update Y state ***
+                                                                       // --- End of Left Stick Navigation Logic ---
+
+
+                        // Only handle UI navigation if the window is in the foreground
                         if (IsWindowInForeground())
                         {
-                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(currentButtons));
+                            // Dispatch UI handling, passing ALL stick states
+                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(currentButtons, stickMovedLeft, stickMovedRight, stickMovedUp, stickMovedDown));
+                            // _lastButtonState is updated on UI thread
                         }
                         else
                         {
-                            _lastButtonState = currentButtons;
+                            _lastButtonState = currentButtons; // Update button state if not focused
+                            _lastStickXDirection = 0; // Reset stick if focus lost
+                            _lastStickYDirection = 0;
                         }
                     }
                 }
-                else
+                else // Controller disconnected
                 {
-                    if (_isKeyboardVisible) HideOnScreenKeyboard();
+                    if (_isMouseModeActive) { _isMouseModeActive = false; DispatcherQueue.TryEnqueue(() => SendOverlayNotification("Mouse Mode Deactivated (Controller Disconnected)")); }
+                    // if (_isKeyboardVisible) { /* DispatcherQueue.TryEnqueue(() => HideOnScreenKeyboard()); */ } // Optional
                     _lastButtonState = GamepadButtonFlags.None;
+                    _lastStickXDirection = 0; // Reset stick directions
+                    _lastStickYDirection = 0;
                 }
 
-                await Task.Delay(16);
+                await Task.Delay(16); // ~60 Hz
             }
         }
 
@@ -6071,14 +6095,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Der Parameter /r steht für "restart"
             Process.Start("shutdown", "/r /t 0");
         }
-        // Renamed from GamepadButtonCheck. This now ONLY handles UI logic on the UI thread.
-        // This is the new, fully corrected version.
-        // This is the new, fully corrected version.
-        // This is the new, fully corrected, and restructured version.
-        // This method now ONLY handles UI navigation when the window is in focus.
-        // This is the final, fully corrected version with the AppLauncher fix.
-        // This is the final, fully corrected version with the AppLauncher fix.
-        private void HandleGamepadInput(GamepadButtonFlags currentButtons)
+
+        private void HandleGamepadInput(GamepadButtonFlags currentButtons, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown) // <-- Added stick parameters
         {
             // Safety check: Do nothing if the window is not in focus.
             if (!IsWindowInForeground())
@@ -6090,17 +6108,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Calculate which buttons are newly pressed in this frame.
             var newPresses = currentButtons & ~_lastButtonState;
 
-            // If no new buttons were pressed, there's nothing to do for the UI.
-            if (newPresses == GamepadButtonFlags.None)
-            {
-                _lastButtonState = currentButtons;
-                return;
-            }
-
-            // Global shortcuts are handled in the background loop.
-
             // --- High Priority: Area Switching with Shoulder Buttons ---
             bool areaSwitched = false;
+            // Only check for new presses for area switching to prevent rapid cycling
             if ((newPresses & GamepadButtonFlags.RightShoulder) != 0)
             {
                 switch (_currentFocusArea)
@@ -6108,6 +6118,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Launcher: _currentFocusArea = FocusArea.Cards; break;
                     case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
+                    case FocusArea.AppLauncher: _currentFocusArea = FocusArea.Launcher; break;
+                    case FocusArea.PowerMenu: _currentFocusArea = FocusArea.Launcher; break;
                 }
                 areaSwitched = true;
             }
@@ -6118,29 +6130,44 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.Launcher: _currentFocusArea = FocusArea.TopButtons; break;
                     case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;
                     case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;
+                    case FocusArea.AppLauncher: _currentFocusArea = FocusArea.TopButtons; break;
+                    case FocusArea.PowerMenu: _currentFocusArea = FocusArea.Cards; break;
                 }
                 areaSwitched = true;
             }
 
+
             if (areaSwitched)
             {
-                // If we switched areas, reset all selection indexes and update the visuals.
+                // Reset selection indexes when switching areas
                 _selectedCardIndex = 0;
                 _selectedTopButtonIndex = 0;
                 _selectedLauncherAreaIndex = 0;
+                _selectedPowerMenuItemIndex = 0;
+                // AppLauncher index is managed by GridView
+
                 UpdateVisualFocus();
                 PlayNavigationSound();
             }
-            else
+            // Only process directional input if NO area switch happened OR if stick input is detected
+            else if (newPresses != GamepadButtonFlags.None || stickMovedLeft || stickMovedRight || stickMovedUp || stickMovedDown)
             {
-                // --- Contextual Navigation (D-Pad, A, B) ---
-                // This code only runs if no area switch happened.
+                // --- Contextual Navigation (D-Pad, Left Stick, A, B) ---
                 switch (_currentFocusArea)
                 {
                     case FocusArea.PowerMenu:
-                        if ((newPresses & GamepadButtonFlags.DPadDown) != 0) { _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0) { _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        // *** Integrate Left Stick Y-Axis Here ***
+                        if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _powerMenuItems.Any())
+                        {
+                            _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
+                            UpdateVisualFocus(); PlayNavigationSound();
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _powerMenuItems.Any())
+                        {
+                            _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
+                            UpdateVisualFocus(); PlayNavigationSound();
+                        }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0 && _powerMenuItems.Count > _selectedPowerMenuItemIndex)
                         {
                             var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
                             if (selectedButton == ShutdownMenuItem) ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
@@ -6152,7 +6179,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         else if ((newPresses & GamepadButtonFlags.B) != 0)
                         {
                             PowerMenu.Visibility = Visibility.Collapsed;
-                            _currentFocusArea = FocusArea.TopButtons;
+                            _currentFocusArea = FocusArea.TopButtons; // Return focus
                             UpdateVisualFocus(); PlaydeactivationSound();
                         }
                         break;
@@ -6160,68 +6187,153 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case FocusArea.AppLauncher:
                         if (AppGridView.Items.Count > 0)
                         {
-                            int columns = 4;
-                            if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
+                            int columns = 4; // Default guess
+                            try // Safely calculate columns
                             {
-                                columns = (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth);
-                                if (columns == 0) columns = 1;
+                                if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
+                                {
+                                    columns = Math.Max(1, (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth));
+                                }
                             }
+                            catch { /* Ignore potential layout errors */ }
 
-                            if ((newPresses & GamepadButtonFlags.DPadDown) != 0) { var newIndex = AppGridView.SelectedIndex + columns; if (newIndex >= AppGridView.Items.Count) newIndex = AppGridView.Items.Count - 1; AppGridView.SelectedIndex = newIndex; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                            else if ((newPresses & GamepadButtonFlags.DPadUp) != 0) { var newIndex = AppGridView.SelectedIndex - columns; if (newIndex < 0) newIndex = 0; AppGridView.SelectedIndex = newIndex; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                            else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { AppGridView.SelectedIndex = (AppGridView.SelectedIndex + 1) % AppGridView.Items.Count; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                            else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { AppGridView.SelectedIndex = (AppGridView.SelectedIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
+                            int currentIndex = AppGridView.SelectedIndex;
+                            int newIndex = currentIndex;
+                            bool navigated = false;
+
+                            // *** Integrate Left Stick Y-Axis Here ***
+                            if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) { newIndex = Math.Min(AppGridView.Items.Count - 1, currentIndex + columns); navigated = true; }
+                            else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) { newIndex = Math.Max(0, currentIndex - columns); navigated = true; }
+                            else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) { newIndex = (currentIndex + 1) % AppGridView.Items.Count; navigated = true; }
+                            else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) { newIndex = (currentIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; navigated = true; }
+
+                            if (navigated && newIndex != currentIndex)
+                            {
+                                AppGridView.SelectedIndex = newIndex;
+                                AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Ensure visible
+                                PlayNavigationSound();
+                            }
                         }
 
-                        // ### HIER IST DIE KORREKTUR ###
                         if ((newPresses & GamepadButtonFlags.A) != 0)
                         {
-                            // Wir benutzen den zuverlässigen SelectedIndex, um das Item direkt zu holen.
                             int selectedIndex = AppGridView.SelectedIndex;
                             if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count)
                             {
-                                if (AppGridView.Items[selectedIndex] is AppInfo app)
-                                {
-                                    LaunchApp(app);
-                                }
+                                if (AppGridView.Items[selectedIndex] is AppInfo app) { LaunchApp(app); }
                             }
                             PlayActivationSound();
                         }
                         else if ((newPresses & GamepadButtonFlags.B) != 0)
                         {
-                            ToggleAppLauncher_Click(null, null);
+                            ToggleAppLauncher_Click(null, null); // Close
                         }
                         break;
 
                     case FocusArea.Launcher:
-                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (_launcherAreaButtons.Any()) _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (_launcherAreaButtons.Any()) _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
+                        // Launcher is horizontal only, so Y-axis stick movement is ignored here
+                        int currentLauncherIndex = _selectedLauncherAreaIndex;
+                        int newLauncherIndex = currentLauncherIndex;
+                        bool launcherNavigated = false;
+                        if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _launcherAreaButtons.Any())
+                        {
+                            newLauncherIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
+                            launcherNavigated = true;
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _launcherAreaButtons.Any())
+                        {
+                            newLauncherIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
+                            launcherNavigated = true;
+                        }
+
+                        if (launcherNavigated)
+                        {
+                            _selectedLauncherAreaIndex = newLauncherIndex;
+                            UpdateVisualFocus(); PlayNavigationSound();
+                        }
                         else if ((newPresses & GamepadButtonFlags.A) != 0)
                         {
-                            if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item) item.TapAction?.Invoke(null, null);
+                            if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item)
+                            {
+                                item.TapAction?.Invoke(null, null); // Execute action
+                            }
                             PlayActivationSound();
                         }
                         break;
 
+
                     case FocusArea.TopButtons:
-                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (_topButtons.Any()) _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (_topButtons.Any()) _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0) { ClickSelectedTopButton(); PlayActivationSound(); }
+                        // Top Buttons are horizontal only, so Y-axis stick movement is ignored here
+                        int currentTopButtonIndex = _selectedTopButtonIndex;
+                        int newTopButtonIndex = currentTopButtonIndex;
+                        bool topButtonNavigated = false;
+                        if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _topButtons.Any())
+                        {
+                            newTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
+                            topButtonNavigated = true;
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _topButtons.Any())
+                        {
+                            newTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
+                            topButtonNavigated = true;
+                        }
+
+                        if (topButtonNavigated)
+                        {
+                            _selectedTopButtonIndex = newTopButtonIndex;
+                            UpdateVisualFocus(); PlayNavigationSound();
+                        }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            ClickSelectedTopButton(); PlayActivationSound();
+                        }
                         break;
 
+
                     case FocusArea.Cards:
-                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (ProgramCardPanel.Children.Any()) _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (ProgramCardPanel.Children.Any()) _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0) { TriggerCardAction(_selectedCardIndex, true); PlayActivationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.B) != 0) { TriggerCardAction(_selectedCardIndex, false); PlaydeactivationSound(); }
+                        // Cards are horizontal only, so Y-axis stick movement is ignored here
+                        int currentCardIndex = _selectedCardIndex;
+                        int newCardIndex = currentCardIndex;
+                        bool cardNavigated = false;
+                        if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && ProgramCardPanel.Children.Any())
+                        {
+                            newCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
+                            cardNavigated = true;
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && ProgramCardPanel.Children.Any())
+                        {
+                            newCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
+                            cardNavigated = true;
+                        }
+
+                        if (cardNavigated)
+                        {
+                            _selectedCardIndex = newCardIndex;
+                            UpdateVisualFocus(); // Handles highlight and scroll
+                            PlayNavigationSound();
+                        }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            TriggerCardAction(_selectedCardIndex, true); // True for launch/focus
+                            PlayActivationSound();
+                        }
+                        else if ((newPresses & GamepadButtonFlags.B) != 0)
+                        {
+                            TriggerCardAction(_selectedCardIndex, false); // False for close/kill
+                            PlaydeactivationSound();
+                        }
                         break;
                 }
             }
+
 
             // This must be the VERY LAST line to correctly track the state for the next frame.
             _lastButtonState = currentButtons;
         }
 
+        // Used to track the last direction the left / Right stick was pushed to prevent rapid navigation events
+        private int _lastStickXDirection = 0; // -1 for left, 0 for center, 1 for right
+        private int _lastStickYDirection = 0; // -1 for down, 0 for center, 1 for up // <-- Add this line
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
             if (PowerMenu.Visibility == Visibility.Visible)
@@ -6245,11 +6357,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 PowerMenu.Visibility = Visibility.Visible;
             }
         }
-
-        /// <summary>
-        /// Aktualisiert die UI performant, indem nur das alte und neue Element geändert wird.
-        /// </summary>
-       
 
         /// <summary>
         /// Updates the UI performantly by only changing the old and new focused elements.
