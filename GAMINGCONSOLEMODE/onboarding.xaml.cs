@@ -1,168 +1,191 @@
-﻿// In your Onboarding.xaml.cs
+﻿// In Onboarding.xaml.cs
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml;
-using System;
-using Microsoft.Web.WebView2.Core;
-using System.IO;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI; // Für Colors
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace GAMINGCONSOLEMODE
 {
     public sealed partial class Onboarding : Page
     {
+        // Arrays für einen einfachen Zugriff auf die UI-Elemente des Steppers
+        private Border[] _stepIndicators;
+        private TextBlock[] _stepNumbers;
+        private TextBlock[] _stepTexts;
+        private FontIcon[] _stepArrows;
+
+        // Farben für die verschiedenen Zustände
+        private SolidColorBrush _accentBrush;
+        private SolidColorBrush _neutralBrush;
+        private SolidColorBrush _textActiveBrush;
+        private SolidColorBrush _textInactiveBrush;
+
+        // ### START DER KORREKTUR ###
+        // Dieser Schalter verhindert, dass der Code ausgeführt wird, bevor die Seite geladen ist
+        private bool _isPageLoaded = false;
+        // ### ENDE DER KORREKTUR ###
+
         public Onboarding()
         {
             this.InitializeComponent();
             this.Loaded += Onboarding_Loaded;
+
+            // Definiere die Farben. Wir holen die Akzentfarbe aus den App-Ressourcen.
+            _accentBrush = Application.Current.Resources["SystemAccentColor"] as SolidColorBrush;
+
+            // Wir verwenden die voll qualifizierten Namen, um den Fehler zu beheben:
+            _neutralBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 64, 64, 64)); // Dunkelgrau
+            _textActiveBrush = new SolidColorBrush(Microsoft.UI.Colors.White);
+            _textInactiveBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray);
         }
 
-        private async void Onboarding_Loaded(object sender, RoutedEventArgs e)
+        private void Onboarding_Loaded(object sender, RoutedEventArgs e)
         {
-            await InitializeWebView2Async();
+            // Fülle die Arrays mit den UI-Elementen aus dem XAML
+            _stepIndicators = new Border[] { Step1Indicator, Step2Indicator, Step3Indicator };
+            _stepNumbers = new TextBlock[] { Step1Number, Step2Number, Step3Number };
+            _stepTexts = new TextBlock[] { Step1Text, Step2Text, Step3Text };
+            _stepArrows = new FontIcon[] { Arrow1, Arrow2 };
+
+            // Setze den visuellen Startzustand (Schritt 1 ist aktiv)
+            UpdateStepperVisuals(0);
+
+            // ### START DER KORREKTUR ###
+            // Jetzt, da alles geladen ist, setzen wir den Schalter auf true
+            _isPageLoaded = true;
+            // ### ENDE DER KORREKTUR ###
         }
 
-        // Final attempt to initialize WebView2 with custom user data folder
-        private async System.Threading.Tasks.Task InitializeWebView2Async()
+        /// <summary>
+        /// Wird jedes Mal aufgerufen, wenn die Seite im FlipView wechselt.
+        /// </summary>
+        private void OnboardingFlipView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (MyWebView == null)
+            // ### START DER KORREKTUR ###
+            // Führe den Code nur aus, wenn die Seite geladen ist und der BackButton nicht mehr null sein kann.
+            if (!_isPageLoaded)
             {
-                Debug.WriteLine(" WebView2 control 'MyWebView' not found in XAML.");
-                await ShowWebViewErrorDialog("Error", "WebView2 control ('MyWebView') not found in XAML.");
-                LoadingSpinner.IsActive = false; LoadingSpinner.Visibility = Visibility.Collapsed;
-                return;
+                return; // Abbrechen, wenn die Seite noch nicht bereit ist
             }
+            // ### ENDE DER KORREKTUR ###
 
-            LoadingSpinner.IsActive = true;
-            LoadingSpinner.Visibility = Visibility.Visible;
-            ErrorText.Visibility = Visibility.Collapsed;
+            int index = OnboardingFlipView.SelectedIndex;
+            if (index == -1) return;
 
-            try
+            UpdateStepperVisuals(index);
+            UpdateNavButtons(index);
+        }
+
+        /// <summary>
+        /// Aktualisiert die Farben der Stepper-Kopfzeile basierend auf dem aktiven Index.
+        /// </summary>
+        private void UpdateStepperVisuals(int activeIndex)
+        {
+            if (_stepIndicators == null) return; // Verhindert Fehler, falls noch nicht geladen
+
+            // Alle Schritte durchlaufen
+            for (int i = 0; i < _stepIndicators.Length; i++)
             {
-                // 1. Pfad für Benutzerdaten definieren
-                string appDataRoamingPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string webViewUserDataFolder = Path.Combine(appDataRoamingPath, "gcmsettings", "WebView2Data");
-                Directory.CreateDirectory(webViewUserDataFolder);
-                Debug.WriteLine($"WebView2 User Data Folder set to: {webViewUserDataFolder}");
-
-                // --- KORRIGIERTER AUFRUF ---
-                // 2. Umgebung mit der korrekten WinRT-Methode 'CreateWithOptionsAsync' erstellen.
-                var environment = await CoreWebView2Environment.CreateWithOptionsAsync(null, webViewUserDataFolder, null);
-                Debug.WriteLine(" CoreWebView2Environment created successfully.");
-
-                // 3. WebView2-Steuerelement mit der erstellten Umgebung initialisieren.
-                //    Dies verwendet die neue Überladung, die in WinAppSDK 1.5 eingeführt wurde.
-                await MyWebView.EnsureCoreWebView2Async(environment);
-                Debug.WriteLine(" EnsureCoreWebView2Async completed.");
-                // --- ENDE DES KORRIGIERTEN AUFRUFS ---
-
-                // 4. Navigation (nur wenn Source nicht in XAML gesetzt ist)
-                if (MyWebView.Source == null && MyWebView.CoreWebView2 != null)
+                if (i == activeIndex)
                 {
-                    MyWebView.CoreWebView2.Navigate("https://www.gameconsolemode.com/onboarding");
-                    Debug.WriteLine(" Navigation initiated.");
+                    // Aktueller Schritt: Vollständige Akzentfarbe
+                    _stepIndicators[i].Background = _accentBrush;
+                    _stepNumbers[i].Foreground = _textActiveBrush;
+                    _stepTexts[i].Foreground = _textActiveBrush;
                 }
-                else if (MyWebView.CoreWebView2 == null)
+                else if (i < activeIndex)
                 {
-                    Debug.WriteLine(" CoreWebView2 is null after EnsureCoreWebView2Async, cannot navigate.");
-                    throw new InvalidOperationException("CoreWebView2 could not be initialized.");
+                    // Abgeschlossener Schritt: Gedämpfte Akzentfarbe (oder voll, je nach Wunsch)
+                    _stepIndicators[i].Background = _accentBrush;
+                    _stepNumbers[i].Foreground = _textActiveBrush;
+                    _stepTexts[i].Foreground = _textInactiveBrush; // Text ausgrauen
                 }
                 else
                 {
-                    Debug.WriteLine(" Source likely set in XAML or navigation already started.");
+                    // Zukünftiger Schritt: Neutral
+                    _stepIndicators[i].Background = _neutralBrush;
+                    _stepNumbers[i].Foreground = _textInactiveBrush;
+                    _stepTexts[i].Foreground = _textInactiveBrush;
                 }
             }
-            catch (ArgumentException argEx)
-            {
-                Debug.WriteLine($" Invalid argument during environment creation: {argEx.Message}");
-                await ShowWebViewErrorDialog("WebView2 Initialization Error", $"Invalid argument provided for WebView2 environment:\n{argEx.Message}");
-                ShowErrorState("Error: Invalid configuration for WebView2.");
-            }
-            catch (FileNotFoundException fileEx)
-            {
-                Debug.WriteLine($" Runtime likely missing: {fileEx.Message}");
-                await ShowWebViewErrorDialog("WebView2 Error", "The required Microsoft Edge WebView2 Runtime might not be installed. Please install it.");
-                ShowErrorState("Error: WebView2 Runtime not found.");
-            }
-            catch (COMException comEx)
-            {
-                Debug.WriteLine($" COM Exception: {comEx.Message} (HRESULT: {comEx.HResult:X})");
-                string message = $"A COM error occurred during initialization:\n{comEx.Message}";
-                string state = $"COM Error: {comEx.HResult:X}";
 
-                if (comEx.HResult == unchecked((int)0x80070005)) // E_ACCESSDENIED
+            // Pfeile aktualisieren
+            for (int i = 0; i < _stepArrows.Length; i++)
+            {
+                // Wenn der Schritt *vor* dem Pfeil aktiv/fertig ist, färbe den Pfeil ein
+                if (i < activeIndex)
                 {
-                    message = $"Access denied trying to create WebView2 folder or access Runtime.\nTry running as Administrator.\nDetails: {comEx.Message}";
-                    state = "Error: Access denied for WebView2.";
-                }
-                else if (comEx.HResult == unchecked((int)0x80070002)) // ERROR_FILE_NOT_FOUND
-                {
-                    message = "The WebView2 Runtime is likely missing or corrupted. Please install/reinstall it.";
-                    state = "Error: WebView2 Runtime not found/corrupted.";
-                }
-
-                await ShowWebViewErrorDialog("WebView2 COM Error", message);
-                ShowErrorState(state);
-            }
-            catch (UnauthorizedAccessException authEx)
-            {
-                Debug.WriteLine($" Access denied for user data directory: {authEx.Message}");
-                await ShowWebViewErrorDialog("WebView2 Initialization Error", $"No write permissions for the WebView2 data directory:\n{authEx.Message}");
-                ShowErrorState("Error: No permissions to write in the WebView2 data folder.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($" Failed to initialize WebView2: {ex.GetType().Name} - {ex.Message}");
-                await ShowWebViewErrorDialog("WebView2 Initialization Error", $"An unexpected error occurred:\n{ex.Message}");
-                ShowErrorState($"Error: {ex.Message}");
-            }
-        }
-
-        // Helper method to update the UI when an initialization error occurs
-        private void ShowErrorState(string errorMessage)
-        {
-            DispatcherQueue.TryEnqueue(() => {
-                LoadingSpinner.IsActive = false;
-                LoadingSpinner.Visibility = Visibility.Collapsed;
-                ErrorText.Text = errorMessage;
-                ErrorText.Visibility = Visibility.Visible;
-                if (MyWebView != null) MyWebView.Opacity = 0; // Hide WebView on error
-            });
-        }
-
-        // Event handler called when the WebView2 control finishes navigating
-        private async void MyWebView_NavigationCompleted(WebView2 sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs args)
-        {
-            DispatcherQueue.TryEnqueue(async () =>
-            {
-                LoadingSpinner.IsActive = false;
-                LoadingSpinner.Visibility = Visibility.Collapsed;
-
-                if (args.IsSuccess)
-                {
-                    Debug.WriteLine("[WebView2] Navigation successful.");
-                    string script = @"var nav = document.querySelector('.nav-container'); if (nav) nav.style.display = 'none';";
-                    try { await MyWebView.ExecuteScriptAsync(script); Debug.WriteLine("[WebView2] Script executed."); }
-                    catch (Exception scriptEx) { Debug.WriteLine($"[WebView2 Error] Script failed: {scriptEx.Message}"); }
-                    ErrorText.Visibility = Visibility.Collapsed;
-                    if (FadeInWebView != null) { FadeInWebView.Begin(); } else { MyWebView.Opacity = 1; }
+                    _stepArrows[i].Foreground = _accentBrush;
                 }
                 else
                 {
-                    Debug.WriteLine($"[WebView2 Error] Navigation failed: {args.WebErrorStatus}");
-                    ErrorText.Text = $"Error loading page: {args.WebErrorStatus}";
-                    ErrorText.Visibility = Visibility.Visible;
-                    if (MyWebView != null) MyWebView.Opacity = 0;
+                    _stepArrows[i].Foreground = _neutralBrush;
                 }
-            });
+            }
         }
 
-        // Helper method to display error messages in a ContentDialog
-        private async System.Threading.Tasks.Task ShowWebViewErrorDialog(string title, string content)
+        /// <summary>
+        /// Zeigt/Verbirgt die "Weiter" / "Fertig" Buttons.
+        /// </summary>
+        private void UpdateNavButtons(int index)
         {
-            if (this.XamlRoot == null) { Debug.WriteLine($"[Dialog Error] XamlRoot null."); return; }
-            ContentDialog errorDialog = new ContentDialog { Title = title, Content = content, CloseButtonText = "Ok", XamlRoot = this.XamlRoot };
-            try { await errorDialog.ShowAsync(); } catch (Exception dialogEx) { Debug.WriteLine($"[Dialog Error] {dialogEx.Message}"); }
+            // "Zurück"-Button aktivieren/deaktivieren
+            BackButton.IsEnabled = (index > 0);
+
+            if (index == OnboardingFlipView.Items.Count - 1)
+            {
+                // Letzte Seite
+                NextButton.Visibility = Visibility.Collapsed;
+                FinishButton.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                // Jede andere Seite
+                NextButton.Visibility = Visibility.Visible;
+                FinishButton.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void BackButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (OnboardingFlipView.SelectedIndex > 0)
+            {
+                OnboardingFlipView.SelectedIndex--;
+            }
+        }
+
+        private void NextButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (OnboardingFlipView.SelectedIndex < OnboardingFlipView.Items.Count - 1)
+            {
+                OnboardingFlipView.SelectedIndex++;
+            }
+        }
+
+        private void FinishButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Diese Aktion schließt das Onboarding ab.
+            // Du musst dem übergeordneten Fenster mitteilen, dass es diese Seite schließen soll.
+            Debug.WriteLine("Onboarding Finished!");
+
+            // Finde das übergeordnete 'Frame' und navigiere zurück (oder schließe das Dialogfenster)
+            var parent = this.Parent;
+            while (parent != null)
+            {
+                if (parent is Frame frame && frame.CanGoBack)
+                {
+                    frame.GoBack();
+                    return;
+                }
+                // Falls es in einem ContentDialog ist:
+                if (parent is ContentDialog dialog)
+                {
+                    dialog.Hide();
+                    return;
+                }
+                parent = (parent as FrameworkElement)?.Parent;
+            }
         }
     }
 }
