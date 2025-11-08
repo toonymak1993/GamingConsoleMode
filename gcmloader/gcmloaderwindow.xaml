@@ -127,10 +127,6 @@
                         <TextBlock Text="B" FontSize="22" FontWeight="Bold" Foreground="#FFDB4E4E"/>
                         <TextBlock Text="Close / Back" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                        <TextBlock Text="LB/RB" FontSize="22" FontWeight="Bold" Foreground="#FF4E97D9"/>
-                        <TextBlock Text="Change Area" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
-                    </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>
