@@ -50,19 +50,7 @@
                        Margin="16,0,0,0"
                        Grid.Column="1"/>
                     </Grid>
-                    <ToggleSwitch x:Name="Taskbar" Header="Enable Taskbar"
-  Toggled="Taskbar_Toggled"
-  OffContent="Disabled"
-  OnContent="Enabled"
-  Foreground="White"
-  Grid.Column="0"/>
                     
-                    <ToggleSwitch x:Name="Startmenu" Header="Enable Startmenu"
-  Toggled="Startmenu_Toggled"
-  OffContent="Disabled"
-  OnContent="Enabled"
-  Foreground="White"
-  Grid.Column="0"/>
                 </StackPanel>
             </StackPanel>
 

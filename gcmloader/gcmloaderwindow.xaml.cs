@@ -1572,6 +1572,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             }
 
+            // Add setting for the taskbar toggle
+            try
+            {
+                AppSettings.Load<bool>("enable_taskbar");
+            }
+            catch
+            {
+                // if not set, set it to false (Disabled)
+                AppSettings.Save("enable_taskbar", false);
+            }
+
+            // Add setting for the start menu toggle
+            try
+            {
+                AppSettings.Load<bool>("enable_startmenu");
+            }
+            catch
+            {
+                // if not set, set it to false (Disabled)
+                AppSettings.Save("enable_startmenu", false);
+            }
+
         }
 
         #region mainwindow design
@@ -1802,42 +1824,57 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-
-        /// <summary>
-        /// Starts a background loop that persistently hides the taskbar.
-        /// This is an aggressive method to fight against the OS trying to reshow it.
-        /// </summary>
         private void StartTaskbarHidingLoop()
         {
             try
             {
+                // Stop any previous loop if it exists
+                _taskbarHiderCts?.Cancel();
                 _taskbarHiderCts = new CancellationTokenSource();
+
                 Task.Run(async () =>
                 {
-                    Debug.WriteLine("Starting persistent taskbar hiding loop...");
+                    // *** ADD THIS CHECK ***
+                    bool enableTaskbar = false;
+                    try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
+
+                    if (enableTaskbar)
+                    {
+                        Debug.WriteLine("Taskbar is set to ENABLED. Skipping persistent hiding loop.");
+                        // If taskbar is enabled, we must ensure it's visible.
+                        TaskbarVisibility.ShowTaskbar();
+                        return; // Exit the task
+                    }
+                    // *** END OF ADDITION ***
+
+                    Debug.WriteLine("Starting persistent taskbar hiding loop...");
                     while (!_taskbarHiderCts.Token.IsCancellationRequested)
                     {
-                        // Use your robust hide method
-                        TaskbarVisibility.HideTaskbar();
+                        // Use your robust hide method
+                        TaskbarVisibility.HideTaskbar();
                         try
                         {
-                            // Check and hide 4 times per second.x
-                            await Task.Delay(50, _taskbarHiderCts.Token);
+                            // Check and hide 4 times per second.x
+                            await Task.Delay(50, _taskbarHiderCts.Token);
                         }
                         catch (TaskCanceledException)
                         {
-                            // This is expected when we stop the loop.
-                            Debug.WriteLine("Taskbar hiding loop stopped.");
-                        }
+                            // This is expected when we stop the loop.
+                            Debug.WriteLine("Taskbar hiding loop stopped.");
+                            break; // Exit the while loop
+                        }
                     }
-                    Debug.WriteLine("Taskbar hiding loop stopped.");
+                    Debug.WriteLine("Taskbar hiding loop task finished.");
                 }, _taskbarHiderCts.Token);
             }
-            catch
+            catch (Exception ex)
             {
-                //error or not ready at this time, repeat
+                Debug.WriteLine($"Error starting taskbar hider: {ex.Message}");
             }
         }
+
+
+
 
         private static void StopOverlay()
         {
@@ -6106,25 +6143,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion shortcuts
 
 
-        private Controller _xinputController;
-        private bool _controllerConnected = false;
 
-        private Controller GetConnectedController()
-        {
-            for (int i = 0; i < 4; i++)
-            {
-                var controller = new Controller((UserIndex)i);
-                if (controller.IsConnected)
-                    return controller;
-            }
-            return null;
-        }
+
+
 
         /// <summary>
         /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
         /// </summary>
-       
-        private void HandleMouseControl(State controllerState)
+
+        /// <summary>
+        /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
+        /// </summary>
+        private void HandleMouseControl(State controllerState, int controllerIndex) // <-- MODIFIED: Needs controllerIndex
         {
             var gamepad = controllerState.Gamepad;
             var currentButtons = gamepad.Buttons;
@@ -6183,11 +6213,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
             // --- Button Actions ---
-            var newPresses = currentButtons & ~_lastButtonState;
+            // *** FIX: Use the per-controller state _lastButtonStates[controllerIndex] ***
+            var newPresses = currentButtons & ~_lastButtonStates[controllerIndex];
 
             // Left Click (A button) - Supports holding
             if ((newPresses & GamepadButtonFlags.A) != 0) { mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero); }
-            else if (((_lastButtonState & GamepadButtonFlags.A) != 0) && ((currentButtons & GamepadButtonFlags.A) == 0)) { mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero); }
+            // *** FIX: Use the per-controller state _lastButtonStates[controllerIndex] ***
+            else if (((_lastButtonStates[controllerIndex] & GamepadButtonFlags.A) != 0) && ((currentButtons & GamepadButtonFlags.A) == 0)) { mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero); }
 
             // Right Click (X button)
             if ((newPresses & GamepadButtonFlags.X) != 0)
@@ -6203,7 +6235,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 ToggleTouchKeyboard();
             }
         }
-
         /// <summary>
         /// Shows the modern Windows 11 Touch Keyboard by starting its process.
         /// This method is safe to call even if the keyboard is already open.
@@ -6370,12 +6401,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const byte O_KEY = 0x47;
         private void SetupGamepad()
         {
+            // NEW: Initialize the per-controller state arrays
+            for (int i = 0; i < 4; i++)
+            {
+                _lastButtonStates[i] = GamepadButtonFlags.None;
+                _lastStickXDirections[i] = 0;
+                _lastStickYDirections[i] = 0;
+            }
+
             // Start the dedicated input loop on a background thread.
             Task.Run(() => GamepadInputLoop());
         }
-      
-      
-        
+
+
+
         private async Task GamepadInputLoop()
         {
             // Define the deadzone for the analog stick
@@ -6383,113 +6422,114 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             while (true) // This loop runs continuously in the background.
             {
-                if (_xinputController == null || !_xinputController.IsConnected)
-                {
-                    _xinputController = GetConnectedController();
-                    _controllerConnected = _xinputController != null;
-                }
+                bool processedInputThisFrame = false;
 
-                if (_controllerConnected)
+                // Loop through all 4 possible controller ports
+                for (int i = 0; i < 4; i++)
                 {
-                    var state = _xinputController.GetState();
-                    var gamepadState = state.Gamepad; // More convenient alias
+                    var controller = new Controller((UserIndex)i);
+
+                    // 1. If controller is NOT connected, reset its state and check next port
+                    if (!controller.IsConnected)
+                    {
+                        _lastButtonStates[i] = GamepadButtonFlags.None;
+                        _lastStickXDirections[i] = 0;
+                        _lastStickYDirections[i] = 0;
+                        continue;
+                    }
+
+                    // --- 2. Controller IS connected ---
+                    processedInputThisFrame = true; // Mark that a controller is active
+                    var state = controller.GetState();
+                    var gamepadState = state.Gamepad;
                     var currentButtons = gamepadState.Buttons;
 
-                    // Get Left Thumbstick values
+                    // Get Stick values
                     var thumbX = gamepadState.LeftThumbX;
-                    var thumbY = gamepadState.LeftThumbY; // *** Get Y-axis value ***
+                    var thumbY = gamepadState.LeftThumbY;
+                    var thumbRy = gamepadState.RightThumbY; // For scrolling
 
-                    // ### Mouse Mode Toggle Logic (remains the same) ###
+                    // Determine current stick directions
+                    int currentStickXDirection = 0;
+                    if (thumbX < -deadzone) { currentStickXDirection = -1; }
+                    else if (thumbX > deadzone) { currentStickXDirection = 1; }
+
+                    int currentStickYDirection = 0;
+                    if (thumbY > deadzone) { currentStickYDirection = 1; } // Stick Up
+                    else if (thumbY < -deadzone) { currentStickYDirection = -1; } // Stick Down
+
+                    // --- 3. Check for Mouse Mode Toggle ---
                     bool backPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
                     bool rsPressed = (currentButtons & GamepadButtonFlags.RightThumb) != 0;
                     bool comboIsPressed = backPressed && rsPressed;
-                    bool lastBackPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
-                    bool lastRsPressed = (_lastButtonState & GamepadButtonFlags.RightThumb) != 0;
+                    bool lastBackPressed = (_lastButtonStates[i] & GamepadButtonFlags.Back) != 0;
+                    bool lastRsPressed = (_lastButtonStates[i] & GamepadButtonFlags.RightThumb) != 0;
                     bool comboWasPressed = lastBackPressed && lastRsPressed;
-                    // ... (rest of the mouse mode toggle logic is unchanged) ...
+
                     if (comboIsPressed && !comboWasPressed) { _comboPressTime = DateTime.UtcNow; _mouseModeToggledThisPress = false; }
-                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress) { if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0) { _isMouseModeActive = !_isMouseModeActive; DispatcherQueue.TryEnqueue(() => SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated")); _mouseModeToggledThisPress = true; /* Optional keyboard hide */ } }
+                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress) { if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0) { _isMouseModeActive = !_isMouseModeActive; DispatcherQueue.TryEnqueue(() => SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated")); _mouseModeToggledThisPress = true; } }
                     if (!comboIsPressed && comboWasPressed) { _comboPressTime = null; }
 
-
-                    // --- Main Input Logic Branch ---
+                    // --- 4. Main Input Logic Branch ---
                     if (_isMouseModeActive)
                     {
-                        HandleMouseControl(state);
-                        _lastButtonState = currentButtons;
-                        _lastStickXDirection = 0; // Reset stick directions when entering mouse mode
-                        _lastStickYDirection = 0;
+                        HandleMouseControl(state, i);
                     }
                     else // --- UI Navigation and Shortcut Mode ---
                     {
-                        HandleShortcuts(currentButtons); // Handle global shortcuts first
+                        HandleShortcuts(currentButtons); // Process shortcuts (has its own logic)
 
-                        // --- NEW: Left Stick Navigation Logic (X and Y axis) ---
-                        int currentStickXDirection = 0;
-                        int currentStickYDirection = 0; // *** Add Y direction ***
-                        bool stickMovedLeft = false;
-                        bool stickMovedRight = false;
-                        bool stickMovedUp = false;    // *** Add Up flag ***
-                        bool stickMovedDown = false;  // *** Add Down flag ***
+                        // --- This is the "One-Shot" logic ---
+                        // Check for *new* button presses this frame
+                        var newPresses = currentButtons & ~_lastButtonStates[i];
 
-                        // Determine current stick X direction
-                        if (thumbX < -deadzone) { currentStickXDirection = -1; } // Left
-                        else if (thumbX > deadzone) { currentStickXDirection = 1; } // Right
-                        else { currentStickXDirection = 0; } // Center
+                        // Check for *new* stick movements (from center or other direction)
+                        bool stickMovedLeft = (currentStickXDirection == -1 && _lastStickXDirections[i] != -1);
+                        bool stickMovedRight = (currentStickXDirection == 1 && _lastStickXDirections[i] != 1);
+                        bool stickMovedUp = (currentStickYDirection == 1 && _lastStickYDirections[i] != 1);
+                        bool stickMovedDown = (currentStickYDirection == -1 && _lastStickYDirections[i] != -1);
 
-                        // Determine current stick Y direction (Inverted: Positive Y is UP on stick)
-                        if (thumbY > deadzone) { currentStickYDirection = 1; } // Up
-                        else if (thumbY < -deadzone) { currentStickYDirection = -1; } // Down
-                        else { currentStickYDirection = 0; } // Center
+                        // Check if any navigation input just happened
+                        bool hasNavInput = (newPresses != GamepadButtonFlags.None) ||
+                                           stickMovedLeft || stickMovedRight ||
+                                           stickMovedUp || stickMovedDown;
 
-                        // Check for horizontal movement changes
-                        if (currentStickXDirection == -1 && _lastStickXDirection != -1) { stickMovedLeft = true; }
-                        else if (currentStickXDirection == 1 && _lastStickXDirection != 1) { stickMovedRight = true; }
-
-                        // Check for vertical movement changes
-                        if (currentStickYDirection == 1 && _lastStickYDirection != 1) { stickMovedUp = true; }
-                        else if (currentStickYDirection == -1 && _lastStickYDirection != -1) { stickMovedDown = true; }
-
-                        // Update the last stick direction states *after* checking
-                        _lastStickXDirection = currentStickXDirection;
-                        _lastStickYDirection = currentStickYDirection; // *** Update Y state ***
-                                                                       // --- End of Left Stick Navigation Logic ---
-
-
-                        // Only handle UI navigation if the window is in the foreground
-                        if (IsWindowInForeground())
+                        if (hasNavInput && IsWindowInForeground())
                         {
-                            // Dispatch UI handling, passing ALL stick states
-                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(currentButtons, stickMovedLeft, stickMovedRight, stickMovedUp, stickMovedDown));
-                            // _lastButtonState is updated on UI thread
-                        }
-                        else
-                        {
-                            _lastButtonState = currentButtons; // Update button state if not focused
-                            _lastStickXDirection = 0; // Reset stick if focus lost
-                            _lastStickYDirection = 0;
+                            // Send *only* the new presses and stick events to the UI thread
+                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, stickMovedLeft, stickMovedRight, stickMovedUp, stickMovedDown, i));
                         }
                     }
-                }
-                else // Controller disconnected
+
+                    // --- 5. CRITICAL: Update this controller's state *every* frame ---
+                    // This ensures 'newPresses' and 'stickMoved' will be false
+                    // next frame, even if the user holds the button/stick.
+                    _lastButtonStates[i] = currentButtons;
+                    _lastStickXDirections[i] = currentStickXDirection;
+                    _lastStickYDirections[i] = currentStickYDirection;
+
+                    // *** FIX: The 'break;' statement was removed here. ***
+                    // This allows the loop to continue and check i=1, i=2, and i=3.
+                    // Because state is tracked per-controller, this is now safe
+                    // and allows multiple controllers to send input.
+
+                } // End of for-loop (i=0 to 3)
+
+                // If no controller was active *at all* this frame
+                if (!processedInputThisFrame && _isMouseModeActive)
                 {
-                    if (_isMouseModeActive) { _isMouseModeActive = false; DispatcherQueue.TryEnqueue(() => SendOverlayNotification("Mouse Mode Deactivated (Controller Disconnected)")); }
-                    // if (_isKeyboardVisible) { /* DispatcherQueue.TryEnqueue(() => HideOnScreenKeyboard()); */ } // Optional
-                    _lastButtonState = GamepadButtonFlags.None;
-                    _lastStickXDirection = 0; // Reset stick directions
-                    _lastStickYDirection = 0;
+                    _isMouseModeActive = false;
+                    DispatcherQueue.TryEnqueue(() => SendOverlayNotification("Mouse Mode Deactivated (Controller Disconnected)"));
                 }
 
                 await Task.Delay(16); // ~60 Hz
             }
         }
 
-        //Taskmanager
-        private GamepadButtonFlags _lastButtonState = GamepadButtonFlags.None;
-        private bool _ignoreNextInputFrame = false;
-       
 
-        
+
+
+
 
 
 
@@ -6714,7 +6754,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Die zentrale Methode, die alle Gamepad-Eingaben für Shortcuts und UI-Navigation verarbeitet.
         /// </summary>
         /// 
-
+        private bool _ignoreNextInputFrame = false;
         /// <summary>
         /// Startet den Computer neu.
         /// </summary>
@@ -6726,34 +6766,30 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
         /// <summary>
-        /// Die zentrale Methode, die alle Gamepad-Eingaben für Shortcuts und UI-Navigation verarbeitet.
+        /// The central method that processes all gamepad inputs for shortcuts and UI navigation.
         /// </summary>
-        private void HandleGamepadInput(GamepadButtonFlags currentButtons, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown)
+        // *** FIX: Signature changed to accept 'newPresses' directly from the loop ***
+        private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
-            // Safety check: Do nothing if the window is not in focus.
-            if (!IsWindowInForeground())
-            {
-                _lastButtonState = currentButtons; // Still update the state to prevent false presses on refocus.
-                return;
-            }
+            // *** FIX: All 'IsWindowInForeground' and 'lastButtonState' logic
+            // is now handled by the background loop before this is called. ***
 
-            // Calculate which buttons are newly pressed in this frame.
-            var newPresses = currentButtons & ~_lastButtonState;
-
-            bool navigated = false; // Wird auf true gesetzt, wenn ein Area-Wechsel stattfindet
+            bool navigated = false; // Set to true if an area switch occurs
 
             // --- Contextual Navigation (D-Pad, Left Stick, A, B) ---
+            // The logic here is now correct because 'newPresses' only contains
+            // buttons that were *just* pressed this frame.
             switch (_currentFocusArea)
             {
                 // --- 1. TopButtons Area ---
                 case FocusArea.TopButtons:
                     if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
                     {
-                        // NACH UNTEN: Gehe zurück zur vorherigen Area (Cards oder Launcher)
+                        // DOWN: Go back to the previous area (Cards or Launcher)
                         _currentFocusArea = _previousFocusArea;
-                        _previousTopButtonIndex = _selectedTopButtonIndex; // Merke dir die Position
+                        _previousTopButtonIndex = _selectedTopButtonIndex; // Remember position
 
-                        // Stelle den Index der Ziel-Area wieder her
+                        // Restore the index of the target area
                         if (_currentFocusArea == FocusArea.Cards)
                             _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
                         else if (_currentFocusArea == FocusArea.Launcher)
@@ -6763,14 +6799,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _topButtons.Any())
                     {
-                        // INNERHALB der Area nach rechts navigieren
+                        // Navigate right WITHIN the area
                         _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
                         UpdateVisualFocus();
                         PlayNavigationSound();
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _topButtons.Any())
                     {
-                        // INNERHALB der Area nach links navigieren
+                        // Navigate left WITHIN the area
                         _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
                         UpdateVisualFocus();
                         PlayNavigationSound();
@@ -6782,42 +6818,42 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     break;
 
-                // --- 2. Cards Area (Hauptbereich) ---
+                // --- 2. Cards Area (Main Area) ---
                 case FocusArea.Cards:
                     if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
                     {
-                        // NACH OBEN: Gehe zu den TopButtons
-                        _previousFocusArea = FocusArea.Cards; // Merke dir, woher wir kommen
-                        _previousCardIndex = _selectedCardIndex; // Merke dir die Position
+                        // UP: Go to TopButtons
+                        _previousFocusArea = FocusArea.Cards; // Remember where we came from
+                        _previousCardIndex = _selectedCardIndex; // Remember position
                         _currentFocusArea = FocusArea.TopButtons;
                         _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
                         navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && ProgramCardPanel.Children.Any())
                     {
-                        // INNERHALB der Area nach rechts navigieren
+                        // Navigate right WITHIN the area
                         _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
                         UpdateVisualFocus();
                         PlayNavigationSound();
                     }
                     else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
                     {
-                        // Prüfen, ob überhaupt Karten zum Navigieren vorhanden sind
+                        // Check if there are any cards to navigate
                         if (ProgramCardPanel.Children.Any())
                         {
-                            // Karten sind vorhanden. Prüfen, ob wir an erster Stelle sind.
+                            // Cards exist. Check if we are at the first one.
                             if (_selectedCardIndex == 0)
                             {
-                                // Wir SIND an erster Stelle (Index 0) -> Springe zum Launcher
+                                // We ARE at the first one (Index 0) -> Jump to Launcher
                                 _previousFocusArea = FocusArea.Cards;
                                 _previousCardIndex = 0;
                                 _currentFocusArea = FocusArea.Launcher;
                                 _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                                navigated = true; // Signalisiert einen Area-Wechsel
+                                navigated = true; // Signals an area switch
                             }
                             else
                             {
-                                // Wir sind NICHT an erster Stelle -> Normal nach links navigieren
+                                // We are NOT at the first one -> Navigate left normally
                                 _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
                                 UpdateVisualFocus();
                                 PlayNavigationSound();
@@ -6825,13 +6861,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         }
                         else
                         {
-                            // **DEIN FIX:** Es sind KEINE Karten vorhanden. Ein Druck nach links
-                            // wechselt daher *immer* sofort zum Launcher-Bereich.
+                            // There are NO cards. A press left
+                            // *always* switches to the Launcher area.
                             _previousFocusArea = FocusArea.Cards;
-                            _previousCardIndex = 0; // Index zurücksetzen
+                            _previousCardIndex = 0; // Reset index
                             _currentFocusArea = FocusArea.Launcher;
                             _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                            navigated = true; // Signalisiert einen Area-Wechsel
+                            navigated = true; // Signals an area switch
                         }
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
@@ -6846,33 +6882,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     break;
 
-                // --- 3. Launcher Area (Linke Spalte, wenn aktiv) ---
+                // --- 3. Launcher Area (Left Column, when active) ---
                 case FocusArea.Launcher:
                     if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
                     {
-                        // NACH OBEN: Gehe zu den TopButtons
-                        _previousFocusArea = FocusArea.Launcher; // Merke dir, woher wir kommen
-                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Merke dir die Position
+                        // UP: Go to TopButtons
+                        _previousFocusArea = FocusArea.Launcher; // Remember where we came from
+                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember position
                         _currentFocusArea = FocusArea.TopButtons;
                         _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
                         navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _launcherAreaButtons.Any())
                     {
-                        // NEU: Wrap-Around Prüfung
+                        // Wrap-around check
                         if (_selectedLauncherAreaIndex == _launcherAreaButtons.Count - 1)
                         {
-                            // JA: Springe zu den Cards
-                            _previousFocusArea = FocusArea.Launcher; // Merken für Hoch/Runter
-                            _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Merken für Rücksprung
+                            // YES: Jump to Cards
+                            _previousFocusArea = FocusArea.Launcher; // Remember for Up/Down
+                            _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember for jumping back
                             _currentFocusArea = FocusArea.Cards;
-                            // Setze Fokus auf das ERSTE Card-Item (oder das gemerkte)
+                            // Set focus to the FIRST Card-Item (or the remembered one)
                             _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
-                            navigated = true; // Signalisiert einen Area-Wechsel
+                            navigated = true; // Signals an area switch
                         }
                         else
                         {
-                            // NEIN: Normale Navigation nach rechts
+                            // NO: Normal navigation right
                             _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
                             UpdateVisualFocus();
                             PlayNavigationSound();
@@ -6880,7 +6916,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _launcherAreaButtons.Any())
                     {
-                        // INNERHALB der Area nach links navigieren
+                        // Navigate left WITHIN the area
                         _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
                         UpdateVisualFocus();
                         PlayNavigationSound();
@@ -6969,19 +7005,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     break;
             }
 
-            // Wenn ein Bereichswechsel stattgefunden hat, UI aktualisieren
+            // If an area switch occurred, update the UI
             if (navigated)
             {
                 UpdateVisualFocus();
                 PlayNavigationSound();
             }
-
-            // This must be the VERY LAST line to correctly track the state for the next frame.
-            _lastButtonState = currentButtons;
         }
-        // Used to track the last direction the left / Right stick was pushed to prevent rapid navigation events
-        private int _lastStickXDirection = 0; // -1 for left, 0 for center, 1 for right
-        private int _lastStickYDirection = 0; // -1 for down, 0 for center, 1 for up // <-- Add this line
+
+        private GamepadButtonFlags[] _lastButtonStates = new GamepadButtonFlags[4];
+        private int[] _lastStickXDirections = new int[4];
+        private int[] _lastStickYDirections = new int[4];
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
             if (PowerMenu.Visibility == Visibility.Visible)
@@ -7907,30 +7941,47 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
         // AKTUALISIERT: Diese Methode versteckt jetzt ALLES
+        // This method now intelligently hides components based on settings
         public static void HideTaskbar()
         {
-            // 1. Haupt-Taskleiste (Shell_TrayWnd)
-            HideWindowByClass("Shell_TrayWnd");
+            // Load the settings
+            bool enableTaskbar = false;
+            bool enableStartMenu = false;
 
-            // 2. Taskleiste auf Zweitmonitoren
-            HideWindowByClass("Shell_SecondaryTrayWnd");
+            try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
+            try { enableStartMenu = AppSettings.Load<bool>("enable_startmenu"); } catch { }
 
-            // 3. Das Startmenü (Klasse in Win 11)
-            HideWindowByClass("StartMenu.Internal.Flyout");
+            // --- 1. Taskbar Hiding ---
+            if (!enableTaskbar)
+            {
+                // 1. Main Taskbar (Shell_TrayWnd)
+                HideWindowByClass("Shell_TrayWnd");
 
-            // 4. Das Startmenü (Fallback über Fenstertitel, z.B. Win 10)
-            HideWindowByTitle("Start");
+                // 2. Taskbar on secondary monitors
+                HideWindowByClass("Shell_SecondaryTrayWnd");
+            }
 
-            // 5. Das Suchfenster (Win+S)
-            HideWindowByTitle("Search"); // Englische Version
-            HideWindowByTitle("Suche"); // Deutsche Version
+            // --- 2. Start Menu Hiding ---
+            if (!enableStartMenu)
+            {
+                // 3. The Start menu (Class in Win 11)
+                HideWindowByClass("StartMenu.Internal.Flyout");
 
-            // 6. Das Info-Center / Schnelleinstellungen (Win+A)
-            HideWindowByClass("Windows.UI.Core.CoreWindow"); // Dies ist riskant, aber oft nötig
-            // Besserer Weg für Win 11 Schnelleinstellungen:
+                // 4. The Start menu (Fallback via window title, e.g., Win 10)
+                HideWindowByTitle("Start");
+            }
+
+            // --- 3. Other Shell Elements (We always hide these) ---
+
+            // 5. The Search window (Win+S)
+            HideWindowByTitle("Search"); // English Version
+            HideWindowByTitle("Suche"); // German Version
+
+            // 6. The Action Center / Quick Settings (Win+A)
+            HideWindowByClass("Windows.UI.Core.CoreWindow");
             HideWindowByClass("ControlCenter.Internal.Flyout");
 
-            // 7. Kalender/Benachrichtigungen (Win+N)
+            // 7. Calendar/Notifications (Win+N)
             HideWindowByClass("NativeHWNDHost");
         }
 
