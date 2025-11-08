@@ -5,8 +5,10 @@ using System.Text;
 
 namespace gcmloader
 {
+    #region Data Model for Shortcut Information
+
     /// <summary>
-    /// Stellt Daten dar, die aus einer Windows-Verknüpfungsdatei (.lnk) extrahiert wurden.
+    /// Represents data extracted from a Windows shortcut (.lnk) file.
     /// </summary>
     public class ShortcutData
     {
@@ -17,12 +19,17 @@ namespace gcmloader
         public string IconLocation { get; set; }
     }
 
+    #endregion
+
+    #region Shortcut Resolver Logic
+
     /// <summary>
-    /// Eine Hilfsklasse zum Auflösen von Windows-Verknüpfungen (.lnk) unter Verwendung von P/Invoke mit der IShellLink-Schnittstelle.
+    /// A helper class to resolve Windows shortcuts (.lnk) using P/Invoke with the IShellLink COM interface.
     /// </summary>
     public static class ShortcutResolver
     {
-        #region COM Imports
+        #region Private COM Imports & Constants
+
         [ComImport]
         [Guid("00021401-0000-0000-C000-000000000046")]
         [ClassInterface(ClassInterfaceType.None)]
@@ -65,16 +72,19 @@ namespace gcmloader
             void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
             void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
         }
-        #endregion
 
         private const uint STGM_READ = 0;
         private const int MAX_PATH = 260;
 
+        #endregion
+
+        #region Public Methods
+
         /// <summary>
-        /// Löst eine .lnk-Datei auf und gibt ein Objekt mit ihren Eigenschaften zurück.
+        /// Resolves a .lnk file and returns an object containing its properties.
         /// </summary>
-        /// <param name="linkPath">Der Pfad zur .lnk-Datei.</param>
-        /// <returns>Ein ShortcutData-Objekt oder null bei einem Fehler.</returns>
+        /// <param name="linkPath">The path to the .lnk file.</param>
+        /// <returns>A ShortcutData object with the link's information, or null if an error occurs.</returns>
         public static ShortcutData Resolve(string linkPath)
         {
             if (!File.Exists(linkPath) || !linkPath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
@@ -116,9 +126,14 @@ namespace gcmloader
             }
             finally
             {
+                // Clean up COM objects to prevent memory leaks.
                 if (file != null) Marshal.ReleaseComObject(file);
                 if (link != null) Marshal.ReleaseComObject(link);
             }
         }
+
+        #endregion
     }
+
+    #endregion
 }

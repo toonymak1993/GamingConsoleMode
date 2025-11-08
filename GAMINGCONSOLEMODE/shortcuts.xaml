@@ -43,17 +43,14 @@
                           OnContent="Enabled"
                           Foreground="White"
                           Grid.Column="0"/>
+
                         <TextBlock Text="Turn this on to receive popups when a shortcut is triggered"
                        Foreground="LightGray"
                        VerticalAlignment="Center"
                        Margin="16,0,0,0"
                        Grid.Column="1"/>
                     </Grid>
-
-                   
-
-              
-
+                    
                 </StackPanel>
             </StackPanel>
 

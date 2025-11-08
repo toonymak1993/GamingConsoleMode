@@ -1,12 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.Win32;
 using System;
-using WinRT.Interop;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using Microsoft.UI.Xaml.Media;
+using System.Threading.Tasks;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -18,28 +14,31 @@ namespace GAMINGCONSOLEMODE
     /// </summary>
     public sealed partial class launcher : Page
     {
-       
+
         public launcher()
         {
             this.InitializeComponent();
-           initialui();
+            InitializeUI();
         }
 
-        #region methodes
+        #region Methods
 
-        // Button for SplitView to open/close
+        // Handles the button click to toggle the SplitView pane.
         private void TogglePaneButton_Click(object sender, RoutedEventArgs e)
         {
             splitView.IsPaneOpen = !splitView.IsPaneOpen;
         }
 
-
-        private void initialui()
+        /// <summary>
+        /// Sets up the initial state of the UI based on saved settings.
+        /// </summary>
+        private void InitializeUI()
         {
-
+            // We'll try to load the saved paths. If it fails (e.g., first launch),
+            // the empty catch block will just let it continue gracefully.
             try
             {
-                #region launcher
+                #region Launcher Paths
                 string steamlauncherpath = AppSettings.Load<string>("steamlauncherpath");
                 textbox_steam_path.Text = steamlauncherpath;
 
@@ -48,13 +47,14 @@ namespace GAMINGCONSOLEMODE
 
                 string customlauncherpath = AppSettings.Load<string>("customlauncherpath");
                 textbox_custom_path.Text = customlauncherpath;
+                #endregion
             }
             catch
             {
-
+                // No settings found? No problem. We'll just start with empty text boxes.
             }
-            
 
+            // Figure out which launcher was last selected and set the right toggle switch.
             string launcher = AppSettings.Load<string>("launcher");
             switch (launcher)
             {
@@ -87,7 +87,8 @@ namespace GAMINGCONSOLEMODE
                     break;
 
                 default:
-                    Console.WriteLine("Invalid launcher. Defaulting to Custom.");
+                    // If we find an invalid or no setting, let's just default to Steam.
+                    Console.WriteLine("Invalid launcher setting. Defaulting to Steam.");
                     launcher = "steam";
                     AppSettings.Save("launcher", launcher);
 
@@ -95,84 +96,82 @@ namespace GAMINGCONSOLEMODE
                     use_playnite.IsOn = false;
                     use_custom.IsOn = false;
                     use_xbox.IsOn = false;
-
                     break;
             }
-
         }
 
-        private string getexe()
+        /// <summary>
+        /// Opens a file dialog to let the user pick an executable file.
+        /// </summary>
+        /// <returns>The full path to the selected .exe, or "none" if canceled.</returns>
+        private string GetExePath()
         {
-            // File Picker
             string file = FilePicker.ShowDialog(
-                "C:\\",                            // start directory
-                new string[] { "exe" },            // file types
-                "Executable Files",                // filter name
-                "Select an EXE File"               // dialogue title
+                "C:\\",                         // Where to start looking.
+                new string[] { "exe" },         // We only want .exe files.
+                "Executable Files",             // The description for the filter.
+                "Select an Executable File"     // The title of the dialog window.
             );
 
             if (!string.IsNullOrEmpty(file))
             {
-                // Get Exe Path
-
+                // The user picked a file. Let's return the path.
                 return file;
             }
             else
             {
-                // break
+                // The user canceled the dialog.
                 return "none";
-
             }
         }
 
-        private  async Task checkLauncherActivatedAsync()
+        /// <summary>
+        /// Checks if at least one launcher toggle is active. If not, it shows a popup
+        /// and resets the choice to Steam as a fallback.
+        /// </summary>
+        private async Task CheckLauncherActivatedAsync()
         {
-            if(use_steam_bp.IsOn == false & use_playnite.IsOn == false & use_custom.IsOn == false & use_xbox.IsOn == false)
+            if (use_steam_bp.IsOn == false & use_playnite.IsOn == false & use_custom.IsOn == false & use_xbox.IsOn == false)
             {
-                //messagebox
+                // Whoops, nothing is selected. We need to tell the user and fix it.
                 var dialog = new ContentDialog
                 {
                     Title = "Information",
-                    Content = "Please select at least one launcher. The default launcher will now be set",
+                    Content = "Please select at least one launcher. The default launcher will now be set.",
                     CloseButtonText = "OK",
-                    XamlRoot = this.Content.XamlRoot // IMPORTANT: Links the dialog to the current window
-
-
+                    // This is crucial - it connects the dialog to our app's main window.
+                    XamlRoot = this.Content.XamlRoot
                 };
 
                 await dialog.ShowAsync();
 
+                // Set Steam as the default and save it.
                 AppSettings.Save("launcher", "steam");
-                //ui 
-                initialui();
+
+                // Refresh the UI to reflect the change.
+                InitializeUI();
             }
-
-
         }
 
-        #endregion launcher
+        #endregion Methods
 
+        #region Events
 
+        #region Steam Events
+        private void textbox_steam_path_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            AppSettings.Save("steamlauncherpath", textbox_steam_path.Text);
+            // Refresh the UI to make sure everything's in sync.
+            InitializeUI();
+        }
 
-        #endregion methodes
-
-        #region events
-
-        #region Steam
-         private void textbox_steam_path_TextChanged(object sender, TextChangedEventArgs e)
-                {
-                    AppSettings.Save("steamlauncherpath", textbox_steam_path.Text);
-                    //ui 
-                    initialui();
-                }
-        
         private async void use_steam_bp_Toggled(object sender, RoutedEventArgs e)
         {
             if (use_steam_bp.IsOn == true)
             {
                 AppSettings.Save("launcher", "steam");
-                //ui 
-                initialui();
+                InitializeUI();
+                // Show the relevant settings panel.
                 SteamPanel.Visibility = Visibility.Visible;
                 PlaynitePanel.Visibility = Visibility.Collapsed;
                 CustomPanel.Visibility = Visibility.Collapsed;
@@ -180,58 +179,57 @@ namespace GAMINGCONSOLEMODE
             }
             else
             {
-               await  checkLauncherActivatedAsync();
-               SteamPanel.Visibility = Visibility.Collapsed;
+                // Make sure at least one launcher is still active.
+                await CheckLauncherActivatedAsync();
+                SteamPanel.Visibility = Visibility.Collapsed;
             }
         }
 
         private void pichsteampath_Click(object sender, RoutedEventArgs e)
         {
-            string exepath = getexe();
+            string exepath = GetExePath();
 
             if (exepath == "none")
             {
-                return;
+                return; // User canceled.
             }
 
-            string expectedFileName = "steam.exe"; // Expected file name
+            string expectedFileName = "steam.exe";
             string selectedFile = System.IO.Path.GetFileName(exepath);
 
+            // Let's make sure they picked the right file.
             if (selectedFile.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
             {
-                // Save the path
+                // Looks good. Save the path and update the UI.
                 AppSettings.Save("steamlauncherpath", exepath);
-                // Update UI
-                initialui();
+                InitializeUI();
             }
             else
             {
                 MessageBox.Show($"Please select the correct file: {expectedFileName}", "Invalid File");
             }
         }
+        #endregion
 
-
-        #endregion Steam
-        #region Playnite
+        #region Playnite Events
 
         private void pichplaynitepath_Click(object sender, RoutedEventArgs e)
         {
-            string exepath = getexe();
+            string exepath = GetExePath();
 
             if (exepath == "none")
             {
-                return;
+                return; // User canceled.
             }
 
-            string expectedFileName = "Playnite.FullscreenApp.exe"; // Expected file name
+            string expectedFileName = "Playnite.FullscreenApp.exe";
             string selectedFile = System.IO.Path.GetFileName(exepath);
 
             if (selectedFile.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
             {
-                // Save the path
+                // Correct file. Save and refresh.
                 AppSettings.Save("playnitelauncherpath", exepath);
-                // Update UI
-                initialui();
+                InitializeUI();
             }
             else
             {
@@ -244,8 +242,8 @@ namespace GAMINGCONSOLEMODE
             if (use_playnite.IsOn == true)
             {
                 AppSettings.Save("launcher", "playnite");
-                //ui 
-                initialui();
+                InitializeUI();
+                // Show the Playnite panel and hide the others.
                 SteamPanel.Visibility = Visibility.Collapsed;
                 PlaynitePanel.Visibility = Visibility.Visible;
                 CustomPanel.Visibility = Visibility.Collapsed;
@@ -253,28 +251,25 @@ namespace GAMINGCONSOLEMODE
             }
             else
             {
-                await checkLauncherActivatedAsync();
+                await CheckLauncherActivatedAsync();
                 PlaynitePanel.Visibility = Visibility.Collapsed;
             }
-
         }
 
         private void textbox_playnite_path_TextChanged(object sender, TextChangedEventArgs e)
         {
-                AppSettings.Save("playnitelauncherpath", textbox_playnite_path.Text);
-                //ui 
-                initialui();    
+            AppSettings.Save("playnitelauncherpath", textbox_playnite_path.Text);
+            InitializeUI();
         }
+        #endregion
 
-        #endregion Playnite
-        #region xbox
+        #region Xbox Events
         private async void use_xbox_Toggled(object sender, RoutedEventArgs e)
         {
             if (use_xbox.IsOn == true)
             {
                 AppSettings.Save("launcher", "xbox");
-                //ui 
-                initialui();
+                InitializeUI();
                 SteamPanel.Visibility = Visibility.Collapsed;
                 PlaynitePanel.Visibility = Visibility.Collapsed;
                 CustomPanel.Visibility = Visibility.Collapsed;
@@ -282,120 +277,117 @@ namespace GAMINGCONSOLEMODE
             }
             else
             {
-                await checkLauncherActivatedAsync();
+                await CheckLauncherActivatedAsync();
                 XboxPanel.Visibility = Visibility.Collapsed;
             }
         }
-        #endregion xbox
-        #region CustomLauncher
+        #endregion
+
+        #region Custom Launcher Events
 
         private void pichcustompath_Click(object sender, RoutedEventArgs e)
-                {
-                    string exepath = getexe();
+        {
+            string exepath = GetExePath();
 
-                    if (exepath == "none")
-                    {
-
-                    }
-                    else
-                    {
-                        // Save Path
-                        AppSettings.Save("customlauncherpath", exepath);
-                        //ui 
-                        initialui();
-                    }
-
-                }
+            if (exepath != "none")
+            {
+                // For a custom launcher, any .exe is fine.
+                AppSettings.Save("customlauncherpath", exepath);
+                InitializeUI();
+            }
+        }
 
         private async void use_custom_Toggled(object sender, RoutedEventArgs e)
-                {
-                    if (use_custom.IsOn == true)
-                    {
-                        AppSettings.Save("launcher", "custom");
-                        //ui 
-                        initialui();
-                        SteamPanel.Visibility = Visibility.Collapsed;
-                        PlaynitePanel.Visibility = Visibility.Collapsed;
-                        CustomPanel.Visibility = Visibility.Visible;
+        {
+            if (use_custom.IsOn == true)
+            {
+                AppSettings.Save("launcher", "custom");
+                InitializeUI();
+                SteamPanel.Visibility = Visibility.Collapsed;
+                PlaynitePanel.Visibility = Visibility.Collapsed;
+                CustomPanel.Visibility = Visibility.Visible;
+                XboxPanel.Visibility = Visibility.Collapsed;
             }
-                    else
-                    {
-                        await checkLauncherActivatedAsync();
-                        CustomPanel.Visibility = Visibility.Collapsed;
+            else
+            {
+                await CheckLauncherActivatedAsync();
+                CustomPanel.Visibility = Visibility.Collapsed;
             }
-                }
+        }
 
         private void textbox_custom_path_TextChanged(object sender, TextChangedEventArgs e)
         {
             AppSettings.Save("customlauncherpath", textbox_custom_path.Text);
-            //ui 
-            initialui();
+            InitializeUI();
         }
 
-        #endregion CustomLauncher
+        #endregion
 
+        #endregion Events
+    }
 
-
-
-        #endregion events
-
-
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        public struct OpenFileName
-        {
-            public int lStructSize;
-            public IntPtr hwndOwner;
-            public IntPtr hInstance;
-            public string lpstrFilter;
-            public string lpstrCustomFilter;
-            public int nMaxCustFilter;
-            public int nFilterIndex;
-            public string lpstrFile;
-            public int nMaxFile;
-            public string lpstrFileTitle;
-            public int nMaxFileTitle;
-            public string lpstrInitialDir;
-            public string lpstrTitle;
-            public int Flags;
-            public short nFileOffset;
-            public short nFileExtension;
-            public string lpstrDefExt;
-            public IntPtr lCustData;
-            public IntPtr lpfnHook;
-            public string lpTemplateName;
-            public IntPtr pvReserved;
-            public int dwReserved;
-            public int flagsEx;
-        }
+    /// <summary>
+    /// This static class wraps the native Win32 API for showing a file open dialog.
+    /// It's a bit old-school, but it gets the job done reliably.
+    /// </summary>
     public static class FilePicker
+    {
+        [System.Runtime.InteropServices.DllImport("comdlg32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        private static extern bool GetOpenFileName(ref OpenFileName ofn);
+
+        // Here's an example of how you'd use this:
+        // string filename = FilePicker.ShowDialog("C:\\", new string[] { "png", "jpeg" }, "Image Files", "Select an Image...");
+        public static string ShowDialog(string startingDirectory, string[] filters, string filterName, string dialogTitle)
         {
+            var ofn = new OpenFileName();
+            ofn.lStructSize = System.Runtime.InteropServices.Marshal.SizeOf(ofn);
 
-            [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-            private static extern bool GetOpenFileName(ref OpenFileName ofn);
-
-            // usage: string filename = FilePicker.ShowDialog("C:\\", new string[] { "png", "jpeg", "jpg" }, "Image Files", "Select an Image File...");
-            public static string ShowDialog(string startingDirectory, string[] filters, string filterName, string dialogTitle)
+            // Building the filter string in the format the API expects.
+            ofn.lpstrFilter = filterName;
+            foreach (string filter in filters)
             {
-                var ofn = new OpenFileName();
-                ofn.lStructSize = Marshal.SizeOf(ofn);
-
-                ofn.lpstrFilter = filterName;
-                foreach (string filter in filters)
-                {
-                    ofn.lpstrFilter += $"\0*.{filter}";
-                }
-                ofn.lpstrFile = new string(new char[256]);
-                ofn.nMaxFile = ofn.lpstrFile.Length;
-                ofn.lpstrFileTitle = new string(new char[64]);
-                ofn.nMaxFileTitle = ofn.lpstrFileTitle.Length;
-                ofn.lpstrTitle = dialogTitle;
-                if (GetOpenFileName(ref ofn))
-                    return ofn.lpstrFile;
-                return string.Empty;
+                ofn.lpstrFilter += $"\0*.{filter}";
             }
-        }
 
-       
+            ofn.lpstrFile = new string(new char[256]);
+            ofn.nMaxFile = ofn.lpstrFile.Length;
+            ofn.lpstrFileTitle = new string(new char[64]);
+            ofn.nMaxFileTitle = ofn.lpstrFileTitle.Length;
+            ofn.lpstrTitle = dialogTitle;
+            ofn.lpstrInitialDir = startingDirectory;
+
+            if (GetOpenFileName(ref ofn))
+                return ofn.lpstrFile;
+
+            return string.Empty; // Return an empty string if the user cancels.
+        }
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    public struct OpenFileName
+    {
+        public int lStructSize;
+        public IntPtr hwndOwner;
+        public IntPtr hInstance;
+        public string lpstrFilter;
+        public string lpstrCustomFilter;
+        public int nMaxCustFilter;
+        public int nFilterIndex;
+        public string lpstrFile;
+        public int nMaxFile;
+        public string lpstrFileTitle;
+        public int nMaxFileTitle;
+        public string lpstrInitialDir;
+        public string lpstrTitle;
+        public int Flags;
+        public short nFileOffset;
+        public short nFileExtension;
+        public string lpstrDefExt;
+        public IntPtr lCustData;
+        public IntPtr lpfnHook;
+        public string lpTemplateName;
+        public IntPtr pvReserved;
+        public int dwReserved;
+        public int flagsEx;
     }
 }
-

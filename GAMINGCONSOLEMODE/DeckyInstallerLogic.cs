@@ -13,18 +13,19 @@ namespace GAMINGCONSOLEMODE
         private const string DOWNLOAD_URL = "https://nightly.link/SteamDeckHomebrew/decky-loader/workflows/build-win/main/PluginLoader%20Win.zip";
         private readonly HttpClient _httpClient;
 
-        // Events, um die Benutzeroberfläche über Änderungen zu informieren
+        // Events to let the UI know what's happening.
         public event Action<string>? StatusUpdated;
-        public event Action<int>? ProgressChanged; // Gibt den Fortschritt in Prozent (0-100) zurück
+        public event Action<int>? ProgressChanged; // Reports progress as a percentage (0-100).
 
         public DeckyInstallerLogic()
         {
             _httpClient = new HttpClient();
+            // Some websites are picky, so let's pretend we're a regular browser.
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
         }
 
         /// <summary>
-        /// Führt den gesamten Installationsprozess für Decky Loader aus (ohne Autostart).
+        /// Kicks off the whole installation process for Decky Loader (autostart is not handled here).
         /// </summary>
         public async Task ExecuteInstallationAsync()
         {
@@ -54,6 +55,7 @@ namespace GAMINGCONSOLEMODE
                 ReportProgress(++currentStep, totalSteps, "Creating Steam shortcut...");
                 if (!CreateSteamShortcut()) throw new Exception("Failed to create Steam shortcut");
 
+                // Clean up the downloaded zip file. No need to leave it lying around.
                 try { File.Delete(zipPath); } catch { }
 
                 ReportProgress(totalSteps, totalSteps, "Installation complete!");
@@ -61,12 +63,12 @@ namespace GAMINGCONSOLEMODE
             catch (Exception ex)
             {
                 StatusUpdated?.Invoke($"Error: {ex.Message}");
-                throw;
+                throw; // Rethrow the exception so the caller knows something went wrong.
             }
         }
 
         /// <summary>
-        /// Macht alle Änderungen der Installation rückgängig.
+        /// This method undoes all the changes made by the installer.
         /// </summary>
         public async Task ExecuteUninstallationAsync()
         {
@@ -76,7 +78,7 @@ namespace GAMINGCONSOLEMODE
 
             try
             {
-                // Schritt 1: Desktop-Verknüpfung entfernen
+                // Step 1: Get rid of the desktop shortcut.
                 ReportProgress(++currentStep, totalSteps, "Removing desktop shortcut...");
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                 string desktopShortcut = Path.Combine(desktopPath, "Steam (Decky).lnk");
@@ -90,7 +92,7 @@ namespace GAMINGCONSOLEMODE
                     StatusUpdated?.Invoke("Desktop shortcut not found, skipping.");
                 }
 
-                // Schritt 2: Steam-Debugging-Datei entfernen
+                // Step 2: Remove the Steam debugging file.
                 ReportProgress(++currentStep, totalSteps, "Removing Steam CEF debugging file...");
                 string steamPath = GetSteamPath();
                 if (!string.IsNullOrEmpty(steamPath) && Directory.Exists(steamPath))
@@ -103,12 +105,12 @@ namespace GAMINGCONSOLEMODE
                     }
                 }
 
-                // Schritt 3: Homebrew-Verzeichnis entfernen
+                // Step 3: Nuke the homebrew directory.
                 ReportProgress(++currentStep, totalSteps, "Removing homebrew directories...");
                 string homebrewDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "homebrew");
                 if (Directory.Exists(homebrewDir))
                 {
-                    Directory.Delete(homebrewDir, true); // true = rekursiv, löscht alles darin
+                    Directory.Delete(homebrewDir, true); // true = recursive, so it deletes everything inside.
                     StatusUpdated?.Invoke("Homebrew directory and its contents removed.");
                 }
 
@@ -122,7 +124,7 @@ namespace GAMINGCONSOLEMODE
         }
 
         /// <summary>
-        /// Prüft, ob Python installiert ist, und installiert es bei Bedarf.
+        /// Checks if Python is installed. If not, it handles the installation.
         /// </summary>
         public async Task EnsurePythonInstalled()
         {
@@ -144,12 +146,13 @@ namespace GAMINGCONSOLEMODE
                 if (process.ExitCode == 0)
                 {
                     StatusUpdated?.Invoke("Python is already installed.");
-                    return;
+                    return; // We're good to go.
                 }
             }
             catch
             {
-                // Process.Start schlägt fehl, wenn "python" nicht im PATH gefunden wird.
+                // Process.Start will throw an exception if it can't find "python" in the PATH.
+                // That's our cue to install it.
             }
 
             StatusUpdated?.Invoke("Python not found. Downloading Python installer...");
@@ -165,7 +168,7 @@ namespace GAMINGCONSOLEMODE
                 FileName = installerPath,
                 Arguments = "/quiet InstallAllUsers=1 PrependPath=1",
                 UseShellExecute = true,
-                Verb = "runas"
+                Verb = "runas" // This will trigger the UAC prompt for admin rights.
             };
 
             using (var process = Process.Start(installProcessInfo))
@@ -178,14 +181,14 @@ namespace GAMINGCONSOLEMODE
             }
 
             StatusUpdated?.Invoke("Python installation successful.");
-            File.Delete(installerPath);
+            File.Delete(installerPath); // Clean up after ourselves.
         }
 
         private void ReportProgress(int current, int total, string message)
         {
             StatusUpdated?.Invoke(message);
             int percentage = (int)((double)current / total * 100);
-            ProgressChanged?.Invoke(Math.Min(100, percentage));
+            ProgressChanged?.Invoke(Math.Min(100, percentage)); // Don't let it go over 100%.
         }
 
         private async Task<bool> SetupSteamDebug()
@@ -198,6 +201,7 @@ namespace GAMINGCONSOLEMODE
                     throw new Exception("Steam installation directory not found");
                 }
 
+                // This empty file is all Steam needs to see to enable CEF debugging.
                 string debugFile = Path.Combine(steamPath, ".cef-enable-remote-debugging");
                 await File.WriteAllTextAsync(debugFile, "");
                 StatusUpdated?.Invoke("Created .cef-enable-remote-debugging file.");
@@ -217,6 +221,7 @@ namespace GAMINGCONSOLEMODE
                 string homebrewDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "homebrew");
                 string servicesDir = Path.Combine(homebrewDir, "services");
 
+                // These methods won't complain if the directories already exist, which is perfect.
                 Directory.CreateDirectory(homebrewDir);
                 Directory.CreateDirectory(servicesDir);
 
@@ -245,6 +250,7 @@ namespace GAMINGCONSOLEMODE
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                 string shortcutPath = Path.Combine(desktopPath, "Steam (Decky).lnk");
 
+                // Using PowerShell to create a shortcut is a bit of a hack, but it's reliable.
                 string psCommand = $@"$WshShell = New-Object -ComObject WScript.Shell; " +
                                      $@"$Shortcut = $WshShell.CreateShortcut('{shortcutPath}'); " +
                                      $@"$Shortcut.TargetPath = '{steamExe}'; " +
@@ -270,13 +276,15 @@ namespace GAMINGCONSOLEMODE
         private string GetSteamPath()
         {
             string? steamPath = null;
+            // First, let's try the registry key for 64-bit systems.
             try
             {
                 using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam");
                 steamPath = key?.GetValue("InstallPath") as string;
             }
-            catch { }
+            catch { /* Best not to crash if registry access fails. */ }
 
+            // If that didn't work, try the 32-bit key.
             if (string.IsNullOrEmpty(steamPath))
             {
                 try
@@ -284,9 +292,10 @@ namespace GAMINGCONSOLEMODE
                     using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam");
                     steamPath = key?.GetValue("InstallPath") as string;
                 }
-                catch { }
+                catch { /* Again, silence is golden. */ }
             }
 
+            // If we still can't find it, fall back to the default location.
             if (string.IsNullOrEmpty(steamPath))
             {
                 steamPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam");

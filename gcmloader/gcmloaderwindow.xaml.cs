@@ -30,7 +30,6 @@ using System.Net.Http.Headers;
 using System.Numerics; 
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Principal;
 using System.ServiceProcess;
@@ -41,20 +40,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using Tomlyn;
 using Tomlyn.Model;
-using Windows.ApplicationModel;
+using Vanara.PInvoke;
 using Windows.Devices.Power;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Networking.Connectivity;
 using Windows.System;
-using static System.Net.Mime.MediaTypeNames;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
 using Application = Microsoft.UI.Xaml.Application;
 using Button = Microsoft.UI.Xaml.Controls.Button;
 using Color = Windows.UI.Color;
 using Image = Microsoft.UI.Xaml.Controls.Image;
-using Point = System.Drawing.Point;
 using Process = System.Diagnostics.Process;
 using Task = System.Threading.Tasks.Task;
 
@@ -158,6 +155,7 @@ namespace gcmloader
         private const long WS_BORDER = 0x00800000L;
         private const long WS_SYSMENU = 0x00080000L;
         private const long WS_MINIMIZEBOX = 0x00020000L;
+
         #endregion playnite launcher window
         #region ui status
         private DispatcherTimer _statusUpdateTimer;
@@ -181,7 +179,12 @@ namespace gcmloader
         private bool startupVideoFinished = false;
         private bool _isVideoPlaybackInitiated = false;
         #endregion
-        #region steamgriddb
+        #region steamgriddb - picture for taskmanager
+
+        // Cache for the local name search
+        private List<string> _steamLibraryPathsCache = null;
+        private Dictionary<string, string> _localGameNameCache = new Dictionary<string, string>();
+
         public record SearchResult(int id, string name);
         public record SearchResponse(bool success, SearchResult[] data);
         public record ImageResult(string url);
@@ -198,7 +201,7 @@ namespace gcmloader
 
             private readonly HttpClient _httpClient = new();
             private readonly string _apiKey;
-
+            public bool IsApiKeySet => !string.IsNullOrEmpty(_apiKey);
             public SteamGridDBHelper(string apiKey)
             {
                 _apiKey = apiKey;
@@ -259,11 +262,291 @@ namespace gcmloader
                 return null;
             }
         }
-        #endregion dsteamgriddb
+
+
+        private string GetSteamInstallPath()
+        {
+            try
+            {
+                // Try reading the 64-bit path first
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam"))
+                {
+                    if (key != null)
+                    {
+                        var path = key.GetValue("InstallPath")?.ToString();
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            return path;
+                        }
+                    }
+                }
+
+                // Fallback to the 32-bit path
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam"))
+                {
+                    if (key != null)
+                    {
+                        var path = key.GetValue("InstallPath")?.ToString();
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            return path;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetSteamInstallPath] Error reading registry: {ex.Message}");
+            }
+            return null;
+        }
+
+        // DEBUG-LOGGING-VERSION (ENGLISH) - V3 (Correct Manifest Path)
+        private string GetSteamAppIdFromExePath(string exePath) // steamInstallPath parameter removed
+        {
+            Logger.Log($"[DEBUG] GetSteamAppIdFromExePath started.\n    EXE-Path: {exePath}");
+
+            try
+            {
+                // 1. Get the game's directory from the exe path
+                var gameDirectoryInfo = new DirectoryInfo(Path.GetDirectoryName(exePath));
+
+                // 2. Check if it's actually in a "steamapps\common" folder.
+                if (!gameDirectoryInfo.FullName.Contains(@"steamapps\common", StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Log("[DEBUG] GetSteamAppIdFromExePath: Path is not in 'steamapps\\common'. Aborting.");
+                    return null; // Not a Steam game library
+                }
+
+                // ==================================================================
+                // ### START OF FIX V3 ###
+                // Find both the game install name AND the correct manifest folder
+
+                string gameInstallName = null;
+                DirectoryInfo manifestFolderDir = null;
+                DirectoryInfo currentDir = gameDirectoryInfo; // e.g., .../Win64
+
+                // Loop safeguard: max 10 levels up, and stop if we hit the drive root
+                for (int i = 0; i < 10 && currentDir != null && currentDir.Parent != null; i++)
+                {
+                    // Is the PARENT "common"?
+                    if (currentDir.Parent.Name.Equals("common", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Yes. So CURRENT is the game folder
+                        gameInstallName = currentDir.Name; // "Days Gone"
+
+                        // And the PARENT of "common" must be "steamapps"
+                        if (currentDir.Parent.Parent != null && currentDir.Parent.Parent.Name.Equals("steamapps", StringComparison.OrdinalIgnoreCase))
+                        {
+                            manifestFolderDir = currentDir.Parent.Parent; // "D:\SteamLibrary\steamapps"
+                            break; // Found everything!
+                        }
+                    }
+                    currentDir = currentDir.Parent; // Move up
+                }
+
+                // 4. Check if we found both
+                if (string.IsNullOrEmpty(gameInstallName) || manifestFolderDir == null)
+                {
+                    Logger.Log($"[DEBUG] GetSteamAppIdFromExePath: Could not find 'steamapps/common/GameName' structure. Aborting.");
+                    return null;
+                }
+
+                string manifestFolder = manifestFolderDir.FullName;
+                Logger.Log($"[DEBUG] GetSteamAppIdFromExePath: Found game folder name: '{gameInstallName}'");
+                Logger.Log($"[DEBUG] GetSteamAppIdFromExePath: Scanning *correct* manifest folder: {manifestFolder}");
+
+                // ### END OF FIX V3 ###
+                // ==================================================================
+
+                // 6. Search all appmanifest_*.acf files in that *correct* folder
+                foreach (var file in Directory.EnumerateFiles(manifestFolder, "appmanifest_*.acf"))
+                {
+                    string content = File.ReadAllText(file);
+
+                    // 7. Check if the manifest file points to our game's "installdir"
+                    // Regex checks if the value *starts with* our game name
+                    string pattern = $"\"installdir\"\\s+\"{Regex.Escape(gameInstallName)}[^\"]*\"";
+
+                    if (Regex.IsMatch(content, pattern, RegexOptions.IgnoreCase))
+                    {
+                        // 8. If yes, extract the AppID from the filename
+                        var match = Regex.Match(Path.GetFileName(file), @"appmanifest_(\d+)\.acf");
+                        if (match.Success)
+                        {
+                            string foundAppId = match.Groups[1].Value;
+                            Logger.Log($"[DEBUG] GetSteamAppIdFromExePath: SUCCESS!\n    File: {file}\n    AppID found: {foundAppId}");
+                            return foundAppId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[DEBUG] GetSteamAppIdFromExePath: ERROR searching for AppID for {exePath}: {ex.Message}");
+            }
+
+            Logger.Log($"[DEBUG] GetSteamAppIdFromExePath: No AppID found for '{exePath}'.");
+            return null; // Nothing found
+        }
+
+        private async Task<string> SearchCacheFolderForImageAsync(string appCacheDirectory)
+        {
+            if (!Directory.Exists(appCacheDirectory))
+            {
+                Logger.Log($"[DEBUG] SearchCache: Cache folder does not exist: {appCacheDirectory}");
+                return null;
+            }
+
+            Logger.Log($"[DEBUG] SearchCache: Scanning for images in {appCacheDirectory}...");
+
+            // ==================================================================
+            // ### START OF FIX V5 (Prioritized Search) ###
+            // ==================================================================
+
+            string preferredImage = null;
+            string fallbackImage = null;
+            string librarySearchPattern = "library_*.jpg";
+            string headerSearchPattern = "library_header.jpg";
+
+            // Get all subdirectories (e.g., "0c47d1...")
+            string[] subDirectories = await Task.Run(() => Directory.GetDirectories(appCacheDirectory));
+
+            // --- PASS 1: Search ALL subfolders for the PREFERRED image (poster) ---
+            foreach (string subDir in subDirectories)
+            {
+                string[] libraryFiles = await Task.Run(() => Directory.GetFiles(subDir, librarySearchPattern));
+                if (libraryFiles.Length > 0)
+                {
+                    preferredImage = libraryFiles[0]; // Found the best type
+                    Logger.Log($"[DEBUG] SearchCache: SUCCESS! (Pass 1) Found preferred poster in subfolder: {preferredImage}");
+                    return preferredImage;
+                }
+            }
+
+            // --- PASS 2: Search the ROOT folder for the PREFERRED image ---
+            string[] rootLibraryFiles = await Task.Run(() => Directory.GetFiles(appCacheDirectory, librarySearchPattern));
+            if (rootLibraryFiles.Length > 0)
+            {
+                preferredImage = rootLibraryFiles[0];
+                Logger.Log($"[DEBUG] SearchCache: SUCCESS! (Pass 2) Found preferred poster in root: {preferredImage}");
+                return preferredImage;
+            }
+
+            Logger.Log($"[DEBUG] SearchCache: (Pass 1 & 2) No preferred poster (library_*.jpg) found. Starting search for fallback (library_header.jpg)...");
+
+            // --- PASS 3: Search ALL subfolders for the FALLBACK image (header) ---
+            foreach (string subDir in subDirectories)
+            {
+                string localHeaderImage = Path.Combine(subDir, headerSearchPattern);
+                if (await Task.Run(() => File.Exists(localHeaderImage)))
+                {
+                    fallbackImage = localHeaderImage; // Found a fallback
+                    Logger.Log($"[DEBUG] SearchCache: WARNING! (Pass 3) No poster found. Returning fallback header from subfolder: {fallbackImage}");
+                    return fallbackImage;
+                }
+            }
+
+            // --- PASS 4: Search the ROOT folder for the FALLBACK image ---
+            string rootHeaderImage = Path.Combine(appCacheDirectory, headerSearchPattern);
+            if (await Task.Run(() => File.Exists(rootHeaderImage)))
+            {
+                fallbackImage = rootHeaderImage;
+                Logger.Log($"[DEBUG] SearchCache: WARNING! (Pass 4) No poster found. Returning fallback header from root: {fallbackImage}");
+                return fallbackImage;
+            }
+
+            // ### END OF FIX V5 ###
+            // ==================================================================
+
+            Logger.Log($"[DEBUG] SearchCache: No image found in root or subfolders.");
+            return null;
+        }
+
+      
+        private async Task<string> FindLocalSteamImageAsync(string exePath)
+        {
+            Logger.Log($"[DEBUG] FindLocalSteamImageAsync started. Searching for: {exePath}");
+            try
+            {
+                // --- Priority 1 & 2: Check game's .exe folder and parent folder ---
+                string exeDirectory = Path.GetDirectoryName(exePath);
+                if (Directory.Exists(exeDirectory))
+                {
+                    string[] foundFiles = await Task.Run(() =>
+                        Directory.GetFiles(exeDirectory, "library_*.jpg"));
+                    if (foundFiles.Length > 0)
+                    {
+                        Logger.Log($"[DEBUG] Prio 1 (EXE-Folder): Image found: {foundFiles[0]}");
+                        return foundFiles[0];
+                    }
+                    string headerPath = Path.Combine(exeDirectory, "header.jpg");
+                    if (File.Exists(headerPath))
+                    {
+                        Logger.Log($"[DEBUG] Prio 1 (EXE-Folder): 'header.jpg' found: {headerPath}");
+                        return headerPath;
+                    }
+                }
+                DirectoryInfo parentDir = Directory.GetParent(exeDirectory);
+                if (parentDir != null)
+                {
+                    string parentDirectoryPath = parentDir.FullName;
+                    string[] foundParentFiles = await Task.Run(() =>
+                        Directory.GetFiles(parentDirectoryPath, "library_*.jpg"));
+                    if (foundParentFiles.Length > 0)
+                    {
+                        Logger.Log($"[DEBUG] Prio 2 (Parent-Folder): Image found: {foundParentFiles[0]}");
+                        return foundParentFiles[0];
+                    }
+                    string headerParentPath = Path.Combine(parentDirectoryPath, "header.jpg");
+                    if (File.Exists(headerParentPath))
+                    {
+                        Logger.Log($"[DEBUG] Prio 2 (Parent-Folder): 'header.jpg' found: {headerParentPath}");
+                        return headerParentPath;
+                    }
+                }
+                Logger.Log($"[DEBUG] Prio 1 & 2: No image found in game folders.");
+
+
+                // --- Priority 3: Check the central Steam Cache (Primary method) ---
+                string steamAppId = await Task.Run(() => GetSteamAppIdFromExePath(exePath));
+                string steamInstallPath = GetSteamInstallPath();
+
+                Logger.Log($"[DEBUG] Prio 3 (Steam-Cache):\n    Image Cache Path (C:): {steamInstallPath}\n    Found AppID (from D:): {(string.IsNullOrEmpty(steamAppId) ? "NONE" : steamAppId)}");
+
+                if (string.IsNullOrEmpty(steamInstallPath) || string.IsNullOrEmpty(steamAppId))
+                {
+                    Logger.Log("[DEBUG] Prio 3: Steam path or AppID is invalid. Skipping Steam-Cache search.");
+                    return null;
+                }
+
+            
+                string appCacheDirectory = Path.Combine(steamInstallPath, "appcache", "librarycache", steamAppId);
+                string imagePath = await SearchCacheFolderForImageAsync(appCacheDirectory);
+
+                if (!string.IsNullOrEmpty(imagePath))
+                {
+                    return imagePath; // SUCCESS!
+                }
+                // ### END OF FIX V5 ###
+                // ==================================================================
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[DEBUG] FindLocalSteamImageAsync: FATAL ERROR: {ex.Message}");
+            }
+
+            Logger.Log("[DEBUG] FindLocalSteamImageAsync: Search finished. NO local image found.");
+            return null;
+        }
+
+
+        #endregion dsteamgriddb - picture for taskmanager
 
         private List<Border> _launcherAreaButtons;
         private List<ProcessData> _latestProcessData = new();
         private int _selectedLauncherAreaIndex = 0;
+
         [DllImport("powrprof.dll", SetLastError = true)]
         private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
         [DllImport("user32.dll")]
@@ -322,48 +605,6 @@ namespace gcmloader
                 Debug.WriteLine("Grace period ended, but window regained focus. No action taken.");
             }
         }
-
-        private void ResizeWindowToFillScreen(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return;
-
-            try
-            {
-                // Get the size of the entire window, including any invisible borders
-                GetWindowRect(hwnd, out RECT windowRect);
-                // Get the size of the client area (the visible content inside the borders)
-                GetClientRect(hwnd, out RECT clientRect);
-
-                // Calculate the total size of the non-client area (the borders)
-                int nonClientWidth = (windowRect.Right - windowRect.Left) - clientRect.Right;
-                int nonClientHeight = (windowRect.Bottom - windowRect.Top) - clientRect.Bottom;
-
-                // Get the target screen dimensions
-                int screenWidth = GetScreenWidth();
-                int screenHeight = GetScreenHeight();
-
-                // Calculate the new size and position. We make the window larger than the screen
-                // and move it slightly off-screen to hide the invisible borders.
-                int newWidth = screenWidth + nonClientWidth;
-                int newHeight = screenHeight + nonClientHeight;
-                int newX = -(nonClientWidth / 2);
-                int newY = -(nonClientHeight / 2);
-
-                Debug.WriteLine($"Resizing window to {newWidth}x{newHeight} at ({newX},{newY}) to perfectly fill the screen.");
-
-                // Apply the new position and size
-                SetWindowPos(hwnd, IntPtr.Zero, newX, newY, newWidth, newHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed to force-resize window: {ex.Message}");
-            }
-        }
-
-        /// Wird jede Sekunde vom Timer aufgerufen.
-        /// </summary>
-        /// <summary>
-        /// 
 
         private void AnimateOverlayOpacity(UIElement element, double toOpacity, bool hideWhenDone = false)
         {
@@ -764,6 +1005,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         public MainWindow()
         {
+            Logger.Initialize();
             this.InitializeComponent();
            
             perfectsettings();
@@ -1330,6 +1572,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             }
 
+            // Add setting for the taskbar toggle
+            try
+            {
+                AppSettings.Load<bool>("enable_taskbar");
+            }
+            catch
+            {
+                // if not set, set it to false (Disabled)
+                AppSettings.Save("enable_taskbar", false);
+            }
+
+            // Add setting for the start menu toggle
+            try
+            {
+                AppSettings.Load<bool>("enable_startmenu");
+            }
+            catch
+            {
+                // if not set, set it to false (Disabled)
+                AppSettings.Save("enable_startmenu", false);
+            }
+
         }
 
         #region mainwindow design
@@ -1560,42 +1824,57 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-
-        /// <summary>
-        /// Starts a background loop that persistently hides the taskbar.
-        /// This is an aggressive method to fight against the OS trying to reshow it.
-        /// </summary>
         private void StartTaskbarHidingLoop()
         {
             try
             {
+                // Stop any previous loop if it exists
+                _taskbarHiderCts?.Cancel();
                 _taskbarHiderCts = new CancellationTokenSource();
+
                 Task.Run(async () =>
                 {
-                    Debug.WriteLine("Starting persistent taskbar hiding loop...");
+                    // *** ADD THIS CHECK ***
+                    bool enableTaskbar = false;
+                    try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
+
+                    if (enableTaskbar)
+                    {
+                        Debug.WriteLine("Taskbar is set to ENABLED. Skipping persistent hiding loop.");
+                        // If taskbar is enabled, we must ensure it's visible.
+                        TaskbarVisibility.ShowTaskbar();
+                        return; // Exit the task
+                    }
+                    // *** END OF ADDITION ***
+
+                    Debug.WriteLine("Starting persistent taskbar hiding loop...");
                     while (!_taskbarHiderCts.Token.IsCancellationRequested)
                     {
-                        // Use your robust hide method
-                        TaskbarVisibility.HideTaskbar();
+                        // Use your robust hide method
+                        TaskbarVisibility.HideTaskbar();
                         try
                         {
-                            // Check and hide 4 times per second.x
-                            await Task.Delay(50, _taskbarHiderCts.Token);
+                            // Check and hide 4 times per second.x
+                            await Task.Delay(50, _taskbarHiderCts.Token);
                         }
                         catch (TaskCanceledException)
                         {
-                            // This is expected when we stop the loop.
-                            Debug.WriteLine("Taskbar hiding loop stopped.");
-                        }
+                            // This is expected when we stop the loop.
+                            Debug.WriteLine("Taskbar hiding loop stopped.");
+                            break; // Exit the while loop
+                        }
                     }
-                    Debug.WriteLine("Taskbar hiding loop stopped.");
+                    Debug.WriteLine("Taskbar hiding loop task finished.");
                 }, _taskbarHiderCts.Token);
             }
-            catch
+            catch (Exception ex)
             {
-                //error or not ready at this time, repeat
+                Debug.WriteLine($"Error starting taskbar hider: {ex.Message}");
             }
         }
+
+
+
 
         private static void StopOverlay()
         {
@@ -2778,35 +3057,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Brings a window robustly to the foreground and performs a focus correction
         /// for Playnite by clicking in the top-right and sending an Escape signal.
         /// </summary>
-        private void ForceWindowToTrueFullscreen(IntPtr hWnd)
-        {
-            if (hWnd == IntPtr.Zero) return;
-
-            // Get the absolute screen resolution.
-            int screenWidth = GetScreenWidth();
-            int screenHeight = GetScreenHeight();
-
-            // Set the window's position to (0,0) and its size to the full screen resolution.
-            // This is more aggressive than SW_SHOWMAXIMIZED.
-            SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
-        }
+        /// 
         private async Task ForcefullyBringToForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
 
-            // Step 1: Reliably bring the window to focus and maximize it to the work area.
-            ShowWindow(hWnd, SW_SHOWMAXIMIZED);
-            await Task.Delay(100);
-
-            string launcher = AppSettings.Load<string>("launcher");
-            if (launcher == "playnite" || launcher == "steam")
-            {
-                // Step 2: Force it to true fullscreen to cover any taskbar remnants.
-                ForceWindowToTrueFullscreen(hWnd);
-            }
-
-            // Step 3: Ensure the window is truly the foreground window.
-            await Task.Delay(150);
+            // --- Step 1: Reliably bring the window to the front ---
+            // (This remains the most stable way to gain focus)
             IntPtr foregroundHwnd = GetForegroundWindow();
             if (foregroundHwnd != hWnd)
             {
@@ -2817,26 +3074,57 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AttachThreadInput(ourThreadId, foregroundThreadId, false);
             }
 
-            // Step 4: Perform the specific focus correction for Playnite.
+            // Ensure the window is visible before we manipulate it
+            if (IsIconic(hWnd)) { ShowWindow(hWnd, SW_RESTORE); }
+            else { ShowWindow(hWnd, 5); } // SW_SHOW
+
+            string launcher = AppSettings.Load<string>("launcher");
             if (launcher == "playnite")
             {
+                // Give the window a moment to become active
+                await Task.Delay(250);
+
+                // --- Step 2: Aggressively force true borderless fullscreen ---
                 try
                 {
-                    // Make the cursor invisible for the operation.
+                    Debug.WriteLine($"[GCM] Forcing true borderless fullscreen for Playnite (Handle: {hWnd}).");
+
+                    // Get the current window style
+                    long style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+
+                    // Remove all border, caption, and menu styles
+                    style &= ~(WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+
+                    // Apply the new, "naked" style
+                    SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)style);
+
+                    // Get the absolute screen resolution
+                    int screenWidth = GetScreenWidth();
+                    int screenHeight = GetScreenHeight();
+
+                    // Resize and position the now-borderless window to cover the entire screen
+                    SetWindowPos(hWnd, HWND_TOP, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GCM] Failed to apply borderless style: {ex.Message}");
+                }
+
+                // Give the UI a moment to settle after resizing
+                await Task.Delay(300);
+
+                // --- Step 3: The physical focus correction (Click THEN Escape) ---
+                try
+                {
+                    // Make the cursor invisible
                     while (ShowCursor(false) >= 0) ;
                     await Task.Delay(32);
 
-                    // Wait for the Playnite UI to settle.
-                    await Task.Delay(300);
-
-                    // --- 4.1: CLICK FIRST to secure focus ---
+                    // 3.1: CLICK FIRST (Top Center)
                     int screenWidth = GetScreenWidth();
                     int screenHeight = GetScreenHeight();
                     int dpiY = GetDpiY();
                     int offsetY = (int)((0.5 / 2.54) * dpiY);
-
-                    // ### THE CHANGE IS HERE ###
-                    // Calculate the click position: top-CENTER, offset by 0.5 cm down.
                     int clickX = screenWidth / 2;
                     int clickY = offsetY;
 
@@ -2845,18 +3133,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     await Task.Delay(50);
                     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
 
-                    // --- 4.2: SEND ESCAPE SECOND to close any open menus ---
+                    // 3.2: ESCAPE SECOND
                     await Task.Delay(50);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                     keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
-                    // --- 4.3: Move the cursor away to a corner ---
+                    // 3.3: Move cursor away
                     SetCursorPos(screenWidth - 1, screenHeight - 1);
                     Debug.WriteLine($"[GCM] Playnite focus correction: Clicked at ({clickX},{clickY}), sent Escape, and hid cursor.");
                 }
                 finally
                 {
-                    // No matter what, make the cursor visible again.
+                    // No matter what happens, make the cursor visible again
                     while (ShowCursor(true) < 0) ;
                 }
             }
@@ -2874,9 +3162,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 switch (launcher)
                 {
                     case "steam":
-                        // ### FINALE LÖSUNG FÜR STEAM ###
-                        // Wir verwenden IMMER den direkten Protokoll-Befehl. 
-                        // Er holt ein laufendes Steam nach vorne oder startet es, falls nötig.
+                        //Steam in foreground
                         Debug.WriteLine("[GCM] Nutze Steam-Protokoll für den Wechsel: steam://open/gamepadui");
                         Process.Start(new ProcessStartInfo("steam://open/gamepadui")
                         {
@@ -2885,21 +3171,35 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         return; // Fertig.
 
                     case "playnite":
-                        // Die Logik für Playnite funktioniert perfekt und bleibt unangetastet.
-                        string processNameToFind = "Playnite.FullscreenApp";
-                        Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
-                        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+                        // Starte Playnite oder bringe es in den Vordergrund
+                        // via Protokoll-Befehl (URI).
+                        Debug.WriteLine("[GCM] Starte/Wiederherstelle Playnite via Protokoll: playnite://playnite/restore");
+                        try
                         {
-                            await ForcefullyBringToForeground(proc.MainWindowHandle);
+                            Process.Start(new ProcessStartInfo("playnite://playnite/restore")
+                            {
+                                UseShellExecute = true
+                            });
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            await StartPlaynite();
+                            string processNameToFind = "Playnite.FullscreenApp";
+                            Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
+                            if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+                            {
+                                await ForcefullyBringToForeground(proc.MainWindowHandle);
+                            }
+
+                            else
+                            {
+                                await StartPlaynite();
+                            }
+                            return;
                         }
                         return;
 
                     case "custom":
-                        // Die Logik für Custom Launcher bleibt ebenfalls unverändert.
+                       
                         string customPath = AppSettings.Load<string>("customlauncherpath");
                         string customProcessName = Path.GetFileNameWithoutExtension(customPath);
                         Process customProc = Process.GetProcessesByName(customProcessName).FirstOrDefault();
@@ -2914,7 +3214,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         return;
 
                     case "xbox":
-                        // Die Logik für Xbox verwendet bereits den Protokoll-Befehl und ist optimal.
+                        // over xbox protokoll
                         Process.Start(new ProcessStartInfo("xbox:") { UseShellExecute = true });
                         return;
                 }
@@ -2924,9 +3224,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine($"[GCM] Fehler während des Launcher-Wechsels: {ex.Message}");
             }
         }
-
-
-
         private static void MaximizeXboxWindow(IntPtr hwnd)
         {
             // Prüft, ob ein gültiges Fenster-Handle übergeben wurde
@@ -3686,18 +3983,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         Console.WriteLine("Decky Loader executable not found, starting Steam normally.");
                     }
                 }
-
-                // ### DIE ENTSCHEIDENDE ÄNDERUNG ###
-                // Wir verwenden jetzt auch hier den zuverlässigen Protokoll-Befehl.
+              
+                string steamExePath = AppSettings.Load<string>("steamlauncherpath");
+                
+                // Wir verwenden jetzt auch hier den zuverlässigen Protokoll-Befehl.    
                 Debug.WriteLine("[GCM] Starte Steam via Protokoll-Befehl: steam://open/gamepadui");
-                Process.Start(new ProcessStartInfo("steam://open/gamepadui")
+                try
                 {
-                    UseShellExecute = true
-                });
-                Process.Start(new ProcessStartInfo("steam://open/gamepadui")
+                    Process.Start(new ProcessStartInfo(steamExePath)
+                    {
+                        Arguments = "-gamepadui",
+                        UseShellExecute = true
+                    });
+                }
+                catch (System.ComponentModel.Win32Exception ex)
                 {
-                    UseShellExecute = true
-                });
+                    // Fängt Fehler ab, z.B. wenn die steam.exe unter dem Pfad nicht gefunden wurde
+                    Debug.WriteLine($"[GCM] Fehler beim Starten der Steam.exe: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -3711,34 +4014,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
+                // Load the configured path for the Playnite executable from settings.
                 string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
 
+                // Validate the path.
                 if (string.IsNullOrWhiteSpace(playnitePath) || !File.Exists(playnitePath))
                 {
-                    // The exception message is now in English.
+                    // Throw an exception if the path is invalid or the file doesn't exist.
                     throw new FileNotFoundException("The Playnite path is invalid or was not found.");
                 }
 
-                // ### THIS IS YOUR REQUESTED CHANGE ###
-                // Step 1: First, kill any running Playnite Fullscreen process.
-                Debug.WriteLine("[GCM] Killing running Playnite Fullscreen instance for a clean restart...");
-                KillProcess("Playnite.FullscreenApp.exe");
-
-                // Step 2: Give the system a moment to fully terminate the process.
-                await Task.Delay(500);
-
-                // Step 3: Now, start Playnite cleanly.
+                // Start Playnite in fullscreen mode and hide the splash screen.
                 Process.Start(new ProcessStartInfo(playnitePath)
                 {
-                    Arguments = "--startfullscreen --hidesplashscreen",
-                    UseShellExecute = true
+                    Arguments = "--startfullscreen --hidesplashscreen", // Arguments to launch directly into fullscreen
+                    UseShellExecute = true // UseShellExecute allows Windows to handle the process start (recommended for .exe)
                 });
+                Debug.WriteLine("[GCM] Playnite started with --startfullscreen --hidesplashscreen.");
             }
             catch (Exception ex)
             {
-                // The debug message remains, but the user message is now in English.
+                // Log any error that occurs during the process.
                 Debug.WriteLine($"Error in StartPlaynite: {ex.Message}");
+                // Show an error message to the user.
                 await messagebox("Could not start Playnite. Please check the path in the settings.");
+                // Attempt to return the user to a usable desktop state if Playnite fails to start.
                 BackToWindows();
             }
         }
@@ -4439,70 +4739,235 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         // In gcmloader/MainWindow.xaml.cs
 
-
-
-        private async void LoadCardImageAsync(Border card, Image iconControl, TextBlock titleControl, string gameName, string exePath)
+        private List<string> GetAllSteamLibraryPaths()
         {
-            // Initial safety checks
-            if (string.IsNullOrEmpty(exePath) || _nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            var paths = new List<string>();
+            string mainSteamPath = GetSteamInstallPath();
+
+            if (string.IsNullOrEmpty(mainSteamPath))
             {
-                return;
+                Logger.Log("[DEBUG] GetAllSteamLibraryPaths: Main Steam install path not found. Aborting.");
+                return paths;
+            }
+
+            // 1. Add the main install path's steamapps folder
+            string mainSteamApps = Path.Combine(mainSteamPath, "steamapps");
+            if (Directory.Exists(mainSteamApps))
+            {
+                paths.Add(mainSteamApps);
+                Logger.Log($"[DEBUG] GetAllSteamLibraryPaths: Found main library: {mainSteamApps}");
+            }
+
+            // 2. Parse libraryfolders.vdf for all other paths
+            string vdfPath = Path.Combine(mainSteamApps, "libraryfolders.vdf");
+            if (!File.Exists(vdfPath))
+            {
+                Logger.Log("[DEBUG] GetAllSteamLibraryPaths: libraryfolders.vdf not found. Only main library will be used.");
+                return paths;
             }
 
             try
             {
-                // 1. Clean up the game name for the search
-                string cleanedGameName = CleanGameNameForSearch(gameName);
-                if (string.IsNullOrEmpty(cleanedGameName)) return;
+                string vdfContent = File.ReadAllText(vdfPath);
+                // Regex to find all "path" "D:\\Some\\Path" entries
+                var matches = Regex.Matches(vdfContent, "\"path\"\\s+\"([^\"]+)\"");
 
-                // 2. Get the game ID from SteamGridDB (with caching)
+                foreach (Match match in matches)
+                {
+                    if (match.Success && match.Groups.Count > 1)
+                    {
+                        // Path from VDF is escaped, e.g., "D:\\\\SteamLibrary"
+                        string libPath = Regex.Unescape(match.Groups[1].Value);
+
+                        // Skip if it's just the main path again
+                        if (libPath.Equals(mainSteamPath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        string libSteamApps = Path.Combine(libPath, "steamapps");
+                        if (Directory.Exists(libSteamApps) && !paths.Contains(libSteamApps))
+                        {
+                            paths.Add(libSteamApps);
+                            Logger.Log($"[DEBUG] GetAllSteamLibraryPaths: Found additional library: {libSteamApps}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[DEBUG] GetAllSteamLibraryPaths: ERROR parsing libraryfolders.vdf: {ex.Message}");
+            }
+
+            return paths;
+        }
+
+
+
+        private void AnimateCrossFade(Image imageToFadeIn, Image imageToFadeOut)
+        {
+            var storyboard = new Storyboard();
+            var duration = new Duration(TimeSpan.FromMilliseconds(300)); // 0.3s fade
+
+            // 1. Fade-in animation for the new image
+            var fadeIn = new DoubleAnimation
+            {
+                To = 1.0,
+                Duration = duration,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(fadeIn, imageToFadeIn);
+            Storyboard.SetTargetProperty(fadeIn, "Opacity");
+            storyboard.Children.Add(fadeIn);
+
+            // 2. Fade-out animation for the default icon
+            var fadeOut = new DoubleAnimation
+            {
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(fadeOut, imageToFadeOut);
+            Storyboard.SetTargetProperty(fadeOut, "Opacity");
+            storyboard.Children.Add(fadeOut);
+
+            // 3. When finished, hide the default icon completely
+            storyboard.Completed += (s, e) =>
+            {
+                imageToFadeOut.Visibility = Visibility.Collapsed;
+            };
+
+            storyboard.Begin();
+        }
+
+        /// <summary>
+        /// Tries to find a Steam AppID by searching all local manifest files
+        /// for a matching game name (window title). Used for Anti-Cheat processes.
+        /// </summary>
+        private async Task<string> FindAppIdFromGameNameLocally(string gameName)
+        {
+            Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: Searching for AppID for '{gameName}'...");
+
+            // Check cache first
+            string cleanedName = CleanGameNameForSearch(gameName);
+            if (_localGameNameCache.TryGetValue(cleanedName, out string cachedAppId))
+            {
+                Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: Found AppID '{cachedAppId ?? "null"}' in name cache.");
+                return cachedAppId;
+            }
+
+            // Get all library paths (cached)
+            if (_steamLibraryPathsCache == null)
+            {
+                _steamLibraryPathsCache = await Task.Run(() => GetAllSteamLibraryPaths());
+            }
+
+            if (_steamLibraryPathsCache == null || !_steamLibraryPathsCache.Any())
+            {
+                Logger.Log("[DEBUG] FindAppIdFromGameNameLocally: No Steam library paths found.");
+                return null;
+            }
+
+            string bestAppId = null;
+            double highestSimilarity = 0.0;
+
+            // Search all manifest files in all libraries
+            foreach (string libPath in _steamLibraryPathsCache)
+            {
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(libPath, "appmanifest_*.acf"))
+                    {
+                        string content = await File.ReadAllTextAsync(file);
+
+                        // Regex to find the "name" "Some Game Name"
+                        var nameMatch = Regex.Match(content, "\"name\"\\s+\"([^\"]+)\"");
+                        if (nameMatch.Success && nameMatch.Groups.Count > 1)
+                        {
+                            string manifestGameName = nameMatch.Groups[1].Value;
+
+                            // Check similarity
+                            double similarity = CalculateSimilarity(cleanedName, CleanGameNameForSearch(manifestGameName));
+
+                            // We need a high threshold to avoid mismatches (e.g., "Demo" matching "Game")
+                            if (similarity > 0.85 && similarity > highestSimilarity)
+                            {
+                                highestSimilarity = similarity;
+                                var appMatch = Regex.Match(Path.GetFileName(file), @"appmanifest_(\d+)\.acf");
+                                if (appMatch.Success)
+                                {
+                                    bestAppId = appMatch.Groups[1].Value;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: Error scanning path '{libPath}': {ex.Message}");
+                }
+            }
+
+            if (bestAppId != null)
+            {
+                Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: Found best match for '{cleanedName}' -> AppID {bestAppId} (Similarity: {highestSimilarity:P2})");
+                _localGameNameCache[cleanedName] = bestAppId; // Add to cache
+                return bestAppId;
+            }
+
+            Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: No local manifest match found for '{cleanedName}'.");
+            _localGameNameCache[cleanedName] = null; // Add null to cache to prevent re-scan
+            return null;
+        }
+        private async Task LoadFromSteamGridDbAsync(
+            Border card,                // The main card
+            Image loadedImageControl,   // The (still invisible) image to fade in
+            Image defaultIconControl,   // The (visible) default icon
+            TextBlock titleControl,     // The title field
+            string gameName,
+            string exePath)
+        {
+            Logger.Log($"[DEBUG] LoadFromSteamGridDbAsync started. Game: {gameName}");
+            try
+            {
+                string cleanedGameName = CleanGameNameForSearch(gameName);
+                if (string.IsNullOrEmpty(cleanedGameName)) { Logger.Log("[DEBUG] SteamGridDB: Cleaned name is empty. Aborting."); return; }
+                Logger.Log($"[DEBUG] SteamGridDB: Cleaned name: '{cleanedGameName}'");
                 SearchResult searchResult = null;
                 if (_gameIdCache.ContainsKey(cleanedGameName))
                 {
                     searchResult = _gameIdCache[cleanedGameName];
+                    Logger.Log($"[DEBUG] SteamGridDB: ID loaded from cache: {(searchResult?.id.ToString() ?? "null")}");
                 }
                 else
                 {
                     searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedGameName);
-                    _gameIdCache[cleanedGameName] = searchResult; // Save the result to the cache (even if it's null)
+                    _gameIdCache[cleanedGameName] = searchResult;
+                    Logger.Log($"[DEBUG] SteamGridDB: API search returned: {(searchResult?.name ?? "NO HIT")}");
                 }
-
-                // Abort if no result was found
-                if (searchResult == null)
-                {
-                    Debug.WriteLine($"[SteamGridDB] No result found for '{cleanedGameName}'.");
-                    return;
-                }
-
-                // 3. Safety check: Is the found game similar enough to the original?
+                if (searchResult == null) { Logger.Log("[DEBUG] SteamGridDB: No ID found for this game. Aborting."); return; }
                 double similarity = CalculateSimilarity(gameName, searchResult.name);
-                if (similarity < 0.5)
-                {
-                    Debug.WriteLine($"[SteamGridDB] Similarity between '{gameName}' and '{searchResult.name}' too low ({similarity:P2}). Aborting.");
-                    return;
-                }
-
-                // 4. Get the image URL for the found game
+                Logger.Log($"[DEBUG] SteamGridDB: Similarity between '{gameName}' and '{searchResult.name}' is {similarity:P2}");
+                if (similarity < 0.5) { Logger.Log("[DEBUG] SteamGridDB: Similarity too low. Aborting."); return; }
                 var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
-                if (string.IsNullOrEmpty(imageUrl))
-                {
-                    Debug.WriteLine($"[SteamGridDB] No image URL found for game ID '{searchResult.id}'.");
-                    return;
-                }
-
-                // 5. Download image, cache it, and apply it to the card
+                if (string.IsNullOrEmpty(imageUrl)) { Logger.Log($"[DEBUG] SteamGridDB: Game ID found, but no image URL present. Aborting."); return; }
+                Logger.Log($"[DEBUG] SteamGridDB: Image URL found: {imageUrl}");
                 string localImagePath = Path.Combine(_imageCachePath, $"{searchResult.id}.jpg");
-
                 if (!File.Exists(localImagePath))
                 {
+                    Logger.Log("[DEBUG] SteamGridDB: Image is not in cache. Downloading...");
                     using (var client = new HttpClient())
                     {
                         var imageData = await client.GetByteArrayAsync(imageUrl);
                         await File.WriteAllBytesAsync(localImagePath, imageData);
                     }
+                    Logger.Log("[DEBUG] SteamGridDB: Download and save successful.");
                 }
+                else
+                {
+                    Logger.Log("[DEBUG] SteamGridDB: Image already present in cache.");
+                }
+           
 
-                // Important: Dispatch the UI update to the UI thread
+
                 card.DispatcherQueue.TryEnqueue(async () =>
                 {
                     try
@@ -4514,22 +4979,121 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
                         }
 
-                        card.Background = new ImageBrush { ImageSource = bitmap, Stretch = Stretch.UniformToFill };
-                        if (iconControl != null) iconControl.Visibility = Visibility.Collapsed;
-                        if (titleControl != null) titleControl.Text = searchResult.name; // Update the title with the official name
+                        // Set the source for the (still invisible) image
+                        loadedImageControl.Source = bitmap;
+                        if (titleControl != null) titleControl.Text = searchResult.name; // Update the title
+
+                        // Start the cross-fade animation
+                        AnimateCrossFade(loadedImageControl, defaultIconControl);
+
+                        Logger.Log($"[DEBUG] SteamGridDB: Image for '{searchResult.name}' loaded and fade-in started.");
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"[SteamGridDB] Error displaying the image for '{gameName}': {ex.Message}");
+                        Logger.Log($"[DEBUG] SteamGridDB: ERROR displaying downloaded image: {ex.Message}");
                     }
                 });
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[SteamGridDB] A general error occurred in LoadCardImageAsync for '{gameName}': {ex.Message}");
+                Logger.Log($"[DEBUG] SteamGridDB: FATAL ERROR in LoadFromSteamGridDbAsync: {ex.Message}");
             }
         }
+        private async void LoadCardImageAsync(
+            Border card,                // The main card
+            Image loadedImageControl,   // The (still invisible) image to fade in
+            Image defaultIconControl,   // The (visible) default icon
+            TextBlock titleControl,     // The title field
+            string gameName,
+            string exePath)
+        {
+            Logger.Log($"[DEBUG] LoadCardImageAsync started.\n    Game: {gameName}\n    Path: {(string.IsNullOrEmpty(exePath) ? "NONE (e.g., Anti-Cheat)" : exePath)}");
 
+            // 1. Safety Check (Non-game keywords)
+            if (_nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            {
+                Logger.Log($"[DEBUG] LoadCardImageAsync: Game '{gameName}' was classified as 'Non-Game' and skipped.");
+                return;
+            }
+
+            string localImagePath = null;
+            string appId = null;
+
+            // 2. Check if we have a valid path
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                Logger.Log("[DEBUG] exePath is valid. Attempting Prio 1-3 (Local Folder + AppID from Path)...");
+                localImagePath = await FindLocalSteamImageAsync(exePath);
+            }
+            else
+            {
+                // This is the Anti-Cheat case (exePath is null)
+                Logger.Log("[DEBUG] exePath is null. Skipping Prio 1-3. Attempting Prio 4 (Find AppID by Name)...");
+                appId = await FindAppIdFromGameNameLocally(gameName);
+
+                if (!string.IsNullOrEmpty(appId))
+                {
+                    string steamInstallPath = GetSteamInstallPath();
+                    if (!string.IsNullOrEmpty(steamInstallPath))
+                    {
+                        string appCacheDirectory = Path.Combine(steamInstallPath, "appcache", "librarycache", appId);
+                        Logger.Log($"[DEBUG] Prio 4: Found AppID '{appId}'. Checking cache path: {appCacheDirectory}");
+
+                        localImagePath = await SearchCacheFolderForImageAsync(appCacheDirectory);
+                    }
+                }
+            }
+
+            Logger.Log($"[DEBUG] LoadCardImageAsync: Local search finished. Found path: {(string.IsNullOrEmpty(localImagePath) ? "NONE" : localImagePath)}");
+
+            // 5. Load local image IF ONE WAS FOUND (from either Prio 1-3 or Prio 4)
+            if (!string.IsNullOrEmpty(localImagePath))
+            {
+                card.DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        var bitmap = new BitmapImage();
+                        var fileBytes = await File.ReadAllBytesAsync(localImagePath);
+                        using (var ms = new MemoryStream(fileBytes))
+                        {
+                            await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
+                        }
+
+                        // ### START OF FLICKER FIX ###
+                        // Set the source for the (still invisible) image
+                        loadedImageControl.Source = bitmap;
+
+                        // Start the cross-fade animation
+                        AnimateCrossFade(loadedImageControl, defaultIconControl);
+                        // ### END OF FLICKER FIX ###
+
+                        Logger.Log($"[DEBUG] LoadCardImageAsync: Local image for '{gameName}' loaded successfully and fade-in started.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[DEBUG] LoadCardImageAsync: ERROR loading local image '{localImagePath}': {ex.Message}\n    Attempting fallback to SteamGridDB...");
+                        if (_steamGridHelper.IsApiKeySet)
+                        {
+                            // Pass the controls to the fallback
+                            await LoadFromSteamGridDbAsync(card, loadedImageControl, defaultIconControl, titleControl, gameName, exePath);
+                        }
+                    }
+                });
+                return; // IMPORTANT: Exit here
+            }
+
+            // 6. Fallback: SteamGridDB
+            if (_steamGridHelper.IsApiKeySet)
+            {
+                Logger.Log("[DEBUG] LoadCardImageAsync: No local image found. Starting SteamGridDB search (using game name)...");
+                await LoadFromSteamGridDbAsync(card, loadedImageControl, defaultIconControl, titleControl, gameName, exePath);
+            }
+            else
+            {
+                Logger.Log("[DEBUG] LoadCardImageAsync: No local image found. SteamGridDB is disabled. Using default icon.");
+            }
+        }
         private void UpdateUiFromData(List<ProcessData> processDataList)
         {
             if (processDataList == null) return;
@@ -4566,6 +5130,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     ProgramCardPanel.Children.Add(border);
                 }
             }
+
+            bool hasCards = _cardCache.Any(); // Prüft, ob Karten im Cache sind
+            NoCardsMessage.Visibility = hasCards ? Visibility.Collapsed : Visibility.Visible;
         }
 
 
@@ -4924,26 +5491,55 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 StartPoint = new Windows.Foundation.Point(0.5, 0),
                 EndPoint = new Windows.Foundation.Point(0.5, 1),
                 GradientStops = new GradientStopCollection
-        {
-            new GradientStop { Color = Color.FromArgb(220, avgColor.R, avgColor.G, avgColor.B), Offset = 0.0 },
-            new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
-        }
+                {
+                    new GradientStop { Color = Color.FromArgb(220, avgColor.R, avgColor.G, avgColor.B), Offset = 0.0 },
+                    new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
+                }
             };
+
+            // ### START OF FLICKER FIX ###
             var contentGrid = new Grid();
+
+            // 1. The Image control that will hold the loaded (poster) image.
+            // It starts invisible (Opacity=0) and stretches to fill the card.
+            var loadedImage = new Image
+            {
+                Name = "LoadedImage",
+                Stretch = Stretch.UniformToFill, // Fills the card
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Opacity = 0.0 // Starts invisible
+            };
+            contentGrid.Children.Add(loadedImage); // Add first (bottom layer)
+
+            // 2. The default icon (game.png or exe icon)
+            // This is visible by default (Opacity=1) and sits on top.
             var iconImage = new Image
             {
                 Name = "IconImage",
                 Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
                 Width = 64,
                 Height = 64,
-                HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
+            contentGrid.Children.Add(iconImage); // Add second (top layer)
+
+            // 3. Text elements (unchanged)
             var textBackground = new Border
             {
                 Height = 80,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new LinearGradientBrush { /* ... */ }
+                Background = new LinearGradientBrush
+                {
+                    StartPoint = new Windows.Foundation.Point(0.5, 0),
+                    EndPoint = new Windows.Foundation.Point(0.5, 1),
+                    GradientStops = new GradientStopCollection
+                    {
+                        new GradientStop { Color = Color.FromArgb(0, 0, 0, 0), Offset = 0.0 },
+                        new GradientStop { Color = Color.FromArgb(180, 0, 0, 0), Offset = 1.0 }
+                    }
+                }
             };
             var titleText = new TextBlock
             {
@@ -4956,14 +5552,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 TextWrapping = TextWrapping.WrapWholeWords,
                 MaxLines = 2
             };
-            contentGrid.Children.Add(iconImage);
             contentGrid.Children.Add(textBackground);
             contentGrid.Children.Add(titleText);
+
             var cardBorder = new Border
             {
                 Width = 220,
                 Height = 260,
-                Background = gradient,
+                Background = gradient, // The gradient is the permanent background
                 CornerRadius = new CornerRadius(15),
                 Margin = new Thickness(10),
                 BorderThickness = new Thickness(1),
@@ -4972,8 +5568,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Child = contentGrid
             };
 
-            // *** CRITICAL CHANGE: Pass the UI elements directly to the async method ***
-            LoadCardImageAsync(cardBorder, iconImage, titleText, name, exePath);
+            // 4. Call the load method, passing BOTH Image controls
+            LoadCardImageAsync(cardBorder, loadedImage, iconImage, titleText, name, exePath);
+            // ### END OF FLICKER FIX ###
 
             return cardBorder;
         }
@@ -5174,6 +5771,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// The main entry point for the shortcut. Checks for Xbox fullscreen, then brings this app to front.
         /// </summary>
         /// 
+
+        const uint WM_KEYUP = 0x0101;
+        const uint WM_KEYDOWN = 0x0100;
+
+        private void SendEscapeKey(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero)
+            {
+                Debug.WriteLine($"[GCM] SendEscapeKey: Invalid window handle.");
+                return;
+            }
+
+            Debug.WriteLine($"[GCM] Sending ESC keystroke to window: {hWnd}");
+            // We are using the received 'hWnd' parameter inside this method
+            PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_ESCAPE, IntPtr.Zero);
+            PostMessage(hWnd, WM_KEYUP, (IntPtr)VK_ESCAPE, IntPtr.Zero);
+        }
+
         public void BringTaskManagerToFrontAndFocus()
         {
             this.DispatcherQueue.TryEnqueue(async () =>
@@ -5185,19 +5800,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     switch (launcher)
                     {
+                        // STEAM LOGIC: Force self (GCM) on top
                         case "steam":
                             windowHandle = FindSteamBigPictureWindow();
                             if (windowHandle != IntPtr.Zero)
                             {
-                                // Eine sehr kurze Verzögerung kann bei Fokus-Operationen helfen.
-                                await Task.Delay(50);
+                                await Task.Delay(100);
 
-                                // Bringe einfach unser eigenes Fenster nach vorne. Das ist alles.
+                                // Bring self (GCM) to front
                                 IntPtr _selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                                 BringToFrontAndFocus(_selfHwnd);
                             }
                             break;
 
+                        // PLAYNITE / CUSTOM LOGIC: Minimize the launcher
                         case "playnite":
                         case "custom":
                             string processNameToFind = launcher == "playnite"
@@ -5210,11 +5826,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 if (proc != null)
                                 {
                                     windowHandle = proc.MainWindowHandle;
-                                    // Für alle anderen Launcher funktioniert das Minimieren perfekt.
                                     if (windowHandle != IntPtr.Zero)
                                     {
+                                        await Task.Delay(100);
                                         ShowWindow(windowHandle, SW_MINIMIZE);
-                                        Debug.WriteLine($"[GCM] {launcher}-Fenster ({windowHandle}) minimiert.");
+                                        Debug.WriteLine($"[GCM] {launcher} window ({windowHandle}) minimized.");
                                     }
                                 }
                             }
@@ -5223,9 +5839,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[GCM] Fehler beim In-den-Hintergrund-schieben des Launchers: {ex.Message}");
+                    Debug.WriteLine($"[GCM] Error while pushing launcher to background: {ex.Message}");
                 }
 
+                // FINAL FOCUS CALL:
+                // This runs *after* the switch-case to ensure GCM is on top,
+                // using the new aggressive method.
                 await Task.Delay(150);
                 IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 BringToFrontAndFocus(selfHwnd);
@@ -5524,25 +6143,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion shortcuts
 
 
-        private Controller _xinputController;
-        private bool _controllerConnected = false;
 
-        private Controller GetConnectedController()
-        {
-            for (int i = 0; i < 4; i++)
-            {
-                var controller = new Controller((UserIndex)i);
-                if (controller.IsConnected)
-                    return controller;
-            }
-            return null;
-        }
+
+
 
         /// <summary>
         /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
         /// </summary>
-       
-        private void HandleMouseControl(State controllerState)
+
+        /// <summary>
+        /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
+        /// </summary>
+        private void HandleMouseControl(State controllerState, int controllerIndex) // <-- MODIFIED: Needs controllerIndex
         {
             var gamepad = controllerState.Gamepad;
             var currentButtons = gamepad.Buttons;
@@ -5601,11 +6213,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
             // --- Button Actions ---
-            var newPresses = currentButtons & ~_lastButtonState;
+            // *** FIX: Use the per-controller state _lastButtonStates[controllerIndex] ***
+            var newPresses = currentButtons & ~_lastButtonStates[controllerIndex];
 
             // Left Click (A button) - Supports holding
             if ((newPresses & GamepadButtonFlags.A) != 0) { mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero); }
-            else if (((_lastButtonState & GamepadButtonFlags.A) != 0) && ((currentButtons & GamepadButtonFlags.A) == 0)) { mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero); }
+            // *** FIX: Use the per-controller state _lastButtonStates[controllerIndex] ***
+            else if (((_lastButtonStates[controllerIndex] & GamepadButtonFlags.A) != 0) && ((currentButtons & GamepadButtonFlags.A) == 0)) { mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero); }
 
             // Right Click (X button)
             if ((newPresses & GamepadButtonFlags.X) != 0)
@@ -5621,7 +6235,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 ToggleTouchKeyboard();
             }
         }
-
         /// <summary>
         /// Shows the modern Windows 11 Touch Keyboard by starting its process.
         /// This method is safe to call even if the keyboard is already open.
@@ -5788,102 +6401,135 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const byte O_KEY = 0x47;
         private void SetupGamepad()
         {
+            // NEW: Initialize the per-controller state arrays
+            for (int i = 0; i < 4; i++)
+            {
+                _lastButtonStates[i] = GamepadButtonFlags.None;
+                _lastStickXDirections[i] = 0;
+                _lastStickYDirections[i] = 0;
+            }
+
             // Start the dedicated input loop on a background thread.
             Task.Run(() => GamepadInputLoop());
         }
 
+
+
         private async Task GamepadInputLoop()
         {
+            // Define the deadzone for the analog stick
+            const int deadzone = 12000; // Adjust as needed
+
             while (true) // This loop runs continuously in the background.
             {
-                if (_xinputController == null || !_xinputController.IsConnected)
+                bool processedInputThisFrame = false;
+
+                // Loop through all 4 possible controller ports
+                for (int i = 0; i < 4; i++)
                 {
-                    _xinputController = GetConnectedController();
-                    _controllerConnected = _xinputController != null;
-                }
+                    var controller = new Controller((UserIndex)i);
 
-                if (_controllerConnected)
-                {
-                    var state = _xinputController.GetState();
-                    var currentButtons = state.Gamepad.Buttons;
+                    // 1. If controller is NOT connected, reset its state and check next port
+                    if (!controller.IsConnected)
+                    {
+                        _lastButtonStates[i] = GamepadButtonFlags.None;
+                        _lastStickXDirections[i] = 0;
+                        _lastStickYDirections[i] = 0;
+                        continue;
+                    }
 
-                    // ### UPDATED: Mouse Mode Toggle Logic (Back + Right Stick Click for 3 seconds) ###
+                    // --- 2. Controller IS connected ---
+                    processedInputThisFrame = true; // Mark that a controller is active
+                    var state = controller.GetState();
+                    var gamepadState = state.Gamepad;
+                    var currentButtons = gamepadState.Buttons;
 
-                    // 1. Check if both buttons are currently pressed.
+                    // Get Stick values
+                    var thumbX = gamepadState.LeftThumbX;
+                    var thumbY = gamepadState.LeftThumbY;
+                    var thumbRy = gamepadState.RightThumbY; // For scrolling
+
+                    // Determine current stick directions
+                    int currentStickXDirection = 0;
+                    if (thumbX < -deadzone) { currentStickXDirection = -1; }
+                    else if (thumbX > deadzone) { currentStickXDirection = 1; }
+
+                    int currentStickYDirection = 0;
+                    if (thumbY > deadzone) { currentStickYDirection = 1; } // Stick Up
+                    else if (thumbY < -deadzone) { currentStickYDirection = -1; } // Stick Down
+
+                    // --- 3. Check for Mouse Mode Toggle ---
                     bool backPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
-                    // The enum for the Right Stick click is 'RightThumb'.
                     bool rsPressed = (currentButtons & GamepadButtonFlags.RightThumb) != 0;
                     bool comboIsPressed = backPressed && rsPressed;
-
-                    bool lastBackPressed = (_lastButtonState & GamepadButtonFlags.Back) != 0;
-                    bool lastRsPressed = (_lastButtonState & GamepadButtonFlags.RightThumb) != 0;
+                    bool lastBackPressed = (_lastButtonStates[i] & GamepadButtonFlags.Back) != 0;
+                    bool lastRsPressed = (_lastButtonStates[i] & GamepadButtonFlags.RightThumb) != 0;
                     bool comboWasPressed = lastBackPressed && lastRsPressed;
 
-                    // 2. If the combo has just been initiated, start the timer.
-                    if (comboIsPressed && !comboWasPressed)
-                    {
-                        _comboPressTime = DateTime.UtcNow;
-                        _mouseModeToggledThisPress = false;
-                    }
+                    if (comboIsPressed && !comboWasPressed) { _comboPressTime = DateTime.UtcNow; _mouseModeToggledThisPress = false; }
+                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress) { if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0) { _isMouseModeActive = !_isMouseModeActive; DispatcherQueue.TryEnqueue(() => SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated")); _mouseModeToggledThisPress = true; } }
+                    if (!comboIsPressed && comboWasPressed) { _comboPressTime = null; }
 
-                    // 3. While the combo is held, check if 3 seconds have passed.
-                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress)
-                    {
-                        if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0)
-                        {
-                            _isMouseModeActive = !_isMouseModeActive;
-                            SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated");
-                            _mouseModeToggledThisPress = true;
-
-                            // If we are deactivating mouse mode, ensure the keyboard is hidden.
-                            if (!_isMouseModeActive && Process.GetProcessesByName("TabTip").Any())
-                            {
-                               
-                            }
-                        }
-                    }
-
-                    // 4. If the combo is released, reset the timer.
-                    if (!comboIsPressed && comboWasPressed)
-                    {
-                        _comboPressTime = null;
-                    }
-
-                    // --- Main Input Logic Branch (remains unchanged) ---
+                    // --- 4. Main Input Logic Branch ---
                     if (_isMouseModeActive)
                     {
-                        HandleMouseControl(state);
-                        _lastButtonState = currentButtons;
+                        HandleMouseControl(state, i);
                     }
-                    else
+                    else // --- UI Navigation and Shortcut Mode ---
                     {
-                        HandleShortcuts(currentButtons);
-                        if (IsWindowInForeground())
+                        HandleShortcuts(currentButtons); // Process shortcuts (has its own logic)
+
+                        // --- This is the "One-Shot" logic ---
+                        // Check for *new* button presses this frame
+                        var newPresses = currentButtons & ~_lastButtonStates[i];
+
+                        // Check for *new* stick movements (from center or other direction)
+                        bool stickMovedLeft = (currentStickXDirection == -1 && _lastStickXDirections[i] != -1);
+                        bool stickMovedRight = (currentStickXDirection == 1 && _lastStickXDirections[i] != 1);
+                        bool stickMovedUp = (currentStickYDirection == 1 && _lastStickYDirections[i] != 1);
+                        bool stickMovedDown = (currentStickYDirection == -1 && _lastStickYDirections[i] != -1);
+
+                        // Check if any navigation input just happened
+                        bool hasNavInput = (newPresses != GamepadButtonFlags.None) ||
+                                           stickMovedLeft || stickMovedRight ||
+                                           stickMovedUp || stickMovedDown;
+
+                        if (hasNavInput && IsWindowInForeground())
                         {
-                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(currentButtons));
-                        }
-                        else
-                        {
-                            _lastButtonState = currentButtons;
+                            // Send *only* the new presses and stick events to the UI thread
+                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, stickMovedLeft, stickMovedRight, stickMovedUp, stickMovedDown, i));
                         }
                     }
-                }
-                else
+
+                    // --- 5. CRITICAL: Update this controller's state *every* frame ---
+                    // This ensures 'newPresses' and 'stickMoved' will be false
+                    // next frame, even if the user holds the button/stick.
+                    _lastButtonStates[i] = currentButtons;
+                    _lastStickXDirections[i] = currentStickXDirection;
+                    _lastStickYDirections[i] = currentStickYDirection;
+
+                    // *** FIX: The 'break;' statement was removed here. ***
+                    // This allows the loop to continue and check i=1, i=2, and i=3.
+                    // Because state is tracked per-controller, this is now safe
+                    // and allows multiple controllers to send input.
+
+                } // End of for-loop (i=0 to 3)
+
+                // If no controller was active *at all* this frame
+                if (!processedInputThisFrame && _isMouseModeActive)
                 {
-                    if (_isKeyboardVisible) HideOnScreenKeyboard();
-                    _lastButtonState = GamepadButtonFlags.None;
+                    _isMouseModeActive = false;
+                    DispatcherQueue.TryEnqueue(() => SendOverlayNotification("Mouse Mode Deactivated (Controller Disconnected)"));
                 }
 
-                await Task.Delay(16);
+                await Task.Delay(16); // ~60 Hz
             }
         }
 
-        //Taskmanager
-        private GamepadButtonFlags _lastButtonState = GamepadButtonFlags.None;
-        private bool _ignoreNextInputFrame = false;
-       
 
-        
+
+
+
 
 
 
@@ -6054,8 +6700,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
 
-        // --- Zustandsvariablen, um den vorherigen Fokus zu speichern (für Performance) ---
-        private FocusArea _previousFocusArea = FocusArea.Cards;
+        // --- State variables to remember previous focus (for navigation) ---
+        private FocusArea _previousFocusArea = FocusArea.Cards; // Used to track which area to return to from TopButtons
+        private int _previousLauncherAreaIndex = -1;
         private int _previousCardIndex = -1;
         private int _previousTopButtonIndex = -1;
 
@@ -6107,7 +6754,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Die zentrale Methode, die alle Gamepad-Eingaben für Shortcuts und UI-Navigation verarbeitet.
         /// </summary>
         /// 
-
+        private bool _ignoreNextInputFrame = false;
         /// <summary>
         /// Startet den Computer neu.
         /// </summary>
@@ -6117,157 +6764,258 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Der Parameter /r steht für "restart"
             Process.Start("shutdown", "/r /t 0");
         }
-        // Renamed from GamepadButtonCheck. This now ONLY handles UI logic on the UI thread.
-        // This is the new, fully corrected version.
-        // This is the new, fully corrected version.
-        // This is the new, fully corrected, and restructured version.
-        // This method now ONLY handles UI navigation when the window is in focus.
-        // This is the final, fully corrected version with the AppLauncher fix.
-        // This is the final, fully corrected version with the AppLauncher fix.
-        private void HandleGamepadInput(GamepadButtonFlags currentButtons)
+
+        /// <summary>
+        /// The central method that processes all gamepad inputs for shortcuts and UI navigation.
+        /// </summary>
+        // *** FIX: Signature changed to accept 'newPresses' directly from the loop ***
+        private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
-            // Safety check: Do nothing if the window is not in focus.
-            if (!IsWindowInForeground())
+            // *** FIX: All 'IsWindowInForeground' and 'lastButtonState' logic
+            // is now handled by the background loop before this is called. ***
+
+            bool navigated = false; // Set to true if an area switch occurs
+
+            // --- Contextual Navigation (D-Pad, Left Stick, A, B) ---
+            // The logic here is now correct because 'newPresses' only contains
+            // buttons that were *just* pressed this frame.
+            switch (_currentFocusArea)
             {
-                _lastButtonState = currentButtons; // Still update the state to prevent false presses on refocus.
-                return;
+                // --- 1. TopButtons Area ---
+                case FocusArea.TopButtons:
+                    if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
+                    {
+                        // DOWN: Go back to the previous area (Cards or Launcher)
+                        _currentFocusArea = _previousFocusArea;
+                        _previousTopButtonIndex = _selectedTopButtonIndex; // Remember position
+
+                        // Restore the index of the target area
+                        if (_currentFocusArea == FocusArea.Cards)
+                            _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
+                        else if (_currentFocusArea == FocusArea.Launcher)
+                            _selectedLauncherAreaIndex = _previousLauncherAreaIndex != -1 ? _previousLauncherAreaIndex : 0;
+
+                        navigated = true;
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _topButtons.Any())
+                    {
+                        // Navigate right WITHIN the area
+                        _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
+                        UpdateVisualFocus();
+                        PlayNavigationSound();
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _topButtons.Any())
+                    {
+                        // Navigate left WITHIN the area
+                        _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
+                        UpdateVisualFocus();
+                        PlayNavigationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        ClickSelectedTopButton();
+                        PlayActivationSound();
+                    }
+                    break;
+
+                // --- 2. Cards Area (Main Area) ---
+                case FocusArea.Cards:
+                    if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
+                    {
+                        // UP: Go to TopButtons
+                        _previousFocusArea = FocusArea.Cards; // Remember where we came from
+                        _previousCardIndex = _selectedCardIndex; // Remember position
+                        _currentFocusArea = FocusArea.TopButtons;
+                        _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
+                        navigated = true;
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && ProgramCardPanel.Children.Any())
+                    {
+                        // Navigate right WITHIN the area
+                        _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
+                        UpdateVisualFocus();
+                        PlayNavigationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                    {
+                        // Check if there are any cards to navigate
+                        if (ProgramCardPanel.Children.Any())
+                        {
+                            // Cards exist. Check if we are at the first one.
+                            if (_selectedCardIndex == 0)
+                            {
+                                // We ARE at the first one (Index 0) -> Jump to Launcher
+                                _previousFocusArea = FocusArea.Cards;
+                                _previousCardIndex = 0;
+                                _currentFocusArea = FocusArea.Launcher;
+                                _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
+                                navigated = true; // Signals an area switch
+                            }
+                            else
+                            {
+                                // We are NOT at the first one -> Navigate left normally
+                                _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
+                                UpdateVisualFocus();
+                                PlayNavigationSound();
+                            }
+                        }
+                        else
+                        {
+                            // There are NO cards. A press left
+                            // *always* switches to the Launcher area.
+                            _previousFocusArea = FocusArea.Cards;
+                            _previousCardIndex = 0; // Reset index
+                            _currentFocusArea = FocusArea.Launcher;
+                            _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
+                            navigated = true; // Signals an area switch
+                        }
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        TriggerCardAction(_selectedCardIndex, true); // True for launch/focus
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        TriggerCardAction(_selectedCardIndex, false); // False for close/kill
+                        PlaydeactivationSound();
+                    }
+                    break;
+
+                // --- 3. Launcher Area (Left Column, when active) ---
+                case FocusArea.Launcher:
+                    if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
+                    {
+                        // UP: Go to TopButtons
+                        _previousFocusArea = FocusArea.Launcher; // Remember where we came from
+                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember position
+                        _currentFocusArea = FocusArea.TopButtons;
+                        _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
+                        navigated = true;
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _launcherAreaButtons.Any())
+                    {
+                        // Wrap-around check
+                        if (_selectedLauncherAreaIndex == _launcherAreaButtons.Count - 1)
+                        {
+                            // YES: Jump to Cards
+                            _previousFocusArea = FocusArea.Launcher; // Remember for Up/Down
+                            _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember for jumping back
+                            _currentFocusArea = FocusArea.Cards;
+                            // Set focus to the FIRST Card-Item (or the remembered one)
+                            _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
+                            navigated = true; // Signals an area switch
+                        }
+                        else
+                        {
+                            // NO: Normal navigation right
+                            _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
+                            UpdateVisualFocus();
+                            PlayNavigationSound();
+                        }
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _launcherAreaButtons.Any())
+                    {
+                        // Navigate left WITHIN the area
+                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
+                        UpdateVisualFocus();
+                        PlayNavigationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item)
+                        {
+                            item.TapAction?.Invoke(null, null); // Execute action
+                        }
+                        PlayActivationSound();
+                    }
+                    break;
+
+                case FocusArea.PowerMenu:
+                    if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _powerMenuItems.Any())
+                    {
+                        _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
+                        UpdateVisualFocus(); PlayNavigationSound();
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _powerMenuItems.Any())
+                    {
+                        _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
+                        UpdateVisualFocus(); PlayNavigationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0 && _powerMenuItems.Count > _selectedPowerMenuItemIndex)
+                    {
+                        var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
+                        if (selectedButton == ShutdownMenuItem) ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
+                        else if (selectedButton == RestartMenuItem) RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
+                        else if (selectedButton == LogOffMenuItem) LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
+                        else if (selectedButton == SleepMenuItem) SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        PowerMenu.Visibility = Visibility.Collapsed;
+                        _currentFocusArea = FocusArea.TopButtons; // Return focus
+                        UpdateVisualFocus(); PlaydeactivationSound();
+                    }
+                    break;
+
+                case FocusArea.AppLauncher:
+                    if (AppGridView.Items.Count > 0)
+                    {
+                        int columns = 4; // Default guess
+                        try
+                        {
+                            if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
+                            {
+                                columns = Math.Max(1, (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth));
+                            }
+                        }
+                        catch { /* Ignore potential layout errors */ }
+
+                        int currentIndex = AppGridView.SelectedIndex;
+                        int newIndex = currentIndex;
+                        bool appNavigated = false;
+
+                        if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) { newIndex = Math.Min(AppGridView.Items.Count - 1, currentIndex + columns); appNavigated = true; }
+                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) { newIndex = Math.Max(0, currentIndex - columns); appNavigated = true; }
+                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) { newIndex = (currentIndex + 1) % AppGridView.Items.Count; appNavigated = true; }
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) { newIndex = (currentIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; appNavigated = true; }
+
+                        if (appNavigated && newIndex != currentIndex)
+                        {
+                            AppGridView.SelectedIndex = newIndex;
+                            AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Ensure visible
+                            PlayNavigationSound();
+                        }
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        int selectedIndex = AppGridView.SelectedIndex;
+                        if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count)
+                        {
+                            if (AppGridView.Items[selectedIndex] is AppInfo app) { LaunchApp(app); }
+                        }
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        ToggleAppLauncher_Click(null, null); // Close
+                    }
+                    break;
             }
 
-            // Calculate which buttons are newly pressed in this frame.
-            var newPresses = currentButtons & ~_lastButtonState;
-
-            // If no new buttons were pressed, there's nothing to do for the UI.
-            if (newPresses == GamepadButtonFlags.None)
+            // If an area switch occurred, update the UI
+            if (navigated)
             {
-                _lastButtonState = currentButtons;
-                return;
-            }
-
-            // Global shortcuts are handled in the background loop.
-
-            // --- High Priority: Area Switching with Shoulder Buttons ---
-            bool areaSwitched = false;
-            if ((newPresses & GamepadButtonFlags.RightShoulder) != 0)
-            {
-                switch (_currentFocusArea)
-                {
-                    case FocusArea.Launcher: _currentFocusArea = FocusArea.Cards; break;
-                    case FocusArea.Cards: _currentFocusArea = FocusArea.TopButtons; break;
-                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Launcher; break;
-                }
-                areaSwitched = true;
-            }
-            else if ((newPresses & GamepadButtonFlags.LeftShoulder) != 0)
-            {
-                switch (_currentFocusArea)
-                {
-                    case FocusArea.Launcher: _currentFocusArea = FocusArea.TopButtons; break;
-                    case FocusArea.Cards: _currentFocusArea = FocusArea.Launcher; break;
-                    case FocusArea.TopButtons: _currentFocusArea = FocusArea.Cards; break;
-                }
-                areaSwitched = true;
-            }
-
-            if (areaSwitched)
-            {
-                // If we switched areas, reset all selection indexes and update the visuals.
-                _selectedCardIndex = 0;
-                _selectedTopButtonIndex = 0;
-                _selectedLauncherAreaIndex = 0;
                 UpdateVisualFocus();
                 PlayNavigationSound();
             }
-            else
-            {
-                // --- Contextual Navigation (D-Pad, A, B) ---
-                // This code only runs if no area switch happened.
-                switch (_currentFocusArea)
-                {
-                    case FocusArea.PowerMenu:
-                        if ((newPresses & GamepadButtonFlags.DPadDown) != 0) { _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0) { _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0)
-                        {
-                            var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                            if (selectedButton == ShutdownMenuItem) ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
-                            else if (selectedButton == RestartMenuItem) RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
-                            else if (selectedButton == LogOffMenuItem) LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
-                            else if (selectedButton == SleepMenuItem) SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
-                            PlayActivationSound();
-                        }
-                        else if ((newPresses & GamepadButtonFlags.B) != 0)
-                        {
-                            PowerMenu.Visibility = Visibility.Collapsed;
-                            _currentFocusArea = FocusArea.TopButtons;
-                            UpdateVisualFocus(); PlaydeactivationSound();
-                        }
-                        break;
-
-                    case FocusArea.AppLauncher:
-                        if (AppGridView.Items.Count > 0)
-                        {
-                            int columns = 4;
-                            if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
-                            {
-                                columns = (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth);
-                                if (columns == 0) columns = 1;
-                            }
-
-                            if ((newPresses & GamepadButtonFlags.DPadDown) != 0) { var newIndex = AppGridView.SelectedIndex + columns; if (newIndex >= AppGridView.Items.Count) newIndex = AppGridView.Items.Count - 1; AppGridView.SelectedIndex = newIndex; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                            else if ((newPresses & GamepadButtonFlags.DPadUp) != 0) { var newIndex = AppGridView.SelectedIndex - columns; if (newIndex < 0) newIndex = 0; AppGridView.SelectedIndex = newIndex; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                            else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { AppGridView.SelectedIndex = (AppGridView.SelectedIndex + 1) % AppGridView.Items.Count; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                            else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { AppGridView.SelectedIndex = (AppGridView.SelectedIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; AppGridView.ScrollIntoView(AppGridView.SelectedItem); PlayNavigationSound(); }
-                        }
-
-                        // ### HIER IST DIE KORREKTUR ###
-                        if ((newPresses & GamepadButtonFlags.A) != 0)
-                        {
-                            // Wir benutzen den zuverlässigen SelectedIndex, um das Item direkt zu holen.
-                            int selectedIndex = AppGridView.SelectedIndex;
-                            if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count)
-                            {
-                                if (AppGridView.Items[selectedIndex] is AppInfo app)
-                                {
-                                    LaunchApp(app);
-                                }
-                            }
-                            PlayActivationSound();
-                        }
-                        else if ((newPresses & GamepadButtonFlags.B) != 0)
-                        {
-                            ToggleAppLauncher_Click(null, null);
-                        }
-                        break;
-
-                    case FocusArea.Launcher:
-                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (_launcherAreaButtons.Any()) _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (_launcherAreaButtons.Any()) _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0)
-                        {
-                            if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item) item.TapAction?.Invoke(null, null);
-                            PlayActivationSound();
-                        }
-                        break;
-
-                    case FocusArea.TopButtons:
-                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (_topButtons.Any()) _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (_topButtons.Any()) _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0) { ClickSelectedTopButton(); PlayActivationSound(); }
-                        break;
-
-                    case FocusArea.Cards:
-                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0) { if (ProgramCardPanel.Children.Any()) _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) { if (ProgramCardPanel.Children.Any()) _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count; UpdateVisualFocus(); PlayNavigationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0) { TriggerCardAction(_selectedCardIndex, true); PlayActivationSound(); }
-                        else if ((newPresses & GamepadButtonFlags.B) != 0) { TriggerCardAction(_selectedCardIndex, false); PlaydeactivationSound(); }
-                        break;
-                }
-            }
-
-            // This must be the VERY LAST line to correctly track the state for the next frame.
-            _lastButtonState = currentButtons;
         }
 
+        private GamepadButtonFlags[] _lastButtonStates = new GamepadButtonFlags[4];
+        private int[] _lastStickXDirections = new int[4];
+        private int[] _lastStickYDirections = new int[4];
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
             if (PowerMenu.Visibility == Visibility.Visible)
@@ -6291,11 +7039,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 PowerMenu.Visibility = Visibility.Visible;
             }
         }
-
-        /// <summary>
-        /// Aktualisiert die UI performant, indem nur das alte und neue Element geändert wird.
-        /// </summary>
-       
 
         /// <summary>
         /// Updates the UI performantly by only changing the old and new focused elements.
@@ -6621,7 +7364,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
 
-
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindowbtf(IntPtr hWnd, int nCmdShow);
+        private const int SW_SHOW = 5; // Used for showing/activating
         public static void BringToFrontAndFocus(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
@@ -6634,7 +7379,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (IsIconic(hWnd))
                 {
                     // If it is minimized, we MUST restore it to make it visible.
-                    ShowWindow(hWnd, SW_RESTORE);
+                    ShowWindowbtf(hWnd, SW_RESTORE);
                 }
 
                 // Step 2: Now, bring it to the foreground. This part is safe for already
@@ -6924,25 +7669,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             if (e.ClickedItem is AppInfo app)
             {
-                try
-                {
-                    if (app.FilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var psi = new ProcessStartInfo(app.FilePath) { UseShellExecute = true };
-                        Process.Start(psi);
-                    }
-                    else
-                    {
-                        Process.Start(app.FilePath);
-                    }
-                    AppLauncher.Visibility = Visibility.Collapsed;
-                    _currentFocusArea = FocusArea.Cards;
-                    UpdateVisualFocus();
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[AppLauncher] Failed to launch '{app.FilePath}': {ex.Message}");
-                }
+               
+                LaunchApp(app);
             }
         }
 
@@ -7163,6 +7891,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
     }
     // Taskbar
+    /// <summary>
+    /// Steuert die Sichtbarkeit der Taskleiste UND anderer Shell-Elemente (Startmenü, etc.)
+    /// </summary>
     public static class TaskbarVisibility
     {
         [DllImport("user32.dll")]
@@ -7173,27 +7904,86 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         [DllImport("user32.dll")]
         static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
-            int X, int Y, int cx, int cy, uint uFlags);
+          int X, int Y, int cx, int cy, uint uFlags);
 
         const int SW_HIDE = 0;
         const int SW_SHOW = 5;
 
-        const uint SWP_HIDEWINDOW = 0x0080;
+        // AKTUALISIERT: Flags hinzugefügt, um Neuzeichnen/Größenänderung zu verhindern
+        const uint SWP_HIDEWINDOW = 0x0080;
         const uint SWP_SHOWWINDOW = 0x0040;
+        const uint SWP_NOMOVE = 0x0002;
+        const uint SWP_NOSIZE = 0x0001;
+        const uint SWP_NOZORDER = 0x0004;
+        const uint SWP_NOACTIVATE = 0x0010;
 
         static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
 
-        public static void HideTaskbar()
+        // NEU: Eine Hilfsmethode, um das Finden und Verstecken zu bündeln
+        private static void HideWindowByClass(string className)
         {
-            IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
-            if (taskbarHandle != IntPtr.Zero)
+            IntPtr windowHandle = FindWindow(className, null);
+            if (windowHandle != IntPtr.Zero)
             {
-                ShowWindow(taskbarHandle, SW_HIDE);
-                SetWindowPos(taskbarHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_HIDEWINDOW);
+                ShowWindow(windowHandle, SW_HIDE);
+                SetWindowPos(windowHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
             }
         }
 
-       
+        private static void HideWindowByTitle(string windowTitle)
+        {
+            IntPtr windowHandle = FindWindow(null, windowTitle);
+            if (windowHandle != IntPtr.Zero)
+            {
+                ShowWindow(windowHandle, SW_HIDE);
+                SetWindowPos(windowHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+            }
+        }
+
+        // AKTUALISIERT: Diese Methode versteckt jetzt ALLES
+        // This method now intelligently hides components based on settings
+        public static void HideTaskbar()
+        {
+            // Load the settings
+            bool enableTaskbar = false;
+            bool enableStartMenu = false;
+
+            try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
+            try { enableStartMenu = AppSettings.Load<bool>("enable_startmenu"); } catch { }
+
+            // --- 1. Taskbar Hiding ---
+            if (!enableTaskbar)
+            {
+                // 1. Main Taskbar (Shell_TrayWnd)
+                HideWindowByClass("Shell_TrayWnd");
+
+                // 2. Taskbar on secondary monitors
+                HideWindowByClass("Shell_SecondaryTrayWnd");
+            }
+
+            // --- 2. Start Menu Hiding ---
+            if (!enableStartMenu)
+            {
+                // 3. The Start menu (Class in Win 11)
+                HideWindowByClass("StartMenu.Internal.Flyout");
+
+                // 4. The Start menu (Fallback via window title, e.g., Win 10)
+                HideWindowByTitle("Start");
+            }
+
+            // --- 3. Other Shell Elements (We always hide these) ---
+
+            // 5. The Search window (Win+S)
+            HideWindowByTitle("Search"); // English Version
+            HideWindowByTitle("Suche"); // German Version
+
+            // 6. The Action Center / Quick Settings (Win+A)
+            HideWindowByClass("Windows.UI.Core.CoreWindow");
+            HideWindowByClass("ControlCenter.Internal.Flyout");
+
+            // 7. Calendar/Notifications (Win+N)
+            HideWindowByClass("NativeHWNDHost");
+        }
 
         public static void ShowTaskbar()
         {
@@ -7201,7 +7991,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             if (taskbarHandle != IntPtr.Zero)
             {
                 ShowWindow(taskbarHandle, SW_SHOW);
-                SetWindowPos(taskbarHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW);
+                // AKTUALISIERT: Flags hinzugefügt
+                SetWindowPos(taskbarHandle, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+            }
+
+            // NEU: Auch die sekundäre Taskleiste wieder anzeigen
+            IntPtr taskbarHandleSecondary = FindWindow("Shell_SecondaryTrayWnd", null);
+            if (taskbarHandleSecondary != IntPtr.Zero)
+            {
+                ShowWindow(taskbarHandleSecondary, SW_SHOW);
+                SetWindowPos(taskbarHandleSecondary, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
             }
         }
     }

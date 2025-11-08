@@ -1,32 +1,13 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net;
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.Json;
-using System.Windows.Forms;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-using static System.Net.Mime.MediaTypeNames;
-using Windows.System;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
 
 namespace GAMINGCONSOLEMODE
 {
-    /// <summary>
-    /// An empty page that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class settings : Page
     {
         public settings()
@@ -35,31 +16,31 @@ namespace GAMINGCONSOLEMODE
 
             try
             {
+                // Try to fetch the latest version number and display it.
                 string latestVersion = GetLatestVersion();
                 versiontext.Text = ("Latest version: " + latestVersion);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error: " + ex.Message);
+                // If it fails, just log it. Not a critical error.
+                Debug.WriteLine("Error fetching latest version: " + ex.Message);
             }
-
-
         }
 
         public static string GetLatestVersion()
         {
-            // GitHub API endpoint for the latest release
+            // This is the GitHub API endpoint to get info on the latest release.
             string apiUrl = "https://api.github.com/repos/Kosnix/GameConsoleMode/releases/latest";
 
             using (WebClient client = new WebClient())
             {
-                // GitHub API requires a User-Agent header.
+                // The GitHub API is a bit picky and requires a User-Agent header.
                 client.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
 
-                // Synchronously download the JSON response from the API.
+                // Grab the JSON response from the API as a string.
                 string json = client.DownloadString(apiUrl);
 
-                // Parse the JSON document to extract the "tag_name" property.
+                // Now, let's parse that JSON to find the version number.
                 using (JsonDocument doc = JsonDocument.Parse(json))
                 {
                     JsonElement root = doc.RootElement;
@@ -71,21 +52,24 @@ namespace GAMINGCONSOLEMODE
 
         private void changelogbutton_Click(object sender, RoutedEventArgs e)
         {
+            // This just opens the GitHub releases page in the user's default browser.
             string url = "https://github.com/Kosnix/GameConsoleMode/releases";
             try
             {
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = url,
-                    UseShellExecute = true
+                    UseShellExecute = true // UseShellExecute = true is important for opening URLs.
                 });
-                Console.WriteLine("The URL has been opened in your default browser.");
+                Debug.WriteLine("The URL has been opened in your default browser.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error opening the URL: " + ex.Message);
+                Debug.WriteLine("Error opening the URL: " + ex.Message);
             }
         }
+
+        // A helper to quickly show a simple info dialog.
         private void ShowSimpleDialog(string title, string content)
         {
             var dialog = new ContentDialog
@@ -93,19 +77,18 @@ namespace GAMINGCONSOLEMODE
                 Title = title,
                 Content = content,
                 CloseButtonText = "OK",
-                XamlRoot = App.MainWindow.Content.XamlRoot
+                XamlRoot = this.Content.XamlRoot // Make sure it's linked to the current window.
             };
 
             _ = dialog.ShowAsync();
         }
+
         private void windowsloginwithoutpassword_Click(object sender, RoutedEventArgs e)
         {
+            // This button provides a direct download link to the Sysinternals AutoLogon tool.
             try
             {
-                // Define the URL to the USBLogon Setup
                 string url = "https://download.sysinternals.com/files/AutoLogon.zip";
-
-                // Open the URL in the default browser
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = url,
@@ -114,17 +97,13 @@ namespace GAMINGCONSOLEMODE
             }
             catch (Exception ex)
             {
-               
+                Debug.WriteLine("Failed to open AutoLogon download link: " + ex.Message);
             }
-        }
-
-        private void Button_Click(object sender, RoutedEventArgs e)
-        {
-
         }
 
         private void resetconfig_Click(object sender, RoutedEventArgs e)
         {
+            // This is a destructive action that deletes the app's settings folder.
             try
             {
                 string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -132,32 +111,30 @@ namespace GAMINGCONSOLEMODE
 
                 if (Directory.Exists(gcmSettings))
                 {
-                    Directory.Delete(gcmSettings, true);
+                    Directory.Delete(gcmSettings, true); // true means recursive delete.
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Fehler: {ex.Message}");
+                Debug.WriteLine($"Error deleting settings folder: {ex.Message}");
             }
 
-            // Anwendung beenden
+            // The settings are gone, so the app needs to close to avoid errors.
             Environment.Exit(0);
         }
 
         private void uactoggle_Click(object sender, RoutedEventArgs e)
         {
-            //On
-
-                AppSettings.Save("uac", true);
+            // Turn on the UAC feature.
+            AppSettings.Save("uac", true);
             ShowSimpleDialog("GCM UAC ON", "GCM will re-enable UAC upon exit. The changes will take effect on the next GCM launch");
         }
 
         private void uactoggleoff_Click(object sender, RoutedEventArgs e)
         {
-            //off
-                AppSettings.Save("uac", false);
+            // Turn off the UAC feature.
+            AppSettings.Save("uac", false);
             ShowSimpleDialog("GCM UAC OFF", "GCM will disable UAC upon exit. The changes will take effect on the next GCM launch.");
-
         }
     }
 }

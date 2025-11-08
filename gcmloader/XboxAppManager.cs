@@ -1,27 +1,40 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Tasks;
 using Windows.Management.Deployment;
 
 namespace gcmloader
 {
+    /// <summary>
+    /// A helper class designed to find, launch, and manage the Windows Xbox application.
+    /// </summary>
     public class XboxLauncher
     {
+        #region Win32 Imports & Constants
+
+        // Imports the user32.dll function needed to control window states.
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        // Constant for the ShowWindow function to maximize the window.
         private const int SW_SHOWMAXIMIZED = 3;
 
+        #endregion
+
+        #region Core Logic
+
         /// <summary>
-        /// Findet den vollen Pfad zur XboxPcApp.exe über die offizielle PackageManager-API.
+        /// Finds the full executable path for the Xbox App using the official PackageManager API.
+        /// This is the reliable way to locate UWP/packaged apps.
         /// </summary>
+        /// <returns>The full path to the Xbox app executable.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if the Xbox app is not installed for the current user.</exception>
         private string FindXboxExePath()
         {
             var packageManager = new PackageManager();
-            // Der "Package Family Name" der Xbox-App
+            // This is the static "Package Family Name" for the Microsoft Xbox App.
             const string packageFamilyName = "Microsoft.GamingApp_8wekyb3d8bbwe";
 
             var packages = packageManager.FindPackagesForUser(string.Empty, packageFamilyName);
@@ -29,56 +42,65 @@ namespace gcmloader
 
             if (package == null)
             {
-                throw new InvalidOperationException("Xbox-App ist nicht für den aktuellen Benutzer installiert.");
+                throw new InvalidOperationException("The Xbox App is not installed for the current user.");
             }
 
-            // Der Pfad zur App-Exe innerhalb des Installationsordners
-            // AppListEntries[0] ist normalerweise der Haupteintrag.
-            return System.IO.Path.Combine(package.InstalledLocation.Path, package.GetAppListEntries()[0].AppUserModelId.Split('!')[1] + ".exe");
+            // The path to the app executable is constructed from its installation folder and its AppUserModelId.
+            // AppListEntries[0] is typically the main entry point for the application.
+            string appName = package.GetAppListEntries()[0].AppUserModelId.Split('!')[1];
+            return System.IO.Path.Combine(package.InstalledLocation.Path, $"{appName}.exe");
         }
 
+        #endregion
+
+        #region Public Methods
+
         /// <summary>
-        /// Startet die Xbox-App und gibt das Fenster-Handle zurück, sobald es verfügbar ist.
+        /// Launches the Xbox app and waits asynchronously for its main window handle to become available.
         /// </summary>
+        /// <returns>The window handle (IntPtr) of the main Xbox app window, or IntPtr.Zero if it fails.</returns>
         public async Task<IntPtr> LaunchAndGetWindowHandleAsync()
         {
             try
             {
-                // Schritt 1: Pfad sauber finden
+                // Step 1: Reliably find the executable path.
                 string exePath = FindXboxExePath();
                 if (string.IsNullOrEmpty(exePath)) return IntPtr.Zero;
 
-                // Schritt 2: Prozess starten
+                // Step 2: Start the process.
                 Process xboxProcess = Process.Start(new ProcessStartInfo(exePath));
                 if (xboxProcess == null) return IntPtr.Zero;
 
-                Console.WriteLine($"Xbox-Prozess gestartet mit ID: {xboxProcess.Id}");
+                Console.WriteLine($"Xbox process started with ID: {xboxProcess.Id}");
 
-                // Schritt 3: Zuverlässig auf das Fenster warten (max. 15 Sekunden)
+                // Step 3: Wait reliably for the window handle to be created.
+                // UWP apps can take a moment to initialize, so we poll for the handle.
+                // We'll try for a maximum of 15 seconds (30 attempts * 500ms delay).
                 for (int i = 0; i < 30; i++)
                 {
-                    xboxProcess.Refresh();
+                    xboxProcess.Refresh(); // Refresh process info
                     if (xboxProcess.MainWindowHandle != IntPtr.Zero)
                     {
-                        Console.WriteLine("Fenster-Handle gefunden!");
+                        Console.WriteLine("Window handle found!");
                         return xboxProcess.MainWindowHandle;
                     }
-                    await Task.Delay(500); // Kurz warten
+                    await Task.Delay(500); // Wait a moment before checking again.
                 }
 
-                Console.WriteLine("Zeitüberschreitung: Fenster-Handle wurde nicht gefunden.");
-                return IntPtr.Zero; // Handle nicht gefunden
+                Console.WriteLine("Timeout: Window handle was not found in time.");
+                return IntPtr.Zero; // Return zero if the handle wasn't found.
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Ein Fehler ist aufgetreten: {ex.Message}");
+                Console.WriteLine($"An error occurred: {ex.Message}");
                 return IntPtr.Zero;
             }
         }
 
         /// <summary>
-        /// Hilfsmethode, um ein Fenster zu maximieren.
+        /// A helper method to maximize a window using its handle.
         /// </summary>
+        /// <param name="hwnd">The window handle (IntPtr) of the window to maximize.</param>
         public void MaximizeWindow(IntPtr hwnd)
         {
             if (hwnd != IntPtr.Zero)
@@ -86,5 +108,7 @@ namespace gcmloader
                 ShowWindow(hwnd, SW_SHOWMAXIMIZED);
             }
         }
+
+        #endregion
     }
 }

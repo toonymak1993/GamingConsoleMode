@@ -9,20 +9,14 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media.Imaging;
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+using Button = Microsoft.UI.Xaml.Controls.Button;
+using TextBox = Microsoft.UI.Xaml.Controls.TextBox;
+
 
 namespace GAMINGCONSOLEMODE
 {
-    public sealed partial class taskmanager : Page
+    public sealed partial class taskmanager : Microsoft.UI.Xaml.Controls.Page
     {
         public taskmanager()
         {
@@ -56,6 +50,8 @@ namespace GAMINGCONSOLEMODE
             {
                 // Ignore if API key setting doesn't exist
             }
+
+            LoadShellVisibilitySettings();
         }
 
         #region SteamGridDB
@@ -93,8 +89,8 @@ namespace GAMINGCONSOLEMODE
         {
             // Find the correct UI elements based on the index
             var imageControl = this.FindName($"Image{index}") as Image;
-            var argsBox = this.FindName($"Args{index}") as TextBox;
-            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
+            var argsBox = this.FindName($"Args{index}") as Microsoft.UI.Xaml.Controls.TextBox;
+            var workDirBox = this.FindName($"WorkDir{index}") as Microsoft.UI.Xaml.Controls.TextBox; // *** ADDED ***
             if (imageControl == null || argsBox == null || workDirBox == null) return; // *** MODIFIED ***
 
             try
@@ -120,8 +116,8 @@ namespace GAMINGCONSOLEMODE
         /// </summary>
         private void SaveSettingsForButton(int index)
         {
-            var argsBox = this.FindName($"Args{index}") as TextBox;
-            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
+            var argsBox = this.FindName($"Args{index}") as Microsoft.UI.Xaml.Controls.TextBox;
+            var workDirBox = this.FindName($"WorkDir{index}") as Microsoft.UI.Xaml.Controls.TextBox; // *** ADDED ***
             if (argsBox == null || workDirBox == null) return; // *** MODIFIED ***
 
             try
@@ -155,7 +151,7 @@ namespace GAMINGCONSOLEMODE
         private async void SelectLink_Click(object sender, RoutedEventArgs e)
         {
             int index = int.Parse((sender as Button).Name.Replace("SelectLink", ""));
-            var workDirBox = this.FindName($"WorkDir{index}") as TextBox; // *** ADDED ***
+            var workDirBox = this.FindName($"WorkDir{index}") as Microsoft.UI.Xaml.Controls.TextBox; // *** ADDED ***
 
             var file = await PickFileAsync(new[] { ".exe" });
             if (file != null)
@@ -180,8 +176,8 @@ namespace GAMINGCONSOLEMODE
             try
             {
                 string exePath = AppSettings.Load<string>($"button{index}link");
-                string arguments = (this.FindName($"Args{index}") as TextBox)?.Text ?? "";
-                string workDir = (this.FindName($"WorkDir{index}") as TextBox)?.Text ?? ""; // *** ADDED ***
+                string arguments = (this.FindName($"Args{index}") as Microsoft.UI.Xaml.Controls.TextBox)?.Text ?? "";
+                string workDir = (this.FindName($"WorkDir{index}") as Microsoft.UI.Xaml.Controls.TextBox)?.Text ?? ""; // *** ADDED ***
 
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                 {
@@ -206,7 +202,7 @@ namespace GAMINGCONSOLEMODE
         private void Args_TextChanged(object sender, TextChangedEventArgs e)
         {
             // Find out which textbox was changed by reading the number from its name.
-            var textBox = sender as TextBox;
+            var textBox = sender as Microsoft.UI.Xaml.Controls.TextBox;
             int index = int.Parse(Regex.Match(textBox.Name, @"\d+").Value);
 
             // Save the new text to the settings file under the correct key (e.g., "button1args").
@@ -221,6 +217,7 @@ namespace GAMINGCONSOLEMODE
         {
             // Find out which textbox was changed by reading the number from its name.
             var textBox = sender as TextBox;
+
             int index = int.Parse(Regex.Match(textBox.Name, @"\d+").Value);
 
             // Save the new text to the settings file under the correct key (e.g., "button1workdir").
@@ -271,5 +268,54 @@ namespace GAMINGCONSOLEMODE
             if (sender is ToggleSwitch toggle) AppSettings.Save("handheldtouchlauncher", toggle.IsOn);
         }
         #endregion
+
+        private void Startmenu_Toggled(object sender, RoutedEventArgs e)
+        {
+            // This event is triggered when the "Enable Startmenu" toggle is changed.
+            if (sender is ToggleSwitch toggle)
+            {
+                bool isEnabled = toggle.IsOn;
+                AppSettings.Save("enable_startmenu", isEnabled);
+                Debug.WriteLine($"Setting 'enable_startmenu' saved: {isEnabled}");
+            }
+        }
+
+        private void Taskbar_Toggled(object sender, RoutedEventArgs e)
+        {
+            // This event is triggered when the "Enable Taskbar" toggle is changed.
+            if (sender is ToggleSwitch toggle)
+            {
+                bool isEnabled = toggle.IsOn;
+                AppSettings.Save("enable_taskbar", isEnabled);
+                Debug.WriteLine($"Setting 'enable_taskbar' saved: {isEnabled}");
+            }
+        }
+
+        private void LoadShellVisibilitySettings()
+        {
+            try
+            {
+                // Find the toggle in XAML and set its state from the saved setting
+                Taskbar.IsOn = AppSettings.Load<bool>("enable_taskbar");
+            }
+            catch
+            {
+                // If setting doesn't exist, default to false (Disabled)
+                Taskbar.IsOn = false;
+                AppSettings.Save("enable_taskbar", false); // Save the default
+            }
+
+            try
+            {
+                // Find the toggle in XAML and set its state from the saved setting
+                Startmenu.IsOn = AppSettings.Load<bool>("enable_startmenu");
+            }
+            catch
+            {
+                // If setting doesn't exist, default to false (Disabled)
+                Startmenu.IsOn = false;
+                AppSettings.Save("enable_startmenu", false); // Save the default
+            }
+        }
     }
 }

@@ -109,8 +109,27 @@ If no key is provided, running applications will show their default icon instead
                         </StackPanel>
 
                     </StackPanel>
+                    
+                    
 
                 </StackPanel>
+                
+            </StackPanel>
+            <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="16" >
+            <TextBlock Text="Taskbar Settings" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+            <ToggleSwitch x:Name="Taskbar" Header="Enable Taskbar"
+Toggled="Taskbar_Toggled"
+OffContent="Disabled"
+OnContent="Enabled"
+Foreground="White"
+Grid.Column="0"/>
+
+            <ToggleSwitch x:Name="Startmenu" Header="Enable Startmenu"
+OffContent="Disabled"
+OnContent="Enabled"
+                          Toggled="Startmenu_Toggled"
+Foreground="White"
+Grid.Column="0"/>
             </StackPanel>
         </StackPanel>
 

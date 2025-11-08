@@ -4,8 +4,6 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Windows.Forms;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -13,86 +11,92 @@ namespace GAMINGCONSOLEMODE
 {
     public class AppSettings
     {
+        #region File Paths & Locking
+
         private static readonly string SettingsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
         private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "settings.toml");
-
         private static readonly object _fileLock = new object();
-        // This is a helper class to show a traditional Win32 MessageBox.
-        // It's simpler for synchronous, blocking messages than using a ContentDialog.
+
+        #endregion
+
+        #region Win32 MessageBox Helper
+
+        /// <summary>
+        /// A helper class to show a traditional Win32 MessageBox.
+        /// </summary>
         public static class MessageBoxHelper
         {
-            // Imports the user32.dll MessageBox function
+            // Imports the user32.dll MessageBox function.
             [DllImport("user32.dll", CharSet = CharSet.Unicode)]
             private static extern int MessageBox(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
-            // Shows the message box
+            /// <summary>
+            /// Shows a native Win32 message box.
+            /// </summary>
+            /// <param name="window">The parent WinUI 3 window.</param>
+            /// <param name="text">The message to display.</param>
+            /// <param name="title">The title of the message box.</param>
             public static void Show(Window window, string text, string title)
             {
-                // Gets the window handle (HWND) from the WinUI 3 window object
+                // Gets the window handle (HWND) from the WinUI 3 window object.
                 var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
-
-                // Calls the Win32 function
-                MessageBox(hwnd, text, title, 0); // 0 = MB_OK
+                // Calls the Win32 function to show the message box (0 = MB_OK).
+                MessageBox(hwnd, text, title, 0);
             }
         }
 
+        #endregion
+
+        #region First Start & Validation
+
         /// <summary>
-        /// Ensures that a valid configuration file exists and cleans up obsolete files.
-        /// If the configuration needs to be created, it will trigger an application restart afterwards.
+        /// Ensures a valid and parseable configuration file exists on application startup.
+        /// If the file does not exist, is empty, or syntactically invalid, it will be regenerated,
+        /// and the application will be prompted to restart.
+        /// Also handles cleanup of obsolete files from previous versions.
         /// </summary>
-        /// <summary>
-        /// Ensures a valid and parseable configuration file exists.
-        /// If the file does not exist, is empty, whitespace, or syntactically invalid,
-        /// it will be deleted and regenerated, followed by an application restart.
-        /// </summary>
-        public static void FirstStart(Window window) // <-- MODIFIED: Takes a Window parameter
+        /// <param name="window">The main application window, required for showing message boxes.</param>
+        public static void FirstStart(Window window)
         {
             lock (_fileLock)
             {
-                // --- Clean up obsolete settings.json ---
+                // --- Clean up obsolete settings.json from older versions ---
                 try
                 {
                     string oldJsonPath = Path.Combine(SettingsFolder, "settings.json");
                     if (File.Exists(oldJsonPath))
                     {
                         File.Delete(oldJsonPath);
-                        // No message box needed here, this is a silent cleanup
                     }
                 }
                 catch (Exception ex)
                 {
-                    //"An error occurred while deleting the old settings.json:\n{ex.Message}", "Cleanup Error");
+                    Debug.WriteLine($"Error deleting old settings.json: {ex.Message}");
                 }
-                //--- Clean up gcmcrew startmenu folder
+
+                // --- Clean up obsolete 'GCMcrew' start menu folder ---
                 try
                 {
-                    // Get the path to the user's Start Menu Programs folder dynamically
                     string startMenuProgramsPath = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
-
-                    // Combine it with the folder name you want to delete
                     string folderToDeletePath = Path.Combine(startMenuProgramsPath, "GCMcrew");
-
-                    // Check if the folder exists
                     if (Directory.Exists(folderToDeletePath))
                     {
-                        // Delete the folder and all its contents (recursive: true)
                         Directory.Delete(folderToDeletePath, true);
                         Console.WriteLine($"Obsolete Start Menu folder deleted: {folderToDeletePath}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Show an error if deletion fails (e.g., due to permissions)
-                    MessageBoxHelper.Show(window, $"An error occurred while deleting the GCMcrew Start Menu folder:\n{ex.Message}", "Cleanup Error");
+                    MessageBoxHelper.Show(window, $"An error occurred while deleting the old GCMcrew Start Menu folder:\n{ex.Message}", "Cleanup Error");
                 }
 
                 // --- Ensure the settings directory exists ---
                 Directory.CreateDirectory(SettingsFolder);
 
-                // --- Main Validation Logic ---
+                // --- Validate the current settings.toml file ---
                 if (!File.Exists(SettingsFilePath))
                 {
-                    RegenerateConfigAndRestart(window); 
+                    RegenerateConfigAndRestart(window);
                 }
                 else
                 {
@@ -103,90 +107,36 @@ namespace GAMINGCONSOLEMODE
                         {
                             throw new Exception("File is empty or contains only whitespace.");
                         }
+                        // Try to parse the file to ensure it's valid TOML.
                         var model = Toml.ToModel(content);
                         Console.WriteLine("Valid and parseable settings file found.");
                     }
                     catch (Exception ex)
                     {
                         MessageBoxHelper.Show(window, $"The settings file is corrupt or invalid and will be recreated.\n\nError: {ex.Message}", "Configuration Error");
-                        RegenerateConfigAndRestart(window); // <-- MODIFIED: Passes the window
+                        RegenerateConfigAndRestart(window);
                     }
                 }
             }
         }
 
-        /// <summary>
-        /// Helper method to handle the process of deleting, re-creating, and restarting.
-        /// </summary>
-        private static void RegenerateConfigAndRestart(Window window) // <-- MODIFIED: Takes a Window parameter
-        {
-            if (File.Exists(SettingsFilePath))
-            {
-                File.Delete(SettingsFilePath);
-            }
+        #endregion
 
-            initialconfig();
-
-            // --- Restart after initial configuration with a MessageBox ---
-            MessageBoxHelper.Show(window, "The initial setup is complete. The application will now restart to apply the new settings.", "Restart Required");
-            RestartApplication();
-        }
+        #region Configuration Management (Save, Load, Delete)
 
         /// <summary>
-        /// Helper method to handle the process of deleting, re-creating, and restarting.
+        /// Saves a key-value pair to the settings.toml file.
+        /// If the file or key exists, it will be updated; otherwise, it will be created.
         /// </summary>
-        private static void RegenerateConfigAndRestart()
-        {
-            // Ensure the file is deleted before creating a new one.
-            if (File.Exists(SettingsFilePath))
-            {
-                File.Delete(SettingsFilePath);
-            }
-
-            // Create the default configuration.
-            initialconfig();
-
-            // --- Restart after initial configuration ---
-            Console.WriteLine("Initial setup is complete. The application will now restart.");
-            RestartApplication();
-        }
-
-        /// <summary>
-        /// Startet die Anwendung neu.
-        /// </summary>
-        public static void RestartApplication()
-        {
-            try
-            {
-                // Startet die Anwendung neu und beendet die aktuelle Instanz.
-                // Der Parameter kann für Startargumente verwendet werden, wir brauchen hier aber keine.
-                AppInstance.Restart(string.Empty);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"restart error {ex.Message}");
-                // Optional: Dem Benutzer eine Fehlermeldung anzeigen.
-                // WICHTIG: Da wir hier keine Referenz auf das UI-Fenster haben, 
-                // ist eine MessageBox schwierig. Console-Logging ist hier sicherer.
-            }
-        }
         public static void Save(string key, object value)
         {
             lock (_fileLock)
             {
                 try
                 {
-                    TomlTable settings;
-
-                    if (File.Exists(SettingsFilePath))
-                    {
-                        var tomlText = File.ReadAllText(SettingsFilePath);
-                        settings = Toml.Parse(tomlText).ToModel();
-                    }
-                    else
-                    {
-                        settings = new TomlTable();
-                    }
+                    TomlTable settings = File.Exists(SettingsFilePath)
+                        ? Toml.Parse(File.ReadAllText(SettingsFilePath)).ToModel()
+                        : new TomlTable();
 
                     settings[key] = value;
 
@@ -202,6 +152,12 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
+        /// <summary>
+        /// Loads a value from the settings.toml file by its key.
+        /// </summary>
+        /// <typeparam name="T">The expected type of the value.</typeparam>
+        /// <returns>The value converted to the specified type.</returns>
+        /// <exception cref="Exception">Throws if the key is not found or the type is incorrect.</exception>
         public static T Load<T>(string key)
         {
             lock (_fileLock)
@@ -216,63 +172,59 @@ namespace GAMINGCONSOLEMODE
                         if (settings.ContainsKey(key))
                         {
                             var value = settings[key];
-
-                            if (value is T typedValue)
-                            {
-                                return typedValue;
-                            }
-                            else
-                            {
-                                // Convert if possible
-                                return (T)Convert.ChangeType(value, typeof(T));
-                            }
+                            // Direct cast if the type matches, otherwise try to convert.
+                            return value is T typedValue ? typedValue : (T)Convert.ChangeType(value, typeof(T));
                         }
                     }
-                    throw new Exception($"Key '{key}' not found in the settings.");
+                    throw new Exception($"Key '{key}' not found in settings.");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error in Load method: {ex.Message}");
+                    Console.WriteLine($"Error in Load method for key '{key}': {ex.Message}");
                     throw;
                 }
             }
         }
+
+        /// <summary>
+        /// Deletes a key from the settings.toml file.
+        /// </summary>
         public static void Delete(string key)
         {
-            try
+            lock (_fileLock)
             {
-                // Prüfen, ob die Einstellungsdatei existiert.
-                if (!File.Exists(SettingsFilePath))
+                try
                 {
-                    return;
+                    if (!File.Exists(SettingsFilePath)) return;
+
+                    var tomlTable = Toml.Parse(File.ReadAllText(SettingsFilePath)).ToModel();
+
+                    if (tomlTable.Remove(key))
+                    {
+                        File.WriteAllText(SettingsFilePath, Toml.FromModel(tomlTable));
+                    }
                 }
-
-                // Lese das gesamte TOML-Dokument.
-                var tomlString = File.ReadAllText(SettingsFilePath);
-                var tomlTable = Toml.ToModel(tomlString);
-
-                // Prüfe, ob der Schlüssel vorhanden ist und entferne ihn, wenn ja.
-                if (tomlTable.ContainsKey(key))
+                catch (Exception ex)
                 {
-                    tomlTable.Remove(key);
-
-                    // Schreibe die aktualisierte Tabelle zurück in die Datei.
-                    File.WriteAllText(SettingsFilePath, Toml.FromModel(tomlTable));
+                    Debug.WriteLine($"[ERROR] Failed to delete key '{key}' from AppSettings: {ex.Message}");
                 }
-            }
-            catch (Exception ex)
-            {
-                // Logge den Fehler, um bei der Fehlersuche zu helfen.
-                Debug.WriteLine($"[ERROR] Fehler beim Löschen des Schlüssels '{key}' aus den AppSettings: {ex.Message}");
             }
         }
+
+        #endregion
+
+        #region Default Configuration & Restart Logic
+
+        /// <summary>
+        /// Creates a new settings.toml file with default values and standard shortcuts.
+        /// </summary>
         public static void initialconfig()
         {
             lock (_fileLock)
             {
                 try
                 {
-                    // 1. Deine bestehenden Standard-Einstellungen
+                    // 1. Define the base default settings.
                     var defaultSettings = new TomlTable
                     {
                         ["launcher"] = "steam",
@@ -280,35 +232,31 @@ namespace GAMINGCONSOLEMODE
                         ["onboarding"] = false
                     };
 
-                    // === ANFANG DER NEUEN LOGIK ===
-
-                    // 2. Erstelle die Liste (TomlTableArray) für die Standard-Shortcuts
+                    // 2. Create the list for default shortcuts.
                     var defaultShortcuts = new TomlTableArray
-            {
-                // Standard-Shortcut 1: Task Manager
-                new TomlTable
-                {
-                    ["key1"] = "Back",
-                    ["key2"] = "Start",
-                    ["function"] = "taskmanager",
-                    ["enabled"] = true
-                },
-                // Standard-Shortcut 2: Show Overlay
-                new TomlTable
-                {
-                    ["key1"] = "RightThumb",
-                    ["key2"] = "DPadLeft",
-                    ["function"] = "show overlay",
-                    ["enabled"] = true
-                }
-            };
+                    {
+                        // Default Shortcut 1: Task Manager
+                        new TomlTable
+                        {
+                            ["key1"] = "Back",
+                            ["key2"] = "Start",
+                            ["function"] = "taskmanager",
+                            ["enabled"] = true
+                        },
+                        // Default Shortcut 2: Show Overlay
+                        new TomlTable
+                        {
+                            ["key1"] = "RightThumb",
+                            ["key2"] = "DPadLeft",
+                            ["function"] = "show overlay",
+                            ["enabled"] = true
+                        }
+                    };
 
-                    // 3. Füge die Shortcut-Liste zu den Haupteinstellungen hinzu
+                    // 3. Add the shortcut list to the main settings.
                     defaultSettings["shortcuts"] = defaultShortcuts;
 
-                    // === ENDE DER NEUEN LOGIK ===
-
-                    // 4. Speichere die kompletten Einstellungen (inkl. Shortcuts) in die Datei
+                    // 4. Save the complete settings object to the file.
                     var tomlText = Toml.FromModel(defaultSettings);
                     File.WriteAllText(SettingsFilePath, tomlText);
 
@@ -320,5 +268,37 @@ namespace GAMINGCONSOLEMODE
                 }
             }
         }
+
+        /// <summary>
+        /// Helper method to delete, re-create the config, and restart the app, showing a message box.
+        /// </summary>
+        private static void RegenerateConfigAndRestart(Window window)
+        {
+            if (File.Exists(SettingsFilePath))
+            {
+                File.Delete(SettingsFilePath);
+            }
+            initialconfig();
+            MessageBoxHelper.Show(window, "The initial setup is complete. The application will now restart to apply the new settings.", "Restart Required");
+            RestartApplication();
+        }
+
+        /// <summary>
+        /// Restarts the entire application.
+        /// </summary>
+        public static void RestartApplication()
+        {
+            try
+            {
+                // Use the AppInstance API to restart the application.
+                AppInstance.Restart(string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Application restart failed: {ex.Message}");
+            }
+        }
+
+        #endregion
     }
 }
