@@ -425,5 +425,15 @@ namespace GAMINGCONSOLEMODE
             if (sender is ToggleSwitch toggle) AppSettings.Save("shortcutpopup", toggle.IsOn);
         }
         #endregion
+
+        private void Taskbar_Toggled(object sender, RoutedEventArgs e)
+        {
+
+        }
+
+        private void Startmenu_Toggled(object sender, RoutedEventArgs e)
+        {
+
+        }
     }
 }

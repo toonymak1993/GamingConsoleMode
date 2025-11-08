@@ -154,12 +154,6 @@ namespace GAMINGCONSOLEMODE
                     Console.WriteLine("An update is available!");
                     // Make the update notification bar visible.
                     mainWindow.UpdateBar.Visibility = Visibility.Visible;
-
-                    //startnews panel
-
-                    string newsUrl = "https://www.gameconsolemode.com/news";
-                    WebBrowserLauncher.OpenUrlInBrowser(newsUrl);
-
                 }
                 else
                 {

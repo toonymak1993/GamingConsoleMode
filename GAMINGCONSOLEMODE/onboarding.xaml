@@ -28,7 +28,7 @@
                 <Border x:Name="Step2Indicator" Width="32" Height="32" CornerRadius="16">
                     <TextBlock x:Name="Step2Number" Text="2" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
-                <TextBlock x:Name="Step2Text" Text="Shortcuts" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock x:Name="Step2Text" Text="Autostart" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
             </StackPanel>
 
             <FontIcon x:Name="Arrow2" Glyph="&#xE0AD;" FontSize="16" VerticalAlignment="Center" />
@@ -37,7 +37,16 @@
                 <Border x:Name="Step3Indicator" Width="32" Height="32" CornerRadius="16">
                     <TextBlock x:Name="Step3Number" Text="3" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
-                <TextBlock x:Name="Step3Text" Text="Finish" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock x:Name="Step3Text" Text="Autologon" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <FontIcon x:Name="Arrow3" Glyph="&#xE0AD;" FontSize="16" VerticalAlignment="Center" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Border x:Name="Step4Indicator" Width="32" Height="32" CornerRadius="16">
+                    <TextBlock x:Name="Step4Number" Text="4" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock x:Name="Step4Text" Text="Finish" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
             </StackPanel>
 
         </StackPanel>
@@ -47,12 +56,18 @@
             <FlipViewItem>
                 <Grid>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="600">
+
+                        <Image Source="Assets/gcm_ui_logo.png" Height="200" Margin="25,5"/>
+
                         <TextBlock Text="Getting Started with GCM"
                                    FontSize="42" FontWeight="SemiBold" HorizontalAlignment="Center"
                                    TextWrapping="Wrap" TextAlignment="Center" />
                         <TextBlock Text="Master your controller shortcuts and learn how to get the most out of GameConsoleMode."
                                    FontSize="20" HorizontalAlignment="Center" Foreground="Gray"
                                    TextWrapping="Wrap" TextAlignment="Center" />
+
+                        <Button x:Name="onboarding" Content="Open Onboarding information" Grid.Column="1" Margin="0,0,10,0" Click="onboarding_Click"  IsEnabled="True" HorizontalAlignment="Center" Width="230" Height="60" FontSize="15" />
+
                     </StackPanel>
                 </Grid>
             </FlipViewItem>
@@ -60,12 +75,23 @@
             <FlipViewItem>
                 <Grid>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="600">
-                        <TextBlock Text="Controller Legend"
+                        <Image Source="Assets/onboarding/shortcuts.png" Height="160" Margin="25,5"/>
+
+                        <TextBlock Text="Autostart Management"
                                    FontSize="42" FontWeight="SemiBold" HorizontalAlignment="Center"
                                    TextWrapping="Wrap" TextAlignment="Center" />
-                        <TextBlock Text="Quick reference for all controller shortcuts."
+                        <TextBlock Text="GCM can control your autostart apps so that nothing pops up at startup. Of course, you can also do this yourself. You have to deactivate some launchers such as Rog AC yourself. "
                                    FontSize="20" HorizontalAlignment="Center" Foreground="Gray"
                                    TextWrapping="Wrap" TextAlignment="Center" />
+
+                        <ToggleSwitch x:Name="AutostartToggle" 
+                                      Header="Autostart Management" 
+                                      OnContent="On"
+                                      OffContent="Off" 
+                                      Toggled="AutostartToggle_Toggled"
+                                      HorizontalAlignment="Center" 
+                                      Margin="0,20,0,0" />
+
                     </StackPanel>
                 </Grid>
             </FlipViewItem>
@@ -73,12 +99,43 @@
             <FlipViewItem>
                 <Grid>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="600">
+                        <Image Source="/functions/winpart.png" Height="200" Margin="25,5"/>
+
+                        <TextBlock Text="Automatic Logon"
+                                   FontSize="42" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   TextWrapping="Wrap" TextAlignment="Center" />
+                        <TextBlock Text="Download the official Windows tool so you don't have to enter your password at startup."
+                                   FontSize="20" HorizontalAlignment="Center" Foreground="Gray"
+                                   TextWrapping="Wrap" TextAlignment="Center" />
+
+                        <Button x:Name="autologon" Content="Windows Autologon" Grid.Column="1" Margin="0,0,10,0" Click="autologon_Click"  IsEnabled="True" HorizontalAlignment="Center" Width="230" Height="60" FontSize="15" />
+
+                    </StackPanel>
+                </Grid>
+            </FlipViewItem>
+
+            <FlipViewItem>
+                <Grid>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="600">
+
+                        <Image Source="/Assets/onboarding/discord.jpg" Height="200" Margin="25,5"/>
+
                         <TextBlock Text="You're all set!"
                                    FontSize="42" FontWeight="SemiBold" HorizontalAlignment="Center"
                                    TextWrapping="Wrap" TextAlignment="Center" />
-                        <TextBlock Text="You can change all settings later. Click 'Start GCM' (in the main window) to begin."
+                        <TextBlock Text="Support, Suggestions, Updates and Community"
                                    FontSize="20" HorizontalAlignment="Center" Foreground="Gray"
                                    TextWrapping="Wrap" TextAlignment="Center" />
+
+                        <Button x:Name="DiscordButton" 
+                                Content="Join our Community" 
+                                HorizontalAlignment="Center" 
+                                Margin="0,20,0,0" 
+                                Click="DiscordButton_Click" 
+                                Width="230" 
+                                Height="60" 
+                                FontSize="15"/>
+
                     </StackPanel>
                 </Grid>
             </FlipViewItem>
@@ -93,10 +150,10 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Button x:Name="BackButton" Content="Back" Grid.Column="1" Margin="0,0,10,0" Click="BackButton_Click" IsEnabled="False" />
+            <Button x:Name="BackButton" Content="Back" Width="100" Grid.Column="1" Margin="0,0,10,0" Click="BackButton_Click" IsEnabled="False" />
 
-            <Button x:Name="NextButton" Content="Next" Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="NextButton_Click" />
-            <Button x:Name="FinishButton" Content="Finish" Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="FinishButton_Click" Visibility="Collapsed" />
+            <Button x:Name="NextButton" Content="Next" Width="100" Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="NextButton_Click" />
+            <Button x:Name="FinishButton" Content="Finish" Width="100" Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="FinishButton_Click" Visibility="Collapsed" />
         </Grid>
     </Grid>
 </Page>

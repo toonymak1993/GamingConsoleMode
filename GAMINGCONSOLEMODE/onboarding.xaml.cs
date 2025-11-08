@@ -1,74 +1,83 @@
 ﻿// In Onboarding.xaml.cs
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI; // Für Colors
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using System;
+using System.ComponentModel;
 using System.Diagnostics;
+using Windows.System;
 
 namespace GAMINGCONSOLEMODE
 {
     public sealed partial class Onboarding : Page
     {
-        // Arrays für einen einfachen Zugriff auf die UI-Elemente des Steppers
+       
         private Border[] _stepIndicators;
         private TextBlock[] _stepNumbers;
         private TextBlock[] _stepTexts;
         private FontIcon[] _stepArrows;
 
-        // Farben für die verschiedenen Zustände
+       
         private SolidColorBrush _accentBrush;
         private SolidColorBrush _neutralBrush;
         private SolidColorBrush _textActiveBrush;
         private SolidColorBrush _textInactiveBrush;
 
-        // ### START DER KORREKTUR ###
-        // Dieser Schalter verhindert, dass der Code ausgeführt wird, bevor die Seite geladen ist
+        
         private bool _isPageLoaded = false;
-        // ### ENDE DER KORREKTUR ###
+     
 
         public Onboarding()
         {
             this.InitializeComponent();
             this.Loaded += Onboarding_Loaded;
 
-            // Definiere die Farben. Wir holen die Akzentfarbe aus den App-Ressourcen.
+  
+
+            
             _accentBrush = Application.Current.Resources["SystemAccentColor"] as SolidColorBrush;
 
-            // Wir verwenden die voll qualifizierten Namen, um den Fehler zu beheben:
-            _neutralBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 64, 64, 64)); // Dunkelgrau
+        
+            _neutralBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 64, 64, 64)); 
             _textActiveBrush = new SolidColorBrush(Microsoft.UI.Colors.White);
             _textInactiveBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray);
         }
 
         private void Onboarding_Loaded(object sender, RoutedEventArgs e)
         {
-            // Fülle die Arrays mit den UI-Elementen aus dem XAML
-            _stepIndicators = new Border[] { Step1Indicator, Step2Indicator, Step3Indicator };
-            _stepNumbers = new TextBlock[] { Step1Number, Step2Number, Step3Number };
-            _stepTexts = new TextBlock[] { Step1Text, Step2Text, Step3Text };
-            _stepArrows = new FontIcon[] { Arrow1, Arrow2 };
+         
+            _stepIndicators = new Border[] { Step1Indicator, Step2Indicator, Step3Indicator, Step4Indicator };
+            _stepNumbers = new TextBlock[] { Step1Number, Step2Number, Step3Number, Step4Number };
+            _stepTexts = new TextBlock[] { Step1Text, Step2Text, Step3Text, Step4Text };
+            _stepArrows = new FontIcon[] { Arrow1, Arrow2, Arrow3 };
 
-            // Setze den visuellen Startzustand (Schritt 1 ist aktiv)
+           
             UpdateStepperVisuals(0);
 
-            // ### START DER KORREKTUR ###
-            // Jetzt, da alles geladen ist, setzen wir den Schalter auf true
+            try
+            {
+
+                AutostartToggle.IsOn = AppSettings.Load<bool>("usewinpartstartapps");
+
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Fehler beim Laden der Toggle-Einstellungen: {ex.Message}");
+            }
+
             _isPageLoaded = true;
-            // ### ENDE DER KORREKTUR ###
+
         }
 
-        /// <summary>
-        /// Wird jedes Mal aufgerufen, wenn die Seite im FlipView wechselt.
-        /// </summary>
+
         private void OnboardingFlipView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            // ### START DER KORREKTUR ###
-            // Führe den Code nur aus, wenn die Seite geladen ist und der BackButton nicht mehr null sein kann.
+           
             if (!_isPageLoaded)
             {
-                return; // Abbrechen, wenn die Seite noch nicht bereit ist
+                return; 
             }
-            // ### ENDE DER KORREKTUR ###
 
             int index = OnboardingFlipView.SelectedIndex;
             if (index == -1) return;
@@ -77,43 +86,41 @@ namespace GAMINGCONSOLEMODE
             UpdateNavButtons(index);
         }
 
-        /// <summary>
-        /// Aktualisiert die Farben der Stepper-Kopfzeile basierend auf dem aktiven Index.
-        /// </summary>
+       
         private void UpdateStepperVisuals(int activeIndex)
         {
-            if (_stepIndicators == null) return; // Verhindert Fehler, falls noch nicht geladen
+            if (_stepIndicators == null) return; 
 
-            // Alle Schritte durchlaufen
+
             for (int i = 0; i < _stepIndicators.Length; i++)
             {
                 if (i == activeIndex)
                 {
-                    // Aktueller Schritt: Vollständige Akzentfarbe
+
                     _stepIndicators[i].Background = _accentBrush;
                     _stepNumbers[i].Foreground = _textActiveBrush;
                     _stepTexts[i].Foreground = _textActiveBrush;
                 }
                 else if (i < activeIndex)
                 {
-                    // Abgeschlossener Schritt: Gedämpfte Akzentfarbe (oder voll, je nach Wunsch)
+                   
                     _stepIndicators[i].Background = _accentBrush;
                     _stepNumbers[i].Foreground = _textActiveBrush;
-                    _stepTexts[i].Foreground = _textInactiveBrush; // Text ausgrauen
+                    _stepTexts[i].Foreground = _textInactiveBrush; 
                 }
                 else
                 {
-                    // Zukünftiger Schritt: Neutral
+                
                     _stepIndicators[i].Background = _neutralBrush;
                     _stepNumbers[i].Foreground = _textInactiveBrush;
                     _stepTexts[i].Foreground = _textInactiveBrush;
                 }
             }
 
-            // Pfeile aktualisieren
+           
             for (int i = 0; i < _stepArrows.Length; i++)
             {
-                // Wenn der Schritt *vor* dem Pfeil aktiv/fertig ist, färbe den Pfeil ein
+                
                 if (i < activeIndex)
                 {
                     _stepArrows[i].Foreground = _accentBrush;
@@ -125,23 +132,21 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        /// <summary>
-        /// Zeigt/Verbirgt die "Weiter" / "Fertig" Buttons.
-        /// </summary>
+        
         private void UpdateNavButtons(int index)
         {
-            // "Zurück"-Button aktivieren/deaktivieren
+          
             BackButton.IsEnabled = (index > 0);
 
             if (index == OnboardingFlipView.Items.Count - 1)
             {
-                // Letzte Seite
+              
                 NextButton.Visibility = Visibility.Collapsed;
                 FinishButton.Visibility = Visibility.Visible;
             }
             else
             {
-                // Jede andere Seite
+                
                 NextButton.Visibility = Visibility.Visible;
                 FinishButton.Visibility = Visibility.Collapsed;
             }
@@ -165,26 +170,108 @@ namespace GAMINGCONSOLEMODE
 
         private void FinishButton_Click(object sender, RoutedEventArgs e)
         {
-            // Diese Aktion schließt das Onboarding ab.
-            // Du musst dem übergeordneten Fenster mitteilen, dass es diese Seite schließen soll.
-            Debug.WriteLine("Onboarding Finished!");
 
-            // Finde das übergeordnete 'Frame' und navigiere zurück (oder schließe das Dialogfenster)
-            var parent = this.Parent;
-            while (parent != null)
+            Debug.WriteLine("Onboarding Finished! Navigating to Launcher...");
+
+            if (this.Frame != null)
             {
-                if (parent is Frame frame && frame.CanGoBack)
+               
+                this.Frame.Navigate(typeof(launcher));
+            }
+            else
+            {
+               
+                if (this.XamlRoot != null && this.XamlRoot.Content is Frame rootFrame)
                 {
-                    frame.GoBack();
-                    return;
+                    rootFrame.Navigate(typeof(Launcher));
                 }
-                // Falls es in einem ContentDialog ist:
-                if (parent is ContentDialog dialog)
+                else
                 {
-                    dialog.Hide();
-                    return;
+                    Debug.WriteLine("Could not find the main Frame to navigate to Launcher.");
                 }
-                parent = (parent as FrameworkElement)?.Parent;
+            }
+        }
+
+        private void onboarding_Click(object sender, RoutedEventArgs e)
+        {
+            WebBrowserLauncher.OpenUrlInBrowser("https://www.gameconsolemode.com/onboarding");
+        }
+
+
+        public class WebBrowserLauncher
+        {
+           
+            public static void OpenUrlInBrowser(string url)
+            {
+                try
+                {
+                    // Create a ProcessStartInfo object
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true // IMPORTANT: UseShellExecute must be true to open URLs in the default browser
+                    };
+
+                    // Start the process (which will be the default browser)
+                    Process.Start(psi);
+
+                    Console.WriteLine($"Successfully requested to open URL: {url}");
+                }
+                catch (Win32Exception ex)
+                {
+                    // Handle potential errors, e.g., no default browser is set or protocol is unknown
+                    Console.WriteLine($"Error opening URL (Win32Exception): {ex.Message}");
+                    // Consider showing a user-friendly error message here
+                }
+                catch (Exception ex)
+                {
+                    // Handle other potential errors
+                    Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                    // Consider showing a user-friendly error message here
+                }
+            }
+        }
+
+        private void DiscordButton_Click(object sender, RoutedEventArgs e)
+        {
+            WebBrowserLauncher.OpenUrlInBrowser("https://discord.gg/FbjYDeEJce");
+        }
+
+        private void AutostartToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleSwitch toggleSwitch)
+            {
+                bool isNowOn = toggleSwitch.IsOn;
+                if (isNowOn)
+                {
+                    // The user turned it ON
+                    Debug.WriteLine("Autostart Management: ON");
+                    AppSettings.Save("usewinpartstartapps", true);
+                }
+                else
+                {
+                    // The user turned it OFF
+                    Debug.WriteLine("Autostart Management: OFF");
+                    AppSettings.Save("usewinpartstartapps", false);
+                }
+            }
+        }
+
+        private void autologon_Click(object sender, RoutedEventArgs e)
+        {
+            // This button provides a direct download link to the Sysinternals AutoLogon tool.
+            try
+            {
+                string url = "https://download.sysinternals.com/files/AutoLogon.zip";
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Failed to open AutoLogon download link: " + ex.Message);
             }
         }
     }

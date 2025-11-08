@@ -5093,6 +5093,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     ProgramCardPanel.Children.Add(border);
                 }
             }
+
+            bool hasCards = _cardCache.Any(); // Prüft, ob Karten im Cache sind
+            NoCardsMessage.Visibility = hasCards ? Visibility.Collapsed : Visibility.Visible;
         }
 
 
@@ -6797,24 +6800,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         UpdateVisualFocus();
                         PlayNavigationSound();
                     }
-                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && ProgramCardPanel.Children.Any())
+                    else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
                     {
-                        if (_selectedCardIndex == 0)
+                        // Prüfen, ob überhaupt Karten zum Navigieren vorhanden sind
+                        if (ProgramCardPanel.Children.Any())
                         {
-                            // JA: Springe zum Launcher
-                            _previousFocusArea = FocusArea.Cards; // Merken für Hoch/Runter
-                            _previousCardIndex = 0; // Merken für Rücksprung
-                            _currentFocusArea = FocusArea.Launcher;
-                            // Setze Fokus auf das LETZTE Launcher-Item
-                            _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                            navigated = true; // Signalisiert einen Area-Wechsel
+                            // Karten sind vorhanden. Prüfen, ob wir an erster Stelle sind.
+                            if (_selectedCardIndex == 0)
+                            {
+                                // Wir SIND an erster Stelle (Index 0) -> Springe zum Launcher
+                                _previousFocusArea = FocusArea.Cards;
+                                _previousCardIndex = 0;
+                                _currentFocusArea = FocusArea.Launcher;
+                                _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
+                                navigated = true; // Signalisiert einen Area-Wechsel
+                            }
+                            else
+                            {
+                                // Wir sind NICHT an erster Stelle -> Normal nach links navigieren
+                                _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
+                                UpdateVisualFocus();
+                                PlayNavigationSound();
+                            }
                         }
                         else
                         {
-                            // NEIN: Normale Navigation nach links
-                            _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
-                            UpdateVisualFocus();
-                            PlayNavigationSound();
+                            // **DEIN FIX:** Es sind KEINE Karten vorhanden. Ein Druck nach links
+                            // wechselt daher *immer* sofort zum Launcher-Bereich.
+                            _previousFocusArea = FocusArea.Cards;
+                            _previousCardIndex = 0; // Index zurücksetzen
+                            _currentFocusArea = FocusArea.Launcher;
+                            _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
+                            navigated = true; // Signalisiert einen Area-Wechsel
                         }
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
