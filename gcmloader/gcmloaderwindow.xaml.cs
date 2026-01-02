@@ -18,16 +18,17 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
+using HidSharp;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
 using System.Media;
-// SteamGridDBHelper.cs
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Numerics; 
+using System.Numerics;
+using DualSenseAPI;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
@@ -61,8 +62,93 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+        #region soundcontrol
+        // Cache for sounds to avoid loading from disk every time
+        private readonly Dictionary<string, Uri> _soundCache = new();
 
+        #endregion soundcontrol
+        #region psdualsense
+        // PS5 HID Hardware
+        private HidDevice _ps5Device;
+        private HidStream _ps5Stream;
+        private byte[] _hidInputBuffer = new byte[64];
+
+        // Navigation State für PlayStation (Index 4 reserviert)
+        private GamepadButtonFlags _lastPs5ButtonState = GamepadButtonFlags.None;
+        private DateTime _ps5NextAllowedInputTime = DateTime.MinValue;
+        private bool _ps5StickCentered = true;
+        private GamepadButtonFlags[] _lastShortcutButtons = new GamepadButtonFlags[5];
+
+        #endregion psdualsense
+        #region controllerbattery icon
+
+
+
+        // Updates the controller battery status and UI icon
+        // Updates the controller battery status with icon and custom text
+        private void UpdateControllerBatteryStatus()
+        {
+            this.DispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    Controller activeController = null;
+                    // Scan ports for the first connected controller
+                    for (int i = 0; i < 4; i++)
+                    {
+                        var temp = new Controller((UserIndex)i);
+                        if (temp.IsConnected) { activeController = temp; break; }
+                    }
+
+                    if (activeController == null)
+                    {
+                        // Hide the whole group if no controller is found
+                        ControllerStatusGroup.Visibility = Visibility.Collapsed;
+                        return;
+                    }
+
+                    // Get status
+                    var batteryInfo = activeController.GetBatteryInformation(BatteryDeviceType.Gamepad);
+                    ControllerStatusGroup.Visibility = Visibility.Visible;
+
+                    // Map battery level to readable text
+                    // Map XInput battery levels to approximate percentage values
+                    // Since XInput only provides 4 states, we translate them to clean numbers
+                    ControllerBatteryText.Text = batteryInfo.BatteryLevel switch
+                    {
+                        BatteryLevel.Empty => "0%",   // Critical
+                        BatteryLevel.Low => "25%",  // Low
+                        BatteryLevel.Medium => "65%",  // Medium/Half
+                        BatteryLevel.Full => "100%", // Full
+                        _ => "100%"  // Wired or unknown fallback
+                    };
+
+                    // Change color to red if battery is under 30%
+                    if (batteryInfo.BatteryLevel == BatteryLevel.Low || batteryInfo.BatteryLevel == BatteryLevel.Empty)
+                    {
+                        ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red);
+                    }
+                    else
+                    {
+                        ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+                    }
+
+                    Debug.WriteLine($"[Controller] Battery updated: {batteryInfo.BatteryLevel}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[BatteryError] {ex.Message}");
+                    ControllerStatusGroup.Visibility = Visibility.Collapsed;
+                }
+            });
+        }
+
+        #endregion controllerbattery icon
         #region mousecontrol 
+
+
+
+
 
         // NEW: COM Interface definitions to control the touch keyboard directly.
         [ComImport, Guid("4CE576FA-83DC-4F88-951C-9D0782B4E376")]
@@ -82,6 +168,7 @@ namespace gcmloader
 
         private float _cursorXRemainder = 0f; 
         private float _cursorYRemainder = 0f; 
+
 
 
 
@@ -160,7 +247,198 @@ namespace gcmloader
         #region ui status
         private DispatcherTimer _statusUpdateTimer;
         #endregion ui status
+        #region autoscaling
+
+        private void ForceDpiRedraw()
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            int pWidth = GetSystemMetrics(0);
+            int pHeight = GetSystemMetrics(1);
+
+            // Hier ebenfalls den Abzug entfernen:
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040 | 0x0020);
+
+            if (MainContent != null)
+            {
+                double ratio = (double)pWidth / _originalScreenWidth;
+                MainContent.RenderTransform = null;
+
+                var scale = new ScaleTransform() { ScaleX = ratio, ScaleY = ratio };
+                MainContent.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+                MainContent.RenderTransform = scale;
+
+                MainContent.UpdateLayout();
+            }
+        }
+
+
+        [DllImport("user32.dll")]
+        static extern int GetSystemMetrics(int nIndex);
+        const int SM_CXSCREEN = 0; // Physische Breite
+        const int SM_CYSCREEN = 1; // Physische Höhe
+
+
+        private void GetPhysicalResolution(out int width, out int height)
+        {
+            // Diese Methode liest die harten Pixel aus, keine skalierten Werte
+            width = GetSystemMetrics(SM_CXSCREEN);
+            height = GetSystemMetrics(SM_CYSCREEN);
+        }
+        private int _originalScreenWidth;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+        // DPI Context Konstanten
+        private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
+
+        private void SetupResolutionListener()
+        {
+            Microsoft.UI.Windowing.AppWindow appWindow = GetAppWindowForCurrentWindow();
+
+            // Wir abonnieren das Changed-Event
+            appWindow.Changed += (s, e) =>
+            {
+                // Wir prüfen auf SizeChange oder PositionChange
+                // Das deckt Auflösungsänderungen zuverlässig ab
+                if (e.DidSizeChange || e.DidPositionChange)
+                {
+                    this.DispatcherQueue.TryEnqueue(() => {
+                        UpdateWindowLayout();
+                    });
+                }
+            };
+        }
+
+        private Microsoft.UI.Windowing.AppWindow GetAppWindowForCurrentWindow()
+        {
+            IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            Microsoft.UI.WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
+            return Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+        }
+
+        private void UpdateWindowLayout()
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+            // 1. Echte Hardware-Pixel abfragen (Win32)
+            int pWidth = GetSystemMetrics(0); // SM_CXSCREEN
+            int pHeight = GetSystemMetrics(1); // SM_CYSCREEN
+
+            // 2. Deine Wunsch-Skalierung basierend auf der Auflösung festlegen
+            double customScale = 1.0;
+
+            if (pWidth >= 3840) // 4K
+            {
+                customScale = 1.5; // 150%
+            }
+            else if (pWidth >= 2560) // 2K / 1440p
+            {
+                customScale = 1.5; // Auch 150% (wie von dir gewünscht)
+            }
+            else if (pWidth >= 1920) // Full HD
+            {
+                customScale = 2.0; // 200% (größere UI für kleine Auflösung)
+            }
+            else // Alles darunter
+            {
+                customScale = 1.0;
+            }
+
+            Debug.WriteLine($"[ResSync] Auflösung: {pWidth}x{pHeight} -> Skalierung: {customScale * 100}%");
+
+            // 3. Fenster Win32-seitig auf Hardware-Pixel setzen
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight - 3,
+                         SWP_SHOWWINDOW | SWP_NOZORDER | 0x0020);
+
+            // 4. XAML-Inhalt manuell anpassen
+            if (this.Content is FrameworkElement rootElement)
+            {
+                // Wir setzen die logische Größe so, dass sie nach der Skalierung den Schirm füllt
+                // Formel: Physische Pixel / Skalierungsfaktor
+                rootElement.Width = pWidth / customScale;
+                rootElement.Height = (pHeight - 3) / customScale;
+
+                // Die ScaleTransform anwenden
+                rootElement.RenderTransformOrigin = new Windows.Foundation.Point(0, 0);
+                rootElement.RenderTransform = new ScaleTransform()
+                {
+                    ScaleX = customScale,
+                    ScaleY = customScale
+                };
+
+                rootElement.InvalidateMeasure();
+                rootElement.UpdateLayout();
+            }
+
+            // 5. Hintergrundbild (sollte immer die vollen Hardware-Pixel ohne Zoom füllen)
+            SetBackgroundImage(pWidth, pHeight);
+        }
+
+
+        #endregion autoscaling
         #region window engine
+
+        #region mouse engine
+
+        private readonly HashSet<string> _autoMouseApps = new(StringComparer.OrdinalIgnoreCase)
+{
+    "Discord",
+    "Spotify",
+    "chrome",
+    "opera gx",
+    "opera",
+    "edge",
+    "explorer",
+    "moonlight"
+};
+
+        private DispatcherTimer _autoMouseTimer;
+        private bool _wasAutoMouseActivated = false;
+
+        private void AutoMouseEngine_Tick(object sender, object e)
+        {
+            // Handle des aktuellen Vordergrund-Fensters holen
+            IntPtr fgHwnd = GetForegroundWindow();
+            if (fgHwnd == IntPtr.Zero) return;
+
+            // Prozess-ID zum Fenster ermitteln
+            GetWindowThreadProcessId(fgHwnd, out uint pid);
+            if (pid == 0) return;
+
+            try
+            {
+                // Name des Prozesses herausfinden
+                using var proc = Process.GetProcessById((int)pid);
+                string procName = proc.ProcessName;
+
+                // Prüfen, ob der Prozess in unserer "Auto-Liste" ist
+                bool isTargetApp = _autoMouseApps.Contains(procName);
+
+                if (isTargetApp && !_isMouseModeActive)
+                {
+                    // App im Fokus & Maus aus -> Aktivieren
+                    _isMouseModeActive = true;
+                    _wasAutoMouseActivated = true; // Markieren, dass die Engine das war
+                    
+                }
+                else if (!isTargetApp && _isMouseModeActive && _wasAutoMouseActivated)
+                {
+                    // Ziel-App verlassen & Maus war auto-aktiviert -> Deaktivieren
+                    _isMouseModeActive = false;
+                    _wasAutoMouseActivated = false;
+                   
+                }
+            }
+            catch (Exception)
+            {
+                // Falls ein Prozess während der Abfrage beendet wird
+            }
+        }
+        #endregion mouse engine
+
+        // Enum for internal switching
+        public enum ControllerType { Xbox, PlayStation }
         // In MainWindow.cs, bei den anderen Klassenvariablen
         private DispatcherTimer _windowEngineTimer;
         private HashSet<IntPtr> _knownWindowHandles = new HashSet<IntPtr>();
@@ -542,6 +820,38 @@ namespace gcmloader
 
 
         #endregion dsteamgriddb - picture for taskmanager
+        #region trigger vibration
+        // Triggers a short vibration on the gamepad for haptic feedback
+        private async Task TriggerVibration(int controllerIndex, float intensity, int durationMs)
+        {
+            try
+            {
+                var controller = new Controller((UserIndex)controllerIndex);
+                if (!controller.IsConnected) return;
+
+                // Create vibration state (converting 0.0-1.0 to ushort 0-65535)
+                var vibration = new Vibration
+                {
+                    LeftMotorSpeed = (ushort)(65535 * intensity),
+                    RightMotorSpeed = (ushort)(65535 * intensity)
+                };
+
+                // Start vibration
+                controller.SetVibration(vibration);
+
+                // Wait for the specified duration without blocking the UI
+                await Task.Delay(durationMs);
+
+                // Stop vibration by sending zero intensity
+                controller.SetVibration(new Vibration());
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[VibrationError] Could not trigger vibration: {ex.Message}");
+            }
+        }
+
+        #endregion trigger vibration
 
         private List<Border> _launcherAreaButtons;
         private List<ProcessData> _latestProcessData = new();
@@ -629,6 +939,9 @@ namespace gcmloader
 
             storyboard.Begin();
         }
+
+
+
 
         private void _focusCheckTimer_Tick(object sender, object e)
         {
@@ -1007,7 +1320,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             Logger.Initialize();
             this.InitializeComponent();
-           
+            //Scaling
+            _originalScreenWidth = GetScreenWidth();
+            _originalScreenWidth = GetSystemMetrics(0);
+            // Wir holen die Hardware-Pixel beim allerersten Start
+
+            ControllerLogger.InitializeLogs();
             perfectsettings();
             StartTaskbarHidingLoop();
             // Zugriff auf das Grid-Root-Element
@@ -1017,6 +1335,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 rootElement.KeyDown += MainWindow_KeyDown;
                 rootElement.Loaded += (s, e) =>
                 {
+                    ForceDpiRedraw();
                     FocusSink.Focus(FocusState.Programmatic);
 
                     // --- HIER IST DIE KORREKTUR ---
@@ -1032,12 +1351,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     // --- ENDE DER KORREKTUR ---
                 };
             }
-           
+
+  
+            // Pre-register sounds (files are loaded on first play)
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            _soundCache["nav"] = new Uri(Path.Combine(baseDir, "Assets\\nav.wav"));
+            _soundCache["play"] = new Uri(Path.Combine(baseDir, "Assets\\play.wav"));
+            _soundCache["pause"] = new Uri(Path.Combine(baseDir, "Assets\\pause.wav"));
 
 
-
-
-
+            // Start Mouse Engine
+            _autoMouseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _autoMouseTimer.Tick += AutoMouseEngine_Tick;
+            _autoMouseTimer.Start();
 
             // Initialisiere den SteamGridDB Helper
             try
@@ -1067,7 +1393,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _steamGridHelper = new SteamGridDBHelper(null);
                 Debug.WriteLine("[WARN] SteamGridDB API key setting does not exist. Feature is disabled.");
             }
-          
+
+            #region controllerbatterycheck
+            // Timer for Controller Battery (Every 5 minutes)
+            var controllerBatteryTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+            controllerBatteryTimer.Tick += (s, e) => UpdateControllerBatteryStatus();
+            controllerBatteryTimer.Start();
+
+            // Initial check
+            UpdateControllerBatteryStatus();
+            #endregion controllerbatterycheck
+
+
+
+
+
+
             MinimizeAllWindows();
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
@@ -1081,7 +1422,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
 
             string startart = AppSettings.Load<string>("launcher");
-           
+    
             LoadShortcutsFromSettings();
             SetupGamepad();
             SetupStatusTimer();
@@ -1898,22 +2239,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
         {
-            // Get the window handle
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
-            // Remove window borders and set to popup style
+            long exStyle = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
             IntPtr style = GetWindowLongPtr(hwnd, GWL_STYLE);
-            style = (IntPtr)((long)style & ~WS_OVERLAPPEDWINDOW | WS_POPUP);
+
+            // WS_EX_TOOLWINDOW sorgt dafür, dass es NICHT im Alt-Tab erscheint
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)(exStyle | 0x00000080L | 0x00080000L));
+
+            style = (IntPtr)((long)style & ~WS_OVERLAPPEDWINDOW);
             SetWindowLongPtr(hwnd, GWL_STYLE, style);
 
-            // Get screen dimensions
             int screenWidth = GetScreenWidth();
             int screenHeight = GetScreenHeight();
 
-            // --- HIER IST DIE ENTSCHEIDENDE ÄNDERUNG ---
-            // Set the window size to fullscreen AND set it to be "HWND_TOPMOST".
-            // IntPtr.Zero (HWND_TOP) -> new IntPtr(-1) (HWND_TOPMOST)
-            SetWindowPos(hwnd, new IntPtr(-1), 0, 0, screenWidth, screenHeight, SWP_NOZORDER | SWP_SHOWWINDOW);
+            // JETZT: Exakte Maße nutzen (kein -3 mehr)
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
         }
 
         private bool IsWindowInForeground()
@@ -2476,7 +2817,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 var backgroundImage = new Microsoft.UI.Xaml.Controls.Image
                 {
                     Source = new BitmapImage(new Uri(imagePath, UriKind.Absolute)),
-                    Stretch = Stretch.UniformToFill,
+                    Stretch = Stretch.UniformToFill, // WICHTIG: Verhindert Verzerrung
                     HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
                     VerticalAlignment = VerticalAlignment.Stretch
                 };
@@ -5788,32 +6129,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_ESCAPE, IntPtr.Zero);
             PostMessage(hWnd, WM_KEYUP, (IntPtr)VK_ESCAPE, IntPtr.Zero);
         }
-
+        private Process _suspendedGameProcess = null;
         public void BringTaskManagerToFrontAndFocus()
         {
             this.DispatcherQueue.TryEnqueue(async () =>
             {
+                IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 string launcher = AppSettings.Load<string>("launcher");
-                IntPtr windowHandle = IntPtr.Zero;
+                IntPtr launcherWindowHandle = IntPtr.Zero;
+
+                // 1. Batterie-Status sofort aktualisieren
+                UpdateControllerBatteryStatus();
+
+                // 2. GCM präventiv nach vorne bringen
+                BringToFrontAndFocus(selfHwnd);
+
+                // ERSTER SOFORT-RESET: Versucht die Skalierung direkt beim Fokus-Erhalt zu korrigieren
+                ForceDpiRedraw();
 
                 try
                 {
+                    // 3. Den konfigurierten Launcher in den Hintergrund schieben
                     switch (launcher)
                     {
-                        // STEAM LOGIC: Force self (GCM) on top
                         case "steam":
-                            windowHandle = FindSteamBigPictureWindow();
-                            if (windowHandle != IntPtr.Zero)
+                            launcherWindowHandle = FindSteamBigPictureWindow();
+                            if (launcherWindowHandle != IntPtr.Zero)
                             {
-                                await Task.Delay(100);
-
-                                // Bring self (GCM) to front
-                                IntPtr _selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                                BringToFrontAndFocus(_selfHwnd);
+                                await Task.Delay(50);
+                                BringToFrontAndFocus(selfHwnd);
                             }
                             break;
 
-                        // PLAYNITE / CUSTOM LOGIC: Minimize the launcher
                         case "playnite":
                         case "custom":
                             string processNameToFind = launcher == "playnite"
@@ -5823,15 +6170,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             if (!string.IsNullOrEmpty(processNameToFind))
                             {
                                 Process proc = Process.GetProcessesByName(processNameToFind).FirstOrDefault();
-                                if (proc != null)
+                                if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
                                 {
-                                    windowHandle = proc.MainWindowHandle;
-                                    if (windowHandle != IntPtr.Zero)
-                                    {
-                                        await Task.Delay(100);
-                                        ShowWindow(windowHandle, SW_MINIMIZE);
-                                        Debug.WriteLine($"[GCM] {launcher} window ({windowHandle}) minimized.");
-                                    }
+                                    await Task.Delay(50);
+                                    ShowWindow(proc.MainWindowHandle, 6); // SW_MINIMIZE
+                                    Debug.WriteLine($"[GCM] {launcher} minimiert.");
                                 }
                             }
                             break;
@@ -5839,18 +6182,38 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[GCM] Error while pushing launcher to background: {ex.Message}");
+                    Debug.WriteLine($"[GCM] Fehler beim Launcher-Handling: {ex.Message}");
                 }
 
-                // FINAL FOCUS CALL:
-                // This runs *after* the switch-case to ensure GCM is on top,
-                // using the new aggressive method.
-                await Task.Delay(150);
-                IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                BringToFrontAndFocus(selfHwnd);
+                // 4. KRITISCH: Warten, bis Windows den Grafik-Stack nach dem Spiel-Exit stabilisiert hat
+                await Task.Delay(250);
+
+                // 5. ZWEITER RADIKALER RESET (Finaler Hardware-Sync)
+                if (MainContent != null)
+                {
+                    // Sichtbarkeit togglen löscht den alten UI-Cache
+                    MainContent.Visibility = Visibility.Collapsed;
+
+                    // Zwingt Windows & WinUI zur Neuskalierung basierend auf Hardware-Pixeln
+                    ForceDpiRedraw();
+
+                    await Task.Delay(50);
+                    MainContent.Visibility = Visibility.Visible;
+                }
+
+                // 6. XAML-Engine zur Neuvormessung zwingen
+                if (this.Content is FrameworkElement root)
+                {
+                    root.InvalidateMeasure();
+                    root.InvalidateArrange();
+                    root.UpdateLayout();
+                }
+
+                Debug.WriteLine($"[GCM] Hard-Resync nach Fokus-Wechsel auf Basis {_originalScreenWidth}px abgeschlossen.");
             });
         }
 
+       
 
         private async Task StartXbox()
         {
@@ -5956,38 +6319,47 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        // Plays the navigation sound (e.g. moving between cards)
+        private void PlayNavigationSound() => PlayCachedSound("nav");
 
-        private void PlayNavigationSound()
+        // Plays the activation sound (e.g. pressing A / launching an app)
+        private async void PlayActivationSound()
         {
-            try
-            {
-                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\nav.wav"));
-                player.Play();
-            }
-            catch { }
+            PlayCachedSound("play");
+            // Intensity 0.4 (40%), Duration 200ms
+            await TriggerVibration(0, 0.4f, 200);
         }
 
-        private void PlayActivationSound()
+        // Plays the deactivation sound (e.g. closing an app / pressing B)
+        private async void PlaydeactivationSound()
         {
-            try
-            {
-                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\play.wav"));
-                player.Play();
-            }
-            catch { }
+            PlayCachedSound("pause");
+            // Intensity 0.2 (20%), Duration 200ms
+            await TriggerVibration(0, 0.2f, 200);
         }
 
-        private void PlaydeactivationSound()
+        private void PlayCachedSound(string soundKey)
         {
+            if (!_soundCache.TryGetValue(soundKey, out var soundUri)) return;
+
             try
             {
-                SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\pause.wav"));
+                // Create a new MediaPlayer for each trigger to allow overlapping sounds
+                var player = new MediaPlayer();
+                player.Source = MediaSource.CreateFromUri(soundUri);
+
+                // Dispose resources once the sound has finished playing
+                player.MediaEnded += (s, e) => {
+                    player.Dispose();
+                };
+
                 player.Play();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SoundError] Failed to play {soundKey}: {ex.Message}");
+            }
         }
-
-
 
 
         #endregion // TaskManager
@@ -6147,93 +6519,73 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
 
-        /// <summary>
-        /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
-        /// </summary>
+
 
         /// <summary>
         /// Handles all controller-as-a-mouse logic, including held clicks and right-stick scrolling.
         /// </summary>
-        private void HandleMouseControl(State controllerState, int controllerIndex) // <-- MODIFIED: Needs controllerIndex
+
+        private void HandleMouseControl(State state, int index)
         {
-            var gamepad = controllerState.Gamepad;
-            var currentButtons = gamepad.Buttons;
+            var gp = state.Gamepad;
+            var btns = (GamepadButtonFlags)gp.Buttons;
+            const int deadzone = 5000;
 
-            // --- Smooth Cursor Movement (Left Stick) ---
-            const int deadzone = 4000;
-            float thumbX = gamepad.LeftThumbX;
-            float thumbY = gamepad.LeftThumbY;
+            // 1. MAUSZEIGER (Linker Stick)
+            float moveX = (Math.Abs((float)gp.LeftThumbX) > deadzone) ? (gp.LeftThumbX / 32767f) * 35f : 0;
+            float moveY = (Math.Abs((float)gp.LeftThumbY) > deadzone) ? (gp.LeftThumbY / 32767f) * 35f : 0;
 
-            if (Math.Abs(thumbX) > deadzone || Math.Abs(thumbY) > deadzone)
+            if (moveX != 0 || moveY != 0)
             {
-                GetCursorPos(out POINT currentPos);
-                float speedMultiplier = 45.0f; // This is the high speed you wanted.
-
-                float moveX = (thumbX / 32767.0f) * speedMultiplier;
-                float moveY = (thumbY / 32767.0f) * speedMultiplier;
-
-                moveX += _cursorXRemainder;
-                moveY += _cursorYRemainder;
-
-                int pixelsToMoveX = (int)moveX;
-                int pixelsToMoveY = (int)moveY;
-
-                int newX = currentPos.X + pixelsToMoveX;
-                int newY = currentPos.Y - pixelsToMoveY; // Y is inverted for screen coordinates.
-                SetCursorPos(newX, newY);
-
-                _cursorXRemainder = moveX - pixelsToMoveX;
-                _cursorYRemainder = moveY - pixelsToMoveY;
-            }
-            else
-            {
-                _cursorXRemainder = 0f;
-                _cursorYRemainder = 0f;
+                GetCursorPos(out POINT p);
+                SetCursorPos(p.X + (int)moveX, p.Y - (int)moveY);
             }
 
-            // ### SCROLLING LOGIC RE-ADDED HERE (Right Stick) ###
-            float thumbRy = gamepad.RightThumbY;
-            // Check if enough time has passed since the last scroll to ensure a smooth speed.
-            if ((DateTime.UtcNow - _lastScrollTime).TotalMilliseconds > 50)
+            // 2. SCROLLEN (Rechter Stick)
+            if (Math.Abs((float)gp.RightThumbY) > deadzone)
             {
-                // Scroll Down
-                if (thumbRy < -deadzone)
+                if ((DateTime.Now - _lastScrollTime).TotalMilliseconds > 40)
                 {
-                    // The 'dwData' parameter controls the wheel. -120 is one "tick" down.
-                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)-120), UIntPtr.Zero);
-                    _lastScrollTime = DateTime.UtcNow; // Reset the timer
-                }
-                // Scroll Up
-                else if (thumbRy > deadzone)
-                {
-                    // 120 is one "tick" up.
-                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 120, UIntPtr.Zero);
-                    _lastScrollTime = DateTime.UtcNow; // Reset the timer
+                    int scrollAmount = gp.RightThumbY > 0 ? 120 : -120;
+                    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)scrollAmount, UIntPtr.Zero);
+                    _lastScrollTime = DateTime.Now;
                 }
             }
 
-            // --- Button Actions ---
-            // *** FIX: Use the per-controller state _lastButtonStates[controllerIndex] ***
-            var newPresses = currentButtons & ~_lastButtonStates[controllerIndex];
+            // 3. MAUSKLICKS (A = Links, X = Rechts)
 
-            // Left Click (A button) - Supports holding
-            if ((newPresses & GamepadButtonFlags.A) != 0) { mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero); }
-            // *** FIX: Use the per-controller state _lastButtonStates[controllerIndex] ***
-            else if (((_lastButtonStates[controllerIndex] & GamepadButtonFlags.A) != 0) && ((currentButtons & GamepadButtonFlags.A) == 0)) { mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero); }
+            // LINKER KLICK (A) - Direkte Statusabfrage für Drag & Drop
+            bool isAPressed = (btns & GamepadButtonFlags.A) != 0;
+            bool wasAPressed = (_lastButtonStates[index] & GamepadButtonFlags.A) != 0;
 
-            // Right Click (X button)
-            if ((newPresses & GamepadButtonFlags.X) != 0)
+            if (isAPressed && !wasAPressed)
+            {
+                // A wurde gerade eben gedrückt
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+            }
+            else if (!isAPressed && wasAPressed)
+            {
+                // A wurde gerade eben losgelassen
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+            }
+
+            // RECHTER KLICK (X) - Einfacher Klick
+            bool isXPressed = (btns & GamepadButtonFlags.X) != 0;
+            bool wasXPressed = (_lastButtonStates[index] & GamepadButtonFlags.X) != 0;
+
+            if (isXPressed && !wasXPressed)
             {
                 mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, UIntPtr.Zero);
                 mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, UIntPtr.Zero);
             }
 
-            // On-Screen Keyboard Toggle (Y button)
-            if ((newPresses & GamepadButtonFlags.Y) != 0)
-            {
-                SendOverlayNotification("Opening Keyboard");
-                ToggleTouchKeyboard();
-            }
+            // Y = Tastatur (nur beim Drücken)
+            bool isYPressed = (btns & GamepadButtonFlags.Y) != 0;
+            bool wasYPressed = (_lastButtonStates[index] & GamepadButtonFlags.Y) != 0;
+            if (isYPressed && !wasYPressed) ToggleTouchKeyboard();
+
+            // WICHTIG: Den State erst ganz am Ende speichern!
+            _lastButtonStates[index] = btns;
         }
         /// <summary>
         /// Shows the modern Windows 11 Touch Keyboard by starting its process.
@@ -6401,133 +6753,676 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const byte O_KEY = 0x47;
         private void SetupGamepad()
         {
-            // NEW: Initialize the per-controller state arrays
-            for (int i = 0; i < 4; i++)
-            {
-                _lastButtonStates[i] = GamepadButtonFlags.None;
-                _lastStickXDirections[i] = 0;
-                _lastStickYDirections[i] = 0;
-            }
+            // Wir erhöhen auf 10, dann haben wir massig Platz für alle
+            _lastButtonStates = new GamepadButtonFlags[10];
+            _lastShortcutButtons = new GamepadButtonFlags[10];
+            _nextAllowedInputTime = new DateTime[10];
+            _isStickCentered = new bool[10];
 
-            // Start the dedicated input loop on a background thread.
-            Task.Run(() => GamepadInputLoop());
+            Task.Factory.StartNew(() => XboxInputLoop(), TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(() => PlayStationInputLoop(), TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(() => PlayStationEdgeInputLoop(), TaskCreationOptions.LongRunning);
         }
 
-
-
-        private async Task GamepadInputLoop()
+        private bool _mouseToggleLocked = false; // Verhindert, dass der Maus-Modus "flattert"
+        // Updates the UI labels to show Xbox or PlayStation icons/text
+        
+        public static class ProcessSuspender
         {
-            // Define the deadzone for the analog stick
-            const int deadzone = 12000; // Adjust as needed
+            [DllImport("ntdll.dll")]
+            private static extern uint NtSuspendProcess(IntPtr processHandle);
 
-            while (true) // This loop runs continuously in the background.
+            [DllImport("ntdll.dll")]
+            private static extern uint NtResumeProcess(IntPtr processHandle);
+
+            public static void Suspend(Process process)
             {
-                bool processedInputThisFrame = false;
+                try { NtSuspendProcess(process.Handle); } catch { }
+            }
 
-                // Loop through all 4 possible controller ports
+            public static void Resume(Process process)
+            {
+                try { NtResumeProcess(process.Handle); } catch { }
+            }
+        }
+        private bool _debugMsgShown = false;
+
+
+
+        private uint[] _lastXboxPacketNumbers = new uint[4];
+        private Controller[] _xboxControllers = new Controller[4];
+        private DateTime _comboStartTime = DateTime.MinValue;
+        private bool _comboIsActive = false;
+        private async Task XboxInputLoop()
+        {
+            Thread.CurrentThread.Priority = ThreadPriority.Highest;
+            const int menuDeadzone = 18000;
+
+            while (!_isExiting)
+            {
                 for (int i = 0; i < 4; i++)
                 {
-                    var controller = new Controller((UserIndex)i);
-
-                    // 1. If controller is NOT connected, reset its state and check next port
-                    if (!controller.IsConnected)
+                    if (_xboxControllers[i] == null) _xboxControllers[i] = new Controller((UserIndex)i);
+                    if (_xboxControllers[i].IsConnected)
                     {
-                        _lastButtonStates[i] = GamepadButtonFlags.None;
-                        _lastStickXDirections[i] = 0;
-                        _lastStickYDirections[i] = 0;
-                        continue;
-                    }
-
-                    // --- 2. Controller IS connected ---
-                    processedInputThisFrame = true; // Mark that a controller is active
-                    var state = controller.GetState();
-                    var gamepadState = state.Gamepad;
-                    var currentButtons = gamepadState.Buttons;
-
-                    // Get Stick values
-                    var thumbX = gamepadState.LeftThumbX;
-                    var thumbY = gamepadState.LeftThumbY;
-                    var thumbRy = gamepadState.RightThumbY; // For scrolling
-
-                    // Determine current stick directions
-                    int currentStickXDirection = 0;
-                    if (thumbX < -deadzone) { currentStickXDirection = -1; }
-                    else if (thumbX > deadzone) { currentStickXDirection = 1; }
-
-                    int currentStickYDirection = 0;
-                    if (thumbY > deadzone) { currentStickYDirection = 1; } // Stick Up
-                    else if (thumbY < -deadzone) { currentStickYDirection = -1; } // Stick Down
-
-                    // --- 3. Check for Mouse Mode Toggle ---
-                    bool backPressed = (currentButtons & GamepadButtonFlags.Back) != 0;
-                    bool rsPressed = (currentButtons & GamepadButtonFlags.RightThumb) != 0;
-                    bool comboIsPressed = backPressed && rsPressed;
-                    bool lastBackPressed = (_lastButtonStates[i] & GamepadButtonFlags.Back) != 0;
-                    bool lastRsPressed = (_lastButtonStates[i] & GamepadButtonFlags.RightThumb) != 0;
-                    bool comboWasPressed = lastBackPressed && lastRsPressed;
-
-                    if (comboIsPressed && !comboWasPressed) { _comboPressTime = DateTime.UtcNow; _mouseModeToggledThisPress = false; }
-                    if (comboIsPressed && _comboPressTime.HasValue && !_mouseModeToggledThisPress) { if ((DateTime.UtcNow - _comboPressTime.Value).TotalSeconds >= 2.0) { _isMouseModeActive = !_isMouseModeActive; DispatcherQueue.TryEnqueue(() => SendOverlayNotification(_isMouseModeActive ? "Mouse Mode Activated" : "Mouse Mode Deactivated")); _mouseModeToggledThisPress = true; } }
-                    if (!comboIsPressed && comboWasPressed) { _comboPressTime = null; }
-
-                    // --- 4. Main Input Logic Branch ---
-                    if (_isMouseModeActive)
-                    {
-                        HandleMouseControl(state, i);
-                    }
-                    else // --- UI Navigation and Shortcut Mode ---
-                    {
-                        HandleShortcuts(currentButtons); // Process shortcuts (has its own logic)
-
-                        // --- This is the "One-Shot" logic ---
-                        // Check for *new* button presses this frame
-                        var newPresses = currentButtons & ~_lastButtonStates[i];
-
-                        // Check for *new* stick movements (from center or other direction)
-                        bool stickMovedLeft = (currentStickXDirection == -1 && _lastStickXDirections[i] != -1);
-                        bool stickMovedRight = (currentStickXDirection == 1 && _lastStickXDirections[i] != 1);
-                        bool stickMovedUp = (currentStickYDirection == 1 && _lastStickYDirections[i] != 1);
-                        bool stickMovedDown = (currentStickYDirection == -1 && _lastStickYDirections[i] != -1);
-
-                        // Check if any navigation input just happened
-                        bool hasNavInput = (newPresses != GamepadButtonFlags.None) ||
-                                           stickMovedLeft || stickMovedRight ||
-                                           stickMovedUp || stickMovedDown;
-
-                        if (hasNavInput && IsWindowInForeground())
+                        try
                         {
-                            // Send *only* the new presses and stick events to the UI thread
-                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, stickMovedLeft, stickMovedRight, stickMovedUp, stickMovedDown, i));
+                            var state = _xboxControllers[i].GetState();
+                            var gp = state.Gamepad;
+                            GamepadButtonFlags btns = (GamepadButtonFlags)gp.Buttons;
+
+                            // --- 1. GLOBALE SHORTCUTS (Immer aktiv, kein Delay) ---
+                            // Wir prüfen die Shortcuts vor allem anderen, damit sie sofort feuern.
+                            HandleShortcuts(btns, i);
+
+                            // --- 2. MAUS MODUS TOGGLE (2-Sekunden RS + Select) ---
+                            bool comboPressed = btns.HasFlag(GamepadButtonFlags.Back) && btns.HasFlag(GamepadButtonFlags.RightThumb);
+                            if (comboPressed)
+                            {
+                                if (!_comboIsActive) { _comboStartTime = DateTime.Now; _comboIsActive = true; }
+                                else if ((DateTime.Now - _comboStartTime).TotalMilliseconds >= 2000)
+                                {
+                                    _isMouseModeActive = !_isMouseModeActive;
+                                    _comboIsActive = false; _comboStartTime = DateTime.MaxValue;
+                                    SendOverlayNotification(_isMouseModeActive ? "Mouse Mode: ON" : "Mouse Mode: OFF");
+                                    _ = TriggerVibration(i, 0.5f, 300);
+                                }
+                            }
+                            else { _comboIsActive = false; _comboStartTime = DateTime.MinValue; }
+
+                            // --- 3. INPUT WEICHE ---
+                            if (_isMouseModeActive)
+                            {
+                                HandleMouseControl(state, i);
+                            }
+                            else
+                            {
+                                // Stick-Richtung für UI-Navigation bestimmen
+                                int xDir = 0;
+                                if (gp.LeftThumbX < -menuDeadzone) xDir = -1;
+                                else if (gp.LeftThumbX > menuDeadzone) xDir = 1;
+
+                                int yDir = 0;
+                                if (gp.LeftThumbY < -menuDeadzone) yDir = -1; // Invertiert für UI
+                                else if (gp.LeftThumbY > menuDeadzone) yDir = 1;
+
+                                // Nur navigieren, wenn GCM im Vordergrund ist
+                                if (IsWindowInForeground())
+                                {
+                                    ProcessUINavigation(btns, xDir, yDir, i);
+                                }
+                            }
+                        }
+                        catch { _xboxControllers[i] = null; }
+                    }
+                }
+                Thread.Sleep(10);
+            }
+        }
+        private List<HidStream> _activePs5Streams = new List<HidStream>();
+        private GamepadButtonFlags[] _multiPs5LastButtons = new GamepadButtonFlags[10];
+        private GamepadButtonFlags[] _lastPs5Buttons = new GamepadButtonFlags[10];
+        private DateTime _nextScanTime = DateTime.MinValue;
+        private DateTime[] _nextStickMove = new DateTime[10]; // Timer für jeden Controller
+
+
+        #region dualsense edge
+
+        #region psdualsense
+
+        // --- DualSense Edge (NEU & SEPARAT) ---
+        private HidDevice _edgeDevice;        // Eigener Slot!
+        private HidStream _edgeStream;        // Eigener Stream!
+        private byte[] _edgeInputBuffer = new byte[64]; // Eigener Buffer!
+        // Seperater Status nur für den Edge, damit er den normalen Controller nicht stört
+        private GamepadButtonFlags _lastEdgeButtonState = GamepadButtonFlags.None;
+        private DateTime _edgeNextAllowedInputTime = DateTime.MinValue;
+        private bool _edgeStickCentered = true;
+
+        #endregion
+
+        #region dedizierter DualSense Edge Loop
+        // Separater Speicher für Edge Shortcuts und Maus-Klicks
+        private GamepadButtonFlags _lastEdgeShortcutButtons = GamepadButtonFlags.None;
+        private GamepadButtonFlags _lastEdgeMouseButtons = GamepadButtonFlags.None;
+        private async Task PlayStationEdgeInputLoop()
+        {
+            Thread.CurrentThread.Priority = ThreadPriority.Highest;
+
+            while (!_isExiting)
+            {
+                if (_edgeStream == null)
+                {
+                    try
+                    {
+                        var loader = DeviceList.Local;
+                        var edgeDev = loader.GetHidDevices(0x054C).FirstOrDefault(d => d.ProductID == 0x0DF2);
+                        if (edgeDev != null && edgeDev.TryOpen(out var tempStream))
+                        {
+                            _edgeStream = tempStream;
+                            _edgeStream.ReadTimeout = 1;
+                            _edgeDevice = edgeDev;
+                            Debug.WriteLine("[Edge] Verbunden für Parallel-Betrieb.");
                         }
                     }
-
-                    // --- 5. CRITICAL: Update this controller's state *every* frame ---
-                    // This ensures 'newPresses' and 'stickMoved' will be false
-                    // next frame, even if the user holds the button/stick.
-                    _lastButtonStates[i] = currentButtons;
-                    _lastStickXDirections[i] = currentStickXDirection;
-                    _lastStickYDirections[i] = currentStickYDirection;
-
-                    // *** FIX: The 'break;' statement was removed here. ***
-                    // This allows the loop to continue and check i=1, i=2, and i=3.
-                    // Because state is tracked per-controller, this is now safe
-                    // and allows multiple controllers to send input.
-
-                } // End of for-loop (i=0 to 3)
-
-                // If no controller was active *at all* this frame
-                if (!processedInputThisFrame && _isMouseModeActive)
-                {
-                    _isMouseModeActive = false;
-                    DispatcherQueue.TryEnqueue(() => SendOverlayNotification("Mouse Mode Deactivated (Controller Disconnected)"));
+                    catch { _edgeStream = null; }
+                    if (_edgeStream == null) { Thread.Sleep(1000); continue; }
                 }
 
-                await Task.Delay(16); // ~60 Hz
+                try
+                {
+                    int bytesRead = _edgeStream.Read(_edgeInputBuffer);
+                    if (bytesRead > 0)
+                    {
+                        byte reportId = _edgeInputBuffer[0];
+                        int start = (reportId == 0x31) ? 2 : 1;
+                        if (reportId != 0x31 && reportId != 0x01) { Thread.Yield(); continue; }
+
+                        GamepadButtonFlags edgeButtons = GamepadButtonFlags.None;
+
+                        // 1. Stick Werte (LX/LY)
+                        float lx = (_edgeInputBuffer[start + 0] - 128) / 128f;
+                        float ly = (_edgeInputBuffer[start + 1] - 128) / 128f;
+                        int xDir = lx < -0.3f ? -1 : (lx > 0.3f ? 1 : 0);
+                        int yDir = ly < -0.3f ? 1 : (ly > 0.3f ? -1 : 0);
+
+                        // 2. Button Offsets
+                        int btnOffset = (reportId == 0x31) ? 7 : 4;
+                        byte b1 = _edgeInputBuffer[start + btnOffset];
+                        byte b2 = _edgeInputBuffer[start + btnOffset + 1];
+
+                        // D-Pad parsen
+                        byte dpadVal = (byte)(b1 & 0x0F);
+                        if (dpadVal <= 7)
+                        {
+                            if (dpadVal == 0 || dpadVal == 1 || dpadVal == 7) edgeButtons |= GamepadButtonFlags.DPadUp;
+                            if (dpadVal == 3 || dpadVal == 4 || dpadVal == 5) edgeButtons |= GamepadButtonFlags.DPadDown;
+                            if (dpadVal == 5 || dpadVal == 6 || dpadVal == 7) edgeButtons |= GamepadButtonFlags.DPadLeft;
+                            if (dpadVal == 1 || dpadVal == 2 || dpadVal == 3) edgeButtons |= GamepadButtonFlags.DPadRight;
+                        }
+
+                        // Buttons parsen
+                        if ((b1 & 0x10) != 0) edgeButtons |= GamepadButtonFlags.X;
+                        if ((b1 & 0x20) != 0) edgeButtons |= GamepadButtonFlags.A;
+                        if ((b1 & 0x40) != 0) edgeButtons |= GamepadButtonFlags.B;
+                        if ((b1 & 0x80) != 0) edgeButtons |= GamepadButtonFlags.Y;
+                        if ((b2 & 0x01) != 0) edgeButtons |= GamepadButtonFlags.LeftShoulder;
+                        if ((b2 & 0x02) != 0) edgeButtons |= GamepadButtonFlags.RightShoulder;
+                        if ((b2 & 0x10) != 0) edgeButtons |= GamepadButtonFlags.Back;
+                        if ((b2 & 0x20) != 0) edgeButtons |= GamepadButtonFlags.Start;
+                        if ((b2 & 0x40) != 0) edgeButtons |= GamepadButtonFlags.LeftThumb;
+                        if ((b2 & 0x80) != 0) edgeButtons |= GamepadButtonFlags.RightThumb;
+
+                        // Paddles (Rücktasten)
+                        byte bEdge = _edgeInputBuffer[start + btnOffset + 4];
+                        if ((bEdge & 0x04) != 0) edgeButtons |= GamepadButtonFlags.A; // Paddle L = A
+                        if ((bEdge & 0x08) != 0) edgeButtons |= GamepadButtonFlags.B; // Paddle R = B
+
+                        // --- Ausführung ---
+                        HandleUniversalToggle(edgeButtons);
+                        HandleEdgeShortcuts(edgeButtons);
+
+                        if (_isMouseModeActive)
+                        {
+                            // WICHTIG: Nutzt jetzt INDEX 5!
+                            // Dadurch speichert HandleMouseControl den "Gedrückt"-Status in einem eigenen Slot.
+                            // Das erlaubt Drag & Drop (Gedrückthalten).
+                            HandleMouseControl(new State
+                            {
+                                Gamepad = new Gamepad
+                                {
+                                    Buttons = (SharpDX.XInput.GamepadButtonFlags)edgeButtons,
+                                    LeftThumbX = (short)(lx * 32767),
+                                    LeftThumbY = (short)(-ly * 32767)
+                                }
+                            }, 5);
+                        }
+                        else if (IsWindowInForeground())
+                        {
+                            ProcessEdgeSmoothNavigation(edgeButtons, xDir, yDir);
+                        }
+
+                        Thread.Yield();
+                    }
+                    else { Thread.Sleep(1); }
+                }
+                catch { _edgeStream?.Dispose(); _edgeStream = null; }
+            }
+        }
+        private void ProcessEdgeSmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
+        {
+            // Nutzt _lastEdgeButtonState statt _lastPs5ButtonState
+            var newPresses = buttons & ~_lastEdgeButtonState;
+            if (newPresses != GamepadButtonFlags.None)
+            {
+                DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, 4));
+            }
+
+            // Stick Smooth Logik mit Edge-eigenen Timern
+            if (xDir == 0 && yDir == 0)
+            {
+                _edgeNextAllowedInputTime = DateTime.MinValue;
+                _edgeStickCentered = true;
+            }
+            else
+            {
+                if (DateTime.Now > _edgeNextAllowedInputTime)
+                {
+                    DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4));
+
+                    if (_edgeStickCentered)
+                    {
+                        _edgeNextAllowedInputTime = DateTime.Now.AddMilliseconds(400);
+                        _edgeStickCentered = false;
+                    }
+                    else
+                    {
+                        _edgeNextAllowedInputTime = DateTime.Now.AddMilliseconds(150);
+                    }
+                }
+            }
+            _lastEdgeButtonState = buttons;
+        }
+        private void HandleEdgeShortcuts(GamepadButtonFlags currentButtons)
+        {
+            // Eigener Status-Check nur für den Edge
+            var newPresses = currentButtons & ~_lastEdgeShortcutButtons;
+            _lastEdgeShortcutButtons = currentButtons;
+
+            if (newPresses == GamepadButtonFlags.None) return;
+
+            foreach (var pair in _activeShortcuts)
+            {
+                if (IsButtonPressed(currentButtons, pair.Key.Item1) && IsButtonPressed(newPresses, pair.Key.Item2))
+                {
+                    if (_shortcutActions.TryGetValue(pair.Value, out var action))
+                    {
+                        DispatcherQueue.TryEnqueue(() => {
+                            action.Invoke();
+                            SendOverlayNotification($"Edge Shortcut: {pair.Value}");
+                        });
+                    }
+                }
+            }
+        }
+        #endregion
+
+
+        #endregion dualsense edge
+
+        #region standard ps controller dualsense
+        private async Task PlayStationInputLoop()
+
+        {
+
+            // Absolutes Maximum an Priorität für diesen Thread
+
+            Thread.CurrentThread.Priority = ThreadPriority.Highest;
+
+
+
+            while (!_isExiting)
+
+            {
+
+                // --- AUTO-SUCHE FÜR ALLE PS5 MODELLE (Standard & Edge) ---
+
+                if (_ps5Stream == null)
+
+                {
+
+                    try
+
+                    {
+
+                        var loader = DeviceList.Local;
+
+                        // Hole ALLE Sony HID Geräte
+
+                        var allSonyDevices = loader.GetHidDevices(0x054C).ToList();
+
+
+
+                        foreach (var dev in allSonyDevices)
+
+                        {
+
+                            // Prüfe ob es ein Standard (0x0CE6) oder Edge (0x0DF2) ist
+
+                            if (dev.ProductID == 0x0CE6 || dev.ProductID == 0x0DF2)
+
+                            {
+
+                                if (dev.TryOpen(out var tempStream))
+
+                                {
+
+                                    _ps5Stream = tempStream;
+
+                                    _ps5Stream.ReadTimeout = 1;
+
+                                    _ps5Device = dev;
+
+                                    Debug.WriteLine($"[PS5] Erfolgreich verbunden mit: {dev.ProductName} (ID: {dev.ProductID:X})");
+
+                                    break;
+
+                                }
+
+                            }
+
+                        }
+
+                    }
+
+                    catch (Exception ex)
+
+                    {
+
+                        Debug.WriteLine("[PS5] Scan Fehler: " + ex.Message);
+
+                        _ps5Stream = null;
+
+                    }
+
+
+
+                    if (_ps5Stream == null)
+
+                    {
+
+                        Thread.Sleep(1000);
+
+                        continue;
+
+                    }
+
+                }
+
+
+
+                // --- INPUT VERARBEITUNG ---
+
+                try
+
+                {
+
+                    int bytesRead = _ps5Stream.Read(_hidInputBuffer);
+
+                    if (bytesRead > 0)
+
+                    {
+
+                        // --- UNIVERSAL REPORT PARSER (Wichtig für Edge & Bluetooth) ---
+
+                        byte reportId = _hidInputBuffer[0];
+
+                        int start = 0;
+
+
+
+                        if (reportId == 0x31)
+
+                        {
+
+                            start = 2; // Bluetooth / Extended Mode (DualSense & Edge)
+
+                        }
+
+                        else if (reportId == 0x01)
+
+                        {
+
+                            start = 1; // USB / Simple Mode
+
+                        }
+
+                        else
+
+                        {
+
+                            Thread.Yield();
+
+                            continue;
+
+                        }
+
+
+
+                        GamepadButtonFlags ps5Buttons = GamepadButtonFlags.None;
+
+
+
+                        // 1. Sticks
+
+                        float lx = (_hidInputBuffer[start + 0] - 128) / 128f;
+
+                        float ly = (_hidInputBuffer[start + 1] - 128) / 128f;
+
+                        int xDir = lx < -0.3f ? -1 : (lx > 0.3f ? 1 : 0);
+
+                        int yDir = ly < -0.3f ? 1 : (ly > 0.3f ? -1 : 0);
+
+
+
+                        // 2. D-PAD (Hat-Switch)
+
+                        int btnOffset = (reportId == 0x31) ? 7 : 4;
+
+                        byte b1 = _hidInputBuffer[start + btnOffset];
+
+                        byte dpadVal = (byte)(b1 & 0x0F);
+
+                        if (dpadVal <= 7)
+
+                        {
+
+                            if (dpadVal == 0 || dpadVal == 1 || dpadVal == 7) ps5Buttons |= GamepadButtonFlags.DPadUp;
+
+                            if (dpadVal == 3 || dpadVal == 4 || dpadVal == 5) ps5Buttons |= GamepadButtonFlags.DPadDown;
+
+                            if (dpadVal == 5 || dpadVal == 6 || dpadVal == 7) ps5Buttons |= GamepadButtonFlags.DPadLeft;
+
+                            if (dpadVal == 1 || dpadVal == 2 || dpadVal == 3) ps5Buttons |= GamepadButtonFlags.DPadRight;
+
+                        }
+
+
+
+                        // 3. Buttons
+
+                        byte b2 = _hidInputBuffer[start + btnOffset + 1];
+
+                        if ((b1 & 0x10) != 0) ps5Buttons |= GamepadButtonFlags.X; // Quadrat
+
+                        if ((b1 & 0x20) != 0) ps5Buttons |= GamepadButtonFlags.A; // Kreuz
+
+                        if ((b1 & 0x40) != 0) ps5Buttons |= GamepadButtonFlags.B; // Kreis
+
+                        if ((b1 & 0x80) != 0) ps5Buttons |= GamepadButtonFlags.Y; // Dreieck
+
+
+
+                        if ((b2 & 0x01) != 0) ps5Buttons |= GamepadButtonFlags.LeftShoulder;
+
+                        if ((b2 & 0x02) != 0) ps5Buttons |= GamepadButtonFlags.RightShoulder;
+
+                        if ((b2 & 0x10) != 0) ps5Buttons |= GamepadButtonFlags.Back;   // Share/Create
+
+                        if ((b2 & 0x20) != 0) ps5Buttons |= GamepadButtonFlags.Start;  // Options
+
+                        if ((b2 & 0x40) != 0) ps5Buttons |= GamepadButtonFlags.LeftThumb;
+
+                        if ((b2 & 0x80) != 0) ps5Buttons |= GamepadButtonFlags.RightThumb;
+
+
+
+                        // --- EXECUTION ---
+
+                        HandleUniversalToggle(ps5Buttons);
+
+                        HandleShortcuts(ps5Buttons, 4);
+
+
+
+                        if (_isMouseModeActive)
+
+                        {
+
+                            HandleMouseControl(new State
+
+                            {
+
+                                Gamepad = new Gamepad
+
+                                {
+
+                                    Buttons = (SharpDX.XInput.GamepadButtonFlags)ps5Buttons,
+
+                                    LeftThumbX = (short)(lx * 32767),
+
+                                    LeftThumbY = (short)(-ly * 32767)
+
+                                }
+
+                            }, 4);
+
+                        }
+
+                        else if (IsWindowInForeground())
+
+                        {
+
+                            ProcessPs5SmoothNavigation(ps5Buttons, xDir, yDir);
+
+                        }
+
+
+
+                        Thread.Yield();
+
+                    }
+
+                    else
+
+                    {
+
+                        Thread.Sleep(1);
+
+                    }
+
+                }
+
+                catch
+
+                {
+
+                    _ps5Stream?.Dispose();
+
+                    _ps5Stream = null;
+
+                }
+
+            }
+
+        }
+
+        private void ProcessPs5SmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
+        {
+            // Buttons (A, B, X, Y) sofort verarbeiten
+            var newPresses = buttons & ~_lastPs5ButtonState;
+            if (newPresses != GamepadButtonFlags.None)
+            {
+                DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, 4));
+            }
+
+            // Stick Smooth Logik
+            if (xDir == 0 && yDir == 0)
+            {
+                _ps5NextAllowedInputTime = DateTime.MinValue;
+                _ps5StickCentered = true;
+            }
+            else
+            {
+                if (DateTime.Now > _ps5NextAllowedInputTime)
+                {
+                    DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4));
+
+                    if (_ps5StickCentered)
+                    {
+                        _ps5NextAllowedInputTime = DateTime.Now.AddMilliseconds(400); // Erster Sprung Pause
+                        _ps5StickCentered = false;
+                    }
+                    else
+                    {
+                        _ps5NextAllowedInputTime = DateTime.Now.AddMilliseconds(150); // Rattern
+                    }
+                }
+            }
+            _lastPs5ButtonState = buttons;
+        }
+        private void HandleUniversalToggle(GamepadButtonFlags buttons)
+        {
+            // Erkennt Create+Options (PS) oder Back+Start (Xbox)
+            bool isComboPressed = buttons.HasFlag(GamepadButtonFlags.Back) && buttons.HasFlag(GamepadButtonFlags.Start);
+
+            if (isComboPressed)
+            {
+                if (!_mouseToggleLocked)
+                {
+                    _isMouseModeActive = !_isMouseModeActive; // Umschalten
+                    _mouseToggleLocked = true; // Sperren bis zum Loslassen
+
+                    // Logge den Wechsel
+                    ControllerLogger.Log("System", $"Mouse Mode changed to: {_isMouseModeActive}");
+
+                    // Kurzes Feedback im Overlay
+                    SendOverlayNotification(_isMouseModeActive ? "Mouse Mode: ON" : "Mouse Mode: OFF");
+                }
+            }
+            else
+            {
+                // Sobald die Kombi losgelassen wird, entsperren wir für den nächsten Druck
+                _mouseToggleLocked = false;
             }
         }
 
+        #endregion standard ps controller dualsense
 
+        private DateTime[] _nextAllowedInputTime = new DateTime[5] { DateTime.MinValue, DateTime.MinValue, DateTime.MinValue, DateTime.MinValue, DateTime.MinValue };
+        private bool[] _isStickCentered = new bool[5] { true, true, true, true, true };
+        private void ProcessUINavigation(GamepadButtonFlags buttons, int xDir, int yDir, int index)
+        {
+            if (!IsWindowInForeground()) return;
 
+            // Buttons A, B, X, Y sofort
+            var newPresses = buttons & ~_lastButtonStates[index];
+            if (newPresses != GamepadButtonFlags.None)
+            {
+                DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, index));
+            }
+
+            // Stick Smooth Logik
+            bool isCurrentlyMoving = (xDir != 0 || yDir != 0);
+            if (!isCurrentlyMoving)
+            {
+                _nextAllowedInputTime[index] = DateTime.MinValue;
+                _isStickCentered[index] = true;
+            }
+            else
+            {
+                if (DateTime.Now > _nextAllowedInputTime[index])
+                {
+                    DispatcherQueue.TryEnqueue(() => {
+                        HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, index);
+                    });
+
+                    _nextAllowedInputTime[index] = _isStickCentered[index] ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
+                    _isStickCentered[index] = false;
+                }
+            }
+            _lastButtonStates[index] = buttons;
+        }
 
 
 
@@ -6710,42 +7605,36 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Verarbeitet alle globalen Gamepad-Shortcuts.
         /// </summary>
-        private void HandleShortcuts(GamepadButtonFlags currentButtons)
+        private void HandleShortcuts(GamepadButtonFlags currentButtons, int index)
         {
+            // Speicher für den vorherigen Zustand pro Controller
+            // WICHTIG: Nutze ein separates Array, damit die Navigation den Zustand nicht löscht
+            var newPresses = currentButtons & ~_lastShortcutButtons[index];
+            _lastShortcutButtons[index] = currentButtons;
+
+            if (newPresses == GamepadButtonFlags.None) return;
+
             foreach (var pair in _activeShortcuts)
             {
-                var key1 = pair.Key.Item1;
-                var key2 = pair.Key.Item2;
+                var key1 = pair.Key.Item1; // z.B. "Back" (Share)
+                var key2 = pair.Key.Item2; // z.B. "RightThumb" (RS)
                 var function = pair.Value;
-                bool key1Pressed = IsButtonPressed(currentButtons, key1);
-                bool key2Pressed = IsButtonPressed(currentButtons, key2);
 
-                if (key1Pressed && !_heldButtonTimestamps.ContainsKey(key1))
-                {
-                    _heldButtonTimestamps[key1] = DateTime.UtcNow;
-                }
+                // Prüfe ob Key1 (Share) GEHALTEN wird und Key2 (RS) gerade NEU gedrückt wurde
+                // ODER ob beide gleichzeitig in diesem Frame neu sind
+                bool k1Held = IsButtonPressed(currentButtons, key1);
+                bool k2New = IsButtonPressed(newPresses, key2);
 
-                if (_heldButtonTimestamps.TryGetValue(key1, out var heldTime))
+                if (k1Held && k2New)
                 {
-                    if (DateTime.UtcNow - heldTime < _comboTimeout && key2Pressed)
+                    if (_shortcutActions.TryGetValue(function, out var action))
                     {
-                        if (!_triggeredCombos.Contains(pair.Key))
-                        {
-                            _triggeredCombos.Add(pair.Key);
-                            if (_shortcutActions.TryGetValue(function, out var action))
-                            {
-                                action?.Invoke();
-                            }
-                        }
+                        Debug.WriteLine($"[PS5-Shortcut] Triggering {function} for index {index}");
+                        DispatcherQueue.TryEnqueue(() => {
+                            action.Invoke();
+                            SendOverlayNotification($"Shortcut: {function}");
+                        });
                     }
-                    else if (!key1Pressed)
-                    {
-                        _heldButtonTimestamps.Remove(key1);
-                    }
-                }
-                else
-                {
-                    _triggeredCombos.Remove(pair.Key);
                 }
             }
         }
@@ -7013,9 +7902,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        private GamepadButtonFlags[] _lastButtonStates = new GamepadButtonFlags[4];
+        private GamepadButtonFlags[] _lastButtonStates = new GamepadButtonFlags[5];
+        private DateTime[] _lastInputTimePerController = new DateTime[5];
         private int[] _lastStickXDirections = new int[4];
         private int[] _lastStickYDirections = new int[4];
+    
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
             if (PowerMenu.Visibility == Visibility.Visible)
@@ -7404,7 +8295,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-        [DllImport("user32.dll")] private static extern int GetSystemMetrics(int nIndex);
         [DllImport("user32.dll")] private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
         [StructLayout(LayoutKind.Sequential)]
@@ -7946,22 +8836,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             // Load the settings
             bool enableTaskbar = false;
-            bool enableStartMenu = false;
+            bool enableStartMenu = false; // Diese Logik lassen wir drin, nutzen sie aber nur für die Taskbar
 
             try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
-            try { enableStartMenu = AppSettings.Load<bool>("enable_startmenu"); } catch { }
 
-            // --- 1. Taskbar Hiding ---
+            // --- 1. Taskbar Hiding (DAS BLEIBT) ---
             if (!enableTaskbar)
             {
-                // 1. Main Taskbar (Shell_TrayWnd)
+                // Main Taskbar
                 HideWindowByClass("Shell_TrayWnd");
 
-                // 2. Taskbar on secondary monitors
+                // Taskbar on secondary monitors
                 HideWindowByClass("Shell_SecondaryTrayWnd");
             }
 
-            // --- 2. Start Menu Hiding ---
+           
+            /*
             if (!enableStartMenu)
             {
                 // 3. The Start menu (Class in Win 11)
@@ -7970,18 +8860,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // 4. The Start menu (Fallback via window title, e.g., Win 10)
                 HideWindowByTitle("Start");
             }
+            */
 
-            // --- 3. Other Shell Elements (We always hide these) ---
-
-            // 5. The Search window (Win+S)
-            HideWindowByTitle("Search"); // English Version
-            HideWindowByTitle("Suche"); // German Version
-
-            // 6. The Action Center / Quick Settings (Win+A)
+            // --- 3. Other Shell Elements (Suchen, Kalender etc. - BLEIBT) ---
+            HideWindowByTitle("Search");
+            HideWindowByTitle("Suche");
             HideWindowByClass("Windows.UI.Core.CoreWindow");
             HideWindowByClass("ControlCenter.Internal.Flyout");
-
-            // 7. Calendar/Notifications (Win+N)
             HideWindowByClass("NativeHWNDHost");
         }
 
@@ -8004,6 +8889,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
     }
+
+
+    public static class ControllerLogger
+    {
+        private static readonly string LogFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
+        private static readonly string Ps5LogPath = Path.Combine(LogFolder, "log_playstation.txt");
+        private static readonly string XboxLogPath = Path.Combine(LogFolder, "log_xbox.txt");
+        private static readonly long MaxLogSize = 10 * 1024 * 1024; // 10 MB
+
+        public static void InitializeLogs()
+        {
+            try
+            {
+                if (File.Exists(Ps5LogPath)) File.Delete(Ps5LogPath);
+                if (File.Exists(XboxLogPath)) File.Delete(XboxLogPath);
+                Log("System", "Logs initialized and cleared.");
+            }
+            catch { }
+        }
+
+        public static void Log(string controller, string message)
+        {
+            string path = controller.ToLower().Contains("ps") || controller.ToLower().Contains("play") ? Ps5LogPath : XboxLogPath;
+            try
+            {
+                FileInfo fi = new FileInfo(path);
+                if (fi.Exists && fi.Length > MaxLogSize) File.Delete(path);
+
+                string logLine = $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}";
+                File.AppendAllText(path, logLine);
+            }
+            catch { /* Nicht crashen wegen Logging */ }
+        }
+    }
+
     /// <summary>
     /// Eine Hilfsklasse, um den "Automatisch ausblenden"-Zustand der Windows-Taskleiste programmatisch zu steuern.
     /// </summary>

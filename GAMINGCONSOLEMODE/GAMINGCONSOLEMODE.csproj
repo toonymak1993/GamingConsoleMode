@@ -382,6 +382,9 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\gcmloader\gcmloader.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Page Update="taskmanager.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
