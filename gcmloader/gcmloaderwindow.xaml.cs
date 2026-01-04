@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
 using HidSharp;
+using Windows.UI;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -65,6 +66,100 @@ namespace gcmloader
         #region soundcontrol
         // Cache for sounds to avoid loading from disk every time
         private readonly Dictionary<string, Uri> _soundCache = new();
+        private List<Button> _audioDeviceButtons = new List<Button>();
+        private int _selectedAudioDeviceIndex = 0;
+
+        private void OpenAudioFlyout()
+        {
+            try
+            {
+                SimpleAudioList.Children.Clear();
+                _audioDeviceButtons.Clear();
+
+                var enumerator = new MMDeviceEnumerator();
+                var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+                var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+
+                foreach (var device in devices)
+                {
+                    // Modernes Button-Styling
+                    var btn = new Button
+                    {
+                        Tag = device.FriendlyName,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Height = 60,
+                        CornerRadius = new CornerRadius(12),
+                        // WinUI 3 Default Style für Buttons im Hintergrund nutzen
+                        Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+                        BorderThickness = new Thickness(0)
+                    };
+
+                    var contentStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 15 };
+
+                    // Icon Logik
+                    string glyph = device.FriendlyName.ToLower().Contains("headset") || device.FriendlyName.ToLower().Contains("kopfhörer") ? "\uE76B" : "\uE7F5";
+                    contentStack.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
+
+                    contentStack.Children.Add(new TextBlock
+                    {
+                        Text = device.FriendlyName,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        FontSize = 15,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                    });
+
+                    if (device.FriendlyName == defaultDevice.FriendlyName)
+                    {
+                        // Akzentfarbe für das aktive Gerät
+                        btn.BorderThickness = new Thickness(2);
+                        // Nutzt die System-Akzentfarbe für Win11 Feeling
+                        btn.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
+                    }
+
+                    btn.Content = contentStack;
+                    btn.Click += (s, e) => SetAudioDevice(device.FriendlyName);
+
+                    _audioDeviceButtons.Add(btn);
+                    SimpleAudioList.Children.Add(btn);
+                }
+
+                AudioOverlay.Visibility = Visibility.Visible;
+                _currentFocusArea = FocusArea.AudioMenu;
+                _selectedAudioDeviceIndex = 0;
+
+                UpdateVisualFocus();
+            }
+            catch (Exception ex) { Debug.WriteLine("Audio Error: " + ex.Message); }
+        }
+
+        private void CloseAudioFlyout()
+        {
+            AudioOverlay.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.TopButtons;
+            UpdateVisualFocus();
+        }
+
+        private void ToggleAudioFlyout()
+        {
+         
+            if (AudioOverlay.Visibility == Visibility.Visible) CloseAudioFlyout();
+            else OpenAudioFlyout();
+        }
+
+        private void AudioOverlay_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            CloseAudioFlyout();
+        }
+
+        private void SetAudioDevice(string deviceName)
+        {
+            // Bereinigung für NirCmd
+            string cleanedName = deviceName.Split('(')[0].Trim();
+            NirCmdUtil.NirCmdHelper.ExecuteCommand($"setdefaultsounddevice \"{cleanedName}\"");
+            SendOverlayNotification("Audio: " + cleanedName);
+            PlayActivationSound();
+            CloseAudioFlyout();
+        }
 
         #endregion soundcontrol
         #region psdualsense
@@ -247,16 +342,115 @@ namespace gcmloader
         #region ui status
         private DispatcherTimer _statusUpdateTimer;
         #endregion ui status
+        #region keyboardatstart
+        private void SetupKeyboardAutoStartTask()
+        {
+            const string taskName = "GCM_KeyboardStart";
+
+            try
+            {
+                using (TaskService ts = new TaskService())
+                {
+                    // Alte Aufgabe entfernen, um Konfiguration sauber zu überschreiben
+                    if (ts.FindTask(taskName) != null)
+                    {
+                        ts.RootFolder.DeleteTask(taskName);
+                    }
+
+                    TaskDefinition td = ts.NewTask();
+                    td.RegistrationInfo.Description = "Startet die Eingabe-UI beim Systemstart unabhängig von der Anmeldung.";
+                    td.RegistrationInfo.Author = "gcm_keyboardstart";
+
+                    // --- TRIGGER: NUR BEIM SYSTEMSTART (BOOT) ---
+                    td.Triggers.Add(new BootTrigger { Enabled = true });
+
+                    // --- SETTINGS (Wie in deinem XML) ---
+                    td.Settings.MultipleInstances = TaskInstancesPolicy.IgnoreNew;
+                    td.Settings.DisallowStartIfOnBatteries = false;
+                    td.Settings.StopIfGoingOnBatteries = false;
+                    td.Settings.AllowHardTerminate = true;
+                    td.Settings.StartWhenAvailable = true; // Wichtig: Starten, sobald der Dienst bereit ist
+                    td.Settings.RunOnlyIfNetworkAvailable = false;
+                    td.Settings.AllowDemandStart = true;
+                    td.Settings.Enabled = true;
+                    td.Settings.Hidden = false;
+                    td.Settings.Priority = ProcessPriorityClass.Normal;
+
+                    // --- AKTION & PFAD ---
+                    string tabTipPath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+                        @"microsoft shared\ink\TabTip.exe");
+
+                    if (File.Exists(tabTipPath))
+                    {
+                        // WICHTIG: Den Pfad in Anführungszeichen setzen, falls Leerzeichen enthalten sind
+                        td.Actions.Add(new ExecAction($"\"{tabTipPath}\"", "startkeyboard"));
+
+                        // --- PRINCIPAL: UNABHÄNGIG VOM NUTZER ---
+                        // "S-1-5-18" ist die SID für das SYSTEM-Konto. 
+                        // Das ist nötig, damit die Aufgabe beim Booten ohne Login läuft.
+                        td.Principal.UserId = "SYSTEM";
+                        td.Principal.LogonType = TaskLogonType.ServiceAccount;
+                        td.Principal.RunLevel = TaskRunLevel.Highest;
+
+                        ts.RootFolder.RegisterTaskDefinition(taskName, td);
+                        Debug.WriteLine($"[Task] {taskName} erfolgreich für System-Boot erstellt.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Task] Fehler: {ex.Message}");
+            }
+        }
+        #endregion keyboardatstart
         #region autoscaling
+        private const int DWMWA_EXCLUDED_FROM_PEEK = 12;
+        private const int DWMWA_FLIP3D_POLICY = 9;
+        private const int DWMFLIP_NONE = 1;
+        //vrr control
+        public void EnsureVrrDisabledViaRegistry()
+        {
+            try
+            {
+                string exePath = Process.GetCurrentProcess().MainModule.FileName;
+                string registryPath = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+
+                // DISABLEDXMAXIMIZEDWINDOWEDMODE = Deaktiviert VRR im Fenstermodus
+                // DISABLEFullScreenOptimizations = Verhindert den "Game-Mode" Wechsel
+                string flags = "~ DISABLEDXMAXIMIZEDWINDOWEDMODE DISABLEFullScreenOptimizations";
+
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(registryPath, true))
+                {
+                    if (key != null)
+                    {
+                        var existingValue = key.GetValue(exePath);
+                        if (existingValue == null || !existingValue.ToString().Contains("DISABLEFullScreenOptimizations"))
+                        {
+                            key.SetValue(exePath, flags);
+                            Debug.WriteLine("[GCM] VRR & Fullscreen-Optimierung via Registry deaktiviert.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Fehler beim Setzen der Registry-Flags: {ex.Message}");
+            }
+        }
+
 
         private void ForceDpiRedraw()
         {
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            int pWidth = GetSystemMetrics(0);
-            int pHeight = GetSystemMetrics(1);
 
-            // Hier ebenfalls den Abzug entfernen:
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040 | 0x0020);
+            // Echte Hardware-Pixel abfragen
+            int pWidth = GetSystemMetrics(0); // SM_CXSCREEN
+            int pHeight = GetSystemMetrics(1); // SM_CYSCREEN
+
+            // WICHTIG: pHeight - 1 sorgt dafür, dass AMD das Fenster als Desktop-Inhalt sieht.
+            // Das verhindert den schwarzen Bildschirm beim Fokus-Wechsel.
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight - 1, 0x0040); // SWP_SHOWWINDOW
 
             if (MainContent != null)
             {
@@ -292,90 +486,6 @@ namespace gcmloader
         // DPI Context Konstanten
         private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
 
-        private void SetupResolutionListener()
-        {
-            Microsoft.UI.Windowing.AppWindow appWindow = GetAppWindowForCurrentWindow();
-
-            // Wir abonnieren das Changed-Event
-            appWindow.Changed += (s, e) =>
-            {
-                // Wir prüfen auf SizeChange oder PositionChange
-                // Das deckt Auflösungsänderungen zuverlässig ab
-                if (e.DidSizeChange || e.DidPositionChange)
-                {
-                    this.DispatcherQueue.TryEnqueue(() => {
-                        UpdateWindowLayout();
-                    });
-                }
-            };
-        }
-
-        private Microsoft.UI.Windowing.AppWindow GetAppWindowForCurrentWindow()
-        {
-            IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            Microsoft.UI.WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
-            return Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
-        }
-
-        private void UpdateWindowLayout()
-        {
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-
-            // 1. Echte Hardware-Pixel abfragen (Win32)
-            int pWidth = GetSystemMetrics(0); // SM_CXSCREEN
-            int pHeight = GetSystemMetrics(1); // SM_CYSCREEN
-
-            // 2. Deine Wunsch-Skalierung basierend auf der Auflösung festlegen
-            double customScale = 1.0;
-
-            if (pWidth >= 3840) // 4K
-            {
-                customScale = 1.5; // 150%
-            }
-            else if (pWidth >= 2560) // 2K / 1440p
-            {
-                customScale = 1.5; // Auch 150% (wie von dir gewünscht)
-            }
-            else if (pWidth >= 1920) // Full HD
-            {
-                customScale = 2.0; // 200% (größere UI für kleine Auflösung)
-            }
-            else // Alles darunter
-            {
-                customScale = 1.0;
-            }
-
-            Debug.WriteLine($"[ResSync] Auflösung: {pWidth}x{pHeight} -> Skalierung: {customScale * 100}%");
-
-            // 3. Fenster Win32-seitig auf Hardware-Pixel setzen
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight - 3,
-                         SWP_SHOWWINDOW | SWP_NOZORDER | 0x0020);
-
-            // 4. XAML-Inhalt manuell anpassen
-            if (this.Content is FrameworkElement rootElement)
-            {
-                // Wir setzen die logische Größe so, dass sie nach der Skalierung den Schirm füllt
-                // Formel: Physische Pixel / Skalierungsfaktor
-                rootElement.Width = pWidth / customScale;
-                rootElement.Height = (pHeight - 3) / customScale;
-
-                // Die ScaleTransform anwenden
-                rootElement.RenderTransformOrigin = new Windows.Foundation.Point(0, 0);
-                rootElement.RenderTransform = new ScaleTransform()
-                {
-                    ScaleX = customScale,
-                    ScaleY = customScale
-                };
-
-                rootElement.InvalidateMeasure();
-                rootElement.UpdateLayout();
-            }
-
-            // 5. Hintergrundbild (sollte immer die vollen Hardware-Pixel ohne Zoom füllen)
-            SetBackgroundImage(pWidth, pHeight);
-        }
-
-
         #endregion autoscaling
         #region window engine
 
@@ -388,7 +498,7 @@ namespace gcmloader
     "chrome",
     "opera gx",
     "opera",
-    "edge",
+    "Microsoft Edge",
     "explorer",
     "moonlight"
 };
@@ -1132,7 +1242,7 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher }
+        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu }
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
@@ -1320,6 +1430,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             Logger.Initialize();
             this.InitializeComponent();
+            EnsureVrrDisabledViaRegistry();
+            SetupKeyboardAutoStartTask();
             //Scaling
             _originalScreenWidth = GetScreenWidth();
             _originalScreenWidth = GetSystemMetrics(0);
@@ -1413,7 +1525,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             LoadDynamicLauncherCards();
-            _topButtons = new List<Button> { ExitGcmButton, SettingsButton, AppLauncherButton, ShutdownButton };
+            _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { ShutdownMenuItem, RestartMenuItem, SleepMenuItem , LogOffMenuItem };
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
@@ -1564,7 +1676,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 NoAppsFoundText.Visibility = AllInstalledApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 if (AppLauncher.Visibility == Visibility.Visible && AppGridView.Items.Count > 0)
                 {
-                    AppGridView.SelectedIndex = 0;
+                    if (AppGridView.SelectedIndex == -1) AppGridView.SelectedIndex = 0;
                 }
             });
         }
@@ -2237,25 +2349,29 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion overlay window
 
+        [DllImport("dwmapi.dll")]
+        static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
         private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
         {
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
-            long exStyle = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-            IntPtr style = GetWindowLongPtr(hwnd, GWL_STYLE);
+            // 1. Randlos-Stil setzen
+            SetWindowLongPtr(hwnd, GWL_STYLE, (IntPtr)0x80000000); // WS_POPUP
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)0);
 
-            // WS_EX_TOOLWINDOW sorgt dafür, dass es NICHT im Alt-Tab erscheint
-            SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)(exStyle | 0x00000080L | 0x00080000L));
+            // 2. VRR / Schwarzbild Fix: Erzwinge Standard-Desktop-Rendering
+            int disableFullscreenTransform = 1;
+            DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, ref disableFullscreenTransform, sizeof(int));
 
-            style = (IntPtr)((long)style & ~WS_OVERLAPPEDWINDOW);
-            SetWindowLongPtr(hwnd, GWL_STYLE, style);
+            int policy = DWMFLIP_NONE;
+            DwmSetWindowAttribute(hwnd, DWMWA_FLIP3D_POLICY, ref policy, sizeof(int));
 
-            int screenWidth = GetScreenWidth();
-            int screenHeight = GetScreenHeight();
-
-            // JETZT: Exakte Maße nutzen (kein -3 mehr)
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+            // 3. Initiale Größe setzen
+            ForceDpiRedraw();
         }
+
+        [DllImport("user32.dll")]
+        static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
         private bool IsWindowInForeground()
         {
@@ -4853,83 +4969,68 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private Border CreateLauncherCard(LauncherCardItem item)
         {
-            double cardWidth = (item.Name == "Main Launcher") ? 300 : 150;
-            double cardHeight = (item.Name == "Main Launcher") ? 250 : 180;
-            UIElement cardContent;
+            var contentGrid = new Grid();
 
-            if (item.Name == "Main Launcher")
+            // 1. Haupt-Glaseffekt
+            var glassEffect = new Border
             {
-                // If an ImagePath is provided, create a StackPanel with the Image and a TextBlock.
-                if (!string.IsNullOrEmpty(item.ImagePath))
-                {
-                    cardContent = new StackPanel
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Spacing = 15,
-                        Children = {
-                    new Image
-                    {
-                        Source = new BitmapImage(new Uri(item.ImagePath)),
-                        Width = 128,
-                        Height = 128,
-                        Stretch = Stretch.Uniform
-                    },
-                    new TextBlock
-                    {
-                        Text = "LAUNCHER",
-                        FontSize = 22,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        Foreground = new SolidColorBrush(Colors.White),
-                        HorizontalAlignment = HorizontalAlignment.Center
-                    }
-                }
-                    };
-                }
-                else // Otherwise, fall back to the default home icon and text.
-                {
-                    cardContent = new StackPanel
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Spacing = 15,
-                        Children = {
-                    new FontIcon { Glyph = "\uE80F", FontSize = 48, Foreground = new SolidColorBrush(Colors.White) },
-                    new TextBlock { Text = "Launcher", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Colors.White) }
-                }
-                    };
-                }
-            }
-            else // For all other cards (Discord, custom apps)
-            {
-                cardContent = new Image
-                {
-                    Source = new BitmapImage(new Uri(item.ImagePath)),
-                    Width = 80,
-                    Height = 80,
-                    Stretch = Stretch.Uniform,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-            }
-
-            // This part of the method remains exactly the same
-            var cardBorder = new Border
-            {
-                Width = cardWidth,
-                Height = cardHeight,
-                Background = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), // #33FFFFFF
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"],
+                Opacity = 0.85,
                 CornerRadius = new CornerRadius(20),
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Colors.Gray),
-                Child = cardContent,
-                Tag = item
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
+                BorderThickness = new Thickness(1.5)
             };
 
-            if (item.TapAction != null)
+            // 2. TITEL-BEREICH (Frosty Grey)
+            var titleBlurLayer = new Border
             {
-                cardBorder.Tapped += (s, e) => item.TapAction(s, e);
-            }
+                VerticalAlignment = VerticalAlignment.Top,
+                Height = 55,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 45, 45, 45)),
+                CornerRadius = new CornerRadius(20, 20, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = item.Name.ToUpper(),
+                    FontSize = 13,
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                    TextAlignment = TextAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(12, 0, 12, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1
+                }
+            };
+
+            // 3. Icon (Etwas größer, da kein Banner den Platz wegnimmt)
+            var iconImage = new Image
+            {
+                Source = new BitmapImage(new Uri(item.ImagePath ?? "ms-appx:///Assets/game.png")),
+                Width = (item.Name == "Main Launcher") ? 100 : 80,
+                Height = (item.Name == "Main Launcher") ? 100 : 80,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 20, 0, 0) // Leicht nach unten schieben wegen Titel
+            };
+
+            contentGrid.Children.Add(glassEffect);
+            contentGrid.Children.Add(titleBlurLayer);
+            contentGrid.Children.Add(iconImage);
+            // HIER KEIN BANNER!
+
+            var cardBorder = new Border
+            {
+                Width = (item.Name == "Main Launcher") ? 270 : 220,
+                Height = 300,
+                CornerRadius = new CornerRadius(20),
+                Margin = new Thickness(12, 0, 12, 0),
+                Child = contentGrid,
+                Tag = item,
+                RenderTransform = new CompositeTransform()
+            };
+
+            if (item.TapAction != null) cardBorder.Tapped += (s, e) => item.TapAction(s, e);
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(cardBorder).ImplicitAnimations = null;
 
             return cardBorder;
         }
@@ -5814,106 +5915,223 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
-            // This part remains unchanged
-            Color avgColor = Color.FromArgb(255, 60, 60, 60);
-            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
-            {
-                try
-                {
-                    using (var iconBmp = GetBitmapFromExeIcon(exePath))
-                    {
-                        if (iconBmp != null) avgColor = GetAverageColor(iconBmp);
-                    }
-                }
-                catch { /* Ignore */ }
-            }
-            var gradient = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0.5, 0),
-                EndPoint = new Windows.Foundation.Point(0.5, 1),
-                GradientStops = new GradientStopCollection
-                {
-                    new GradientStop { Color = Color.FromArgb(220, avgColor.R, avgColor.G, avgColor.B), Offset = 0.0 },
-                    new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
-                }
-            };
-
-            // ### START OF FLICKER FIX ###
             var contentGrid = new Grid();
 
-            // 1. The Image control that will hold the loaded (poster) image.
-            // It starts invisible (Opacity=0) and stretches to fill the card.
-            var loadedImage = new Image
-            {
-                Name = "LoadedImage",
-                Stretch = Stretch.UniformToFill, // Fills the card
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Opacity = 0.0 // Starts invisible
-            };
-            contentGrid.Children.Add(loadedImage); // Add first (bottom layer)
+            // 1. Poster Hintergrund
+            var loadedImage = new Image { Name = "LoadedImage", Stretch = Stretch.UniformToFill, Opacity = 0.0 };
 
-            // 2. The default icon (game.png or exe icon)
-            // This is visible by default (Opacity=1) and sits on top.
+            // 2. HAUPT-GLASEFFEKT (Frosted Glass)
+            var glassEffect = new Border
+            {
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"],
+                Opacity = 0.85,
+                CornerRadius = new CornerRadius(20),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
+                BorderThickness = new Thickness(1.5)
+            };
+
+            // 3. TITEL-BEREICH (Blurry Gray)
+            var titleBlurLayer = new Border
+            {
+                VerticalAlignment = VerticalAlignment.Top,
+                Height = 55,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 45, 45, 45)),
+                CornerRadius = new CornerRadius(20, 20, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = name,
+                    FontSize = 14,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                    TextAlignment = TextAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(12, 0, 12, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1
+                }
+            };
+
+            // 4. Icon (Zentriert)
             var iconImage = new Image
             {
-                Name = "IconImage",
                 Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
                 Width = 64,
                 Height = 64,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            contentGrid.Children.Add(iconImage); // Add second (top layer)
 
-            // 3. Text elements (unchanged)
-            var textBackground = new Border
+            // 5. BANNER-BEREICH UNTEN (Nur bei Cards + Eigener Blur Layer)
+            var bannerContainer = new Border
             {
-                Height = 80,
+                Name = "ButtonBanner", // WICHTIG: Name für die Animation
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new LinearGradientBrush
+                Height = 50,
+                Opacity = 0, // Erscheint bei Fokus
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 45, 45, 45)), // Gleicher Blur wie oben
+                CornerRadius = new CornerRadius(0, 0, 20, 20),
+                Child = new StackPanel
                 {
-                    StartPoint = new Windows.Foundation.Point(0.5, 0),
-                    EndPoint = new Windows.Foundation.Point(0.5, 1),
-                    GradientStops = new GradientStopCollection
-                    {
-                        new GradientStop { Color = Color.FromArgb(0, 0, 0, 0), Offset = 0.0 },
-                        new GradientStop { Color = Color.FromArgb(180, 0, 0, 0), Offset = 1.0 }
-                    }
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Spacing = 15
                 }
             };
-            var titleText = new TextBlock
-            {
-                Name = "TitleText",
-                Text = name,
-                Foreground = new SolidColorBrush(Colors.White),
-                FontSize = 16,
-                Margin = new Thickness(10, 0, 10, 10),
-                VerticalAlignment = VerticalAlignment.Bottom,
-                TextWrapping = TextWrapping.WrapWholeWords,
-                MaxLines = 2
-            };
-            contentGrid.Children.Add(textBackground);
-            contentGrid.Children.Add(titleText);
 
+            // Buttons zum StackPanel im Container hinzufügen
+            var bannerStack = (StackPanel)bannerContainer.Child;
+            SetupButtonLayout(bannerStack, "Xbox");
+
+            contentGrid.Children.Add(loadedImage);
+            contentGrid.Children.Add(glassEffect);
+            contentGrid.Children.Add(titleBlurLayer);
+            contentGrid.Children.Add(iconImage);
+            contentGrid.Children.Add(bannerContainer);
+
+            // In der CreateProgramCard Methode ganz unten:
             var cardBorder = new Border
             {
                 Width = 220,
-                Height = 260,
-                Background = gradient, // The gradient is the permanent background
-                CornerRadius = new CornerRadius(15),
-                Margin = new Thickness(10),
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)),
+                Height = 300,
+                CornerRadius = new CornerRadius(20),
+                // Margin von 12 auf 5 reduziert für engere Abstände
+                Margin = new Thickness(5, 0, 5, 0),
+                Child = contentGrid,
                 Tag = new CardTag { Process = proc, Hwnd = hwnd },
-                Child = contentGrid
+                RenderTransform = new CompositeTransform()
             };
 
-            // 4. Call the load method, passing BOTH Image controls
-            LoadCardImageAsync(cardBorder, loadedImage, iconImage, titleText, name, exePath);
-            // ### END OF FLICKER FIX ###
-
+            LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath);
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(cardBorder).ImplicitAnimations = null;
             return cardBorder;
+        }
+
+        private void SetupButtonLayout(StackPanel banner, string type)
+        {
+            banner.Children.Clear();
+
+            if (type == "Xbox")
+            {
+                // A = Grün, B = Rot
+                banner.Children.Add(CreateControllerButton("A", "#FF22b14c", "Start"));
+                banner.Children.Add(CreateControllerButton("B", "#FFe74c3c", "Close"));
+            }
+            else // PlayStation Style
+            {
+                // X = Weißer Kreis mit grauem Text / Kreis-Symbol = Weißer Kreis
+                banner.Children.Add(CreateControllerButton("\uE739", "#FFFFFFFF", "Start", true)); // X Symbol
+                banner.Children.Add(CreateControllerButton("\uE711", "#FFFFFFFF", "Close", true)); // O Symbol
+            }
+        }
+
+        private StackPanel CreateControllerButton(string symbol, string colorHex, string label, bool isPS = false)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+
+            var btnCircle = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(10),
+                Background = new SolidColorBrush(HexToColor(colorHex)),
+                Child = new TextBlock
+                {
+                    Text = symbol,
+                    FontSize = isPS ? 10 : 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(isPS ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            sp.Children.Add(btnCircle);
+            sp.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return sp;
+        }
+
+        private Windows.UI.Color HexToColor(string hex)
+        {
+            hex = hex.Replace("#", "");
+            byte r = byte.Parse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber);
+            byte g = byte.Parse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber);
+            byte b = byte.Parse(hex.Substring(6, 2), System.Globalization.NumberStyles.HexNumber);
+            return Windows.UI.Color.FromArgb(255, r, g, b);
+        }
+
+        private StackPanel CreateXboxHint(string button, string colorHex, string label)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+
+            // Der farbige Kreis mit dem Buchstaben
+            var btnCircle = new Border
+            {
+                Width = 18,
+                Height = 18,
+                CornerRadius = new CornerRadius(9),
+                Background = new SolidColorBrush(HexToColor(colorHex)),
+                Child = new TextBlock
+                {
+                    Text = button,
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+
+            sp.Children.Add(btnCircle);
+            sp.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return sp;
+        }
+
+        // Hilfsfunktion für Farben
+        
+
+        // 3. HILFSMETHODE FÜR DIE BUTTON-ANZEIGE
+        private StackPanel CreateKeyHint(string glyph, string text)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            sp.Children.Add(new FontIcon
+            {
+                Glyph = glyph,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons")
+            });
+            sp.Children.Add(new TextBlock
+            {
+                Text = text,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return sp;
+        }
+
+        // Hilfsmethode für die Shortcut-Anzeigen (X Start / O Close)
+        private StackPanel CreateKeyHint(string glyph, string color, string label)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+            sp.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
+            sp.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), VerticalAlignment = VerticalAlignment.Center });
+            return sp;
         }
 
 
@@ -7329,37 +7547,109 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void ProcessPs5SmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
         {
-            // Buttons (A, B, X, Y) sofort verarbeiten
+            // 1. Neue Button-Drücke berechnen
             var newPresses = buttons & ~_lastPs5ButtonState;
-            if (newPresses != GamepadButtonFlags.None)
-            {
-                DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, 4));
-            }
 
-            // Stick Smooth Logik
-            if (xDir == 0 && yDir == 0)
+            // --- UI-Sichere Verarbeitung via Dispatcher ---
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                // Prüfen, ob der App-Launcher aktiv ist
+                if (_currentFocusArea == FocusArea.AppLauncher)
+                {
+                    // X-Taste (intern A) -> App starten
+                    if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        int selectedIndex = AppGridView.SelectedIndex;
+                        if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count && AppGridView.Items[selectedIndex] is AppInfo app)
+                        {
+                            LaunchApp(app);
+                            PlayActivationSound();
+                        }
+                    }
+                    // Kreis-Taste (intern B) -> Launcher schließen
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        ToggleAppLauncher_Click(null, null);
+                        PlaydeactivationSound();
+                    }
+
+                    // STEUERKREUZ (D-Pad) innerhalb des Launchers
+                    int dpadX = 0; int dpadY = 0;
+                    if ((newPresses & GamepadButtonFlags.DPadUp) != 0) dpadY = 1;
+                    else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) dpadY = -1;
+                    else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) dpadX = -1;
+                    else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) dpadX = 1;
+
+                    if (dpadX != 0 || dpadY != 0)
+                    {
+                        HandleAppLauncherNavigation(dpadX, dpadY);
+                    }
+                }
+                // --- NORMALER MODUS (Wenn Launcher zu ist) ---
+                else if (newPresses != GamepadButtonFlags.None)
+                {
+                    // Hier leiten wir an die normale HandleGamepadInput weiter
+                    HandleGamepadInput(newPresses, false, false, false, false, 4);
+                }
+            });
+
+            // 2. Stick-Navigation (Smooth) - ebenfalls im Dispatcher
+            if (xDir != 0 || yDir != 0)
+            {
+                if (DateTime.Now > _ps5NextAllowedInputTime)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (_currentFocusArea == FocusArea.AppLauncher)
+                        {
+                            HandleAppLauncherNavigation(xDir, yDir);
+                        }
+                        else
+                        {
+                            HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4);
+                        }
+                    });
+
+                    _ps5NextAllowedInputTime = _ps5StickCentered ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
+                    _ps5StickCentered = false;
+                }
+            }
+            else
             {
                 _ps5NextAllowedInputTime = DateTime.MinValue;
                 _ps5StickCentered = true;
             }
-            else
-            {
-                if (DateTime.Now > _ps5NextAllowedInputTime)
-                {
-                    DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4));
 
-                    if (_ps5StickCentered)
-                    {
-                        _ps5NextAllowedInputTime = DateTime.Now.AddMilliseconds(400); // Erster Sprung Pause
-                        _ps5StickCentered = false;
-                    }
-                    else
-                    {
-                        _ps5NextAllowedInputTime = DateTime.Now.AddMilliseconds(150); // Rattern
-                    }
-                }
-            }
             _lastPs5ButtonState = buttons;
+        }
+
+        // Hilfsmethode für das Raster-Scrolling im App-Launcher
+        private void HandleAppLauncherNavigation(int xDir, int yDir)
+        {
+            if (AppGridView.Items.Count == 0) return;
+
+            int columns = 4; // Standardfall
+            try
+            {
+                if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container)
+                    columns = Math.Max(1, (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth));
+            }
+            catch { }
+
+            int currentIndex = AppGridView.SelectedIndex;
+            int newIndex = currentIndex;
+
+            if (yDir == 1) newIndex = Math.Max(0, currentIndex - columns); // Hoch
+            else if (yDir == -1) newIndex = Math.Min(AppGridView.Items.Count - 1, currentIndex + columns); // Runter
+            else if (xDir == 1) newIndex = (currentIndex + 1) % AppGridView.Items.Count; // Rechts
+            else if (xDir == -1) newIndex = (currentIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; // Links
+
+            if (newIndex != currentIndex)
+            {
+                AppGridView.SelectedIndex = newIndex;
+                AppGridView.ScrollIntoView(AppGridView.SelectedItem);
+                PlayNavigationSound();
+            }
         }
         private void HandleUniversalToggle(GamepadButtonFlags buttons)
         {
@@ -7655,30 +7945,29 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
         /// <summary>
-        /// The central method that processes all gamepad inputs for shortcuts and UI navigation.
+        /// Die zentrale Methode zur Verarbeitung der Gamepad-Eingaben für die UI-Navigation.
+        /// Beinhaltet jetzt die Steuerung für das Audio-Flyout (X-Taste in TopButtons).
         /// </summary>
-        // *** FIX: Signature changed to accept 'newPresses' directly from the loop ***
+        /// <summary>
+        /// Verarbeitet Gamepad-Eingaben für die UI-Navigation und Shortcuts.
+        /// </summary>
         private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
-            // *** FIX: All 'IsWindowInForeground' and 'lastButtonState' logic
-            // is now handled by the background loop before this is called. ***
+            // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
+            if (!IsWindowInForeground()) return;
 
-            bool navigated = false; // Set to true if an area switch occurs
+            bool navigated = false;
 
-            // --- Contextual Navigation (D-Pad, Left Stick, A, B) ---
-            // The logic here is now correct because 'newPresses' only contains
-            // buttons that were *just* pressed this frame.
             switch (_currentFocusArea)
             {
-                // --- 1. TopButtons Area ---
+                // --- 1. TopButtons (Leiste oben) ---
                 case FocusArea.TopButtons:
                     if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
                     {
-                        // DOWN: Go back to the previous area (Cards or Launcher)
+                        // Wechsel zurück zum vorherigen Hauptbereich
                         _currentFocusArea = _previousFocusArea;
-                        _previousTopButtonIndex = _selectedTopButtonIndex; // Remember position
+                        _previousTopButtonIndex = _selectedTopButtonIndex;
 
-                        // Restore the index of the target area
                         if (_currentFocusArea == FocusArea.Cards)
                             _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
                         else if (_currentFocusArea == FocusArea.Launcher)
@@ -7688,213 +7977,181 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _topButtons.Any())
                     {
-                        // Navigate right WITHIN the area
                         _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _topButtons.Any())
                     {
-                        // Navigate left WITHIN the area
                         _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
                         ClickSelectedTopButton();
                         PlayActivationSound();
                     }
+                    else if ((newPresses & GamepadButtonFlags.X) != 0)
+                    {
+                        // NEU: Öffnet das integrierte Audio-Menü
+                        OpenAudioFlyout();
+                        PlayActivationSound();
+                    }
                     break;
 
-                // --- 2. Cards Area (Main Area) ---
+                // --- 2. Cards (Laufende Apps) ---
                 case FocusArea.Cards:
                     if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
                     {
-                        // UP: Go to TopButtons
-                        _previousFocusArea = FocusArea.Cards; // Remember where we came from
-                        _previousCardIndex = _selectedCardIndex; // Remember position
+                        _previousFocusArea = FocusArea.Cards;
+                        _previousCardIndex = _selectedCardIndex;
                         _currentFocusArea = FocusArea.TopButtons;
                         _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
                         navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && ProgramCardPanel.Children.Any())
                     {
-                        // Navigate right WITHIN the area
                         _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
                     {
-                        // Check if there are any cards to navigate
-                        if (ProgramCardPanel.Children.Any())
+                        if (ProgramCardPanel.Children.Any() && _selectedCardIndex > 0)
                         {
-                            // Cards exist. Check if we are at the first one.
-                            if (_selectedCardIndex == 0)
-                            {
-                                // We ARE at the first one (Index 0) -> Jump to Launcher
-                                _previousFocusArea = FocusArea.Cards;
-                                _previousCardIndex = 0;
-                                _currentFocusArea = FocusArea.Launcher;
-                                _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                                navigated = true; // Signals an area switch
-                            }
-                            else
-                            {
-                                // We are NOT at the first one -> Navigate left normally
-                                _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
-                                UpdateVisualFocus();
-                                PlayNavigationSound();
-                            }
+                            _selectedCardIndex--;
+                            navigated = true;
                         }
                         else
                         {
-                            // There are NO cards. A press left
-                            // *always* switches to the Launcher area.
+                            // Am Anfang der Liste -> Wechsel zum Mini-Launcher links
                             _previousFocusArea = FocusArea.Cards;
-                            _previousCardIndex = 0; // Reset index
                             _currentFocusArea = FocusArea.Launcher;
                             _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                            navigated = true; // Signals an area switch
+                            navigated = true;
                         }
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
-                        TriggerCardAction(_selectedCardIndex, true); // True for launch/focus
+                        TriggerCardAction(_selectedCardIndex, true);
                         PlayActivationSound();
                     }
                     else if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
-                        TriggerCardAction(_selectedCardIndex, false); // False for close/kill
+                        TriggerCardAction(_selectedCardIndex, false);
                         PlaydeactivationSound();
                     }
                     break;
 
-                // --- 3. Launcher Area (Left Column, when active) ---
+                // --- 3. Launcher (Mini-Launcher links) ---
                 case FocusArea.Launcher:
                     if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
                     {
-                        // UP: Go to TopButtons
-                        _previousFocusArea = FocusArea.Launcher; // Remember where we came from
-                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember position
+                        _previousFocusArea = FocusArea.Launcher;
+                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex;
                         _currentFocusArea = FocusArea.TopButtons;
                         _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
                         navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _launcherAreaButtons.Any())
                     {
-                        // Wrap-around check
                         if (_selectedLauncherAreaIndex == _launcherAreaButtons.Count - 1)
                         {
-                            // YES: Jump to Cards
-                            _previousFocusArea = FocusArea.Launcher; // Remember for Up/Down
-                            _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember for jumping back
+                            // Ende der Liste -> Wechsel zu den Cards
                             _currentFocusArea = FocusArea.Cards;
-                            // Set focus to the FIRST Card-Item (or the remembered one)
-                            _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
-                            navigated = true; // Signals an area switch
+                            _selectedCardIndex = 0;
+                            navigated = true;
                         }
                         else
                         {
-                            // NO: Normal navigation right
-                            _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
-                            UpdateVisualFocus();
-                            PlayNavigationSound();
+                            _selectedLauncherAreaIndex++;
+                            navigated = true;
                         }
                     }
-                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _launcherAreaButtons.Any())
+                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _selectedLauncherAreaIndex > 0)
                     {
-                        // Navigate left WITHIN the area
-                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        _selectedLauncherAreaIndex--;
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
-                        if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item)
+                        if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count)
                         {
-                            item.TapAction?.Invoke(null, null); // Execute action
+                            var item = _launcherAreaButtons[_selectedLauncherAreaIndex].Tag as LauncherCardItem;
+                            item?.TapAction?.Invoke(null, null);
                         }
                         PlayActivationSound();
                     }
                     break;
 
+                // --- 4. AudioMenu (Audio-Geräte Flyout) ---
+                case FocusArea.AudioMenu:
+                    if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioDeviceButtons.Any())
+                    {
+                        _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
+                        navigated = true;
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioDeviceButtons.Any())
+                    {
+                        _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex - 1 + _audioDeviceButtons.Count) % _audioDeviceButtons.Count;
+                        navigated = true;
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0 || (newPresses & GamepadButtonFlags.X) != 0)
+                    {
+                        if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                        {
+                            SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                        }
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        CloseAudioFlyout();
+                        PlaydeactivationSound();
+                    }
+                    break;
+
+                // --- 5. PowerMenu (Shutdown/Restart) ---
                 case FocusArea.PowerMenu:
                     if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _powerMenuItems.Any())
                     {
                         _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
-                        UpdateVisualFocus(); PlayNavigationSound();
+                        navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _powerMenuItems.Any())
                     {
                         _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
-                        UpdateVisualFocus(); PlayNavigationSound();
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0 && _powerMenuItems.Count > _selectedPowerMenuItemIndex)
                     {
-                        var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                        if (selectedButton == ShutdownMenuItem) ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
-                        else if (selectedButton == RestartMenuItem) RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
-                        else if (selectedButton == LogOffMenuItem) LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
-                        else if (selectedButton == SleepMenuItem) SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
+                        _powerMenuItems[_selectedPowerMenuItemIndex].Focus(FocusState.Programmatic);
+                        // Trigger Click logic for the button
+                        var btn = _powerMenuItems[_selectedPowerMenuItemIndex];
+                        if (btn == ShutdownMenuItem) ShutdownMenuItem_Click(null, null);
+                        else if (btn == RestartMenuItem) RestartMenuItem_Click(null, null);
+                        else if (btn == SleepMenuItem) SleepMenuItem_Click(null, null);
+                        else if (btn == LogOffMenuItem) LogOffMenuItem_Click(null, null);
                         PlayActivationSound();
                     }
                     else if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
                         PowerMenu.Visibility = Visibility.Collapsed;
-                        _currentFocusArea = FocusArea.TopButtons; // Return focus
-                        UpdateVisualFocus(); PlaydeactivationSound();
+                        _currentFocusArea = FocusArea.TopButtons;
+                        navigated = true;
+                        PlaydeactivationSound();
                     }
                     break;
 
+                // --- 6. AppLauncher (Fullscreen Grid) ---
                 case FocusArea.AppLauncher:
-                    if (AppGridView.Items.Count > 0)
+                    if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
-                        int columns = 4; // Default guess
-                        try
-                        {
-                            if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
-                            {
-                                columns = Math.Max(1, (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth));
-                            }
-                        }
-                        catch { /* Ignore potential layout errors */ }
-
-                        int currentIndex = AppGridView.SelectedIndex;
-                        int newIndex = currentIndex;
-                        bool appNavigated = false;
-
-                        if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) { newIndex = Math.Min(AppGridView.Items.Count - 1, currentIndex + columns); appNavigated = true; }
-                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) { newIndex = Math.Max(0, currentIndex - columns); appNavigated = true; }
-                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) { newIndex = (currentIndex + 1) % AppGridView.Items.Count; appNavigated = true; }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) { newIndex = (currentIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; appNavigated = true; }
-
-                        if (appNavigated && newIndex != currentIndex)
-                        {
-                            AppGridView.SelectedIndex = newIndex;
-                            AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Ensure visible
-                            PlayNavigationSound();
-                        }
+                        ToggleAppLauncher_Click(null, null);
+                        PlaydeactivationSound();
                     }
-
-                    if ((newPresses & GamepadButtonFlags.A) != 0)
-                    {
-                        int selectedIndex = AppGridView.SelectedIndex;
-                        if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count)
-                        {
-                            if (AppGridView.Items[selectedIndex] is AppInfo app) { LaunchApp(app); }
-                        }
-                        PlayActivationSound();
-                    }
-                    else if ((newPresses & GamepadButtonFlags.B) != 0)
-                    {
-                        ToggleAppLauncher_Click(null, null); // Close
-                    }
+                    // Navigation innerhalb der GridView wird meist durch Windows-Focus-System 
+                    // oder spezifische Index-Berechnungen (siehe dein früherer Code) gehandhabt.
                     break;
             }
 
-            // If an area switch occurred, update the UI
             if (navigated)
             {
                 UpdateVisualFocus();
@@ -7934,63 +8191,89 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Updates the UI performantly by only changing the old and new focused elements.
         /// </summary>
-        
 
+
+        /// <summary>
+        /// Aktualisiert die visuelle Darstellung des Fokus basierend auf der aktuellen FocusArea.
+        /// Enthält Bounce-Animationen für das Infopanel und Scale-Effekte für Buttons.
+        /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
             UpdateLayoutForFocus();
 
-            // Reset all highlights (dieser Teil bleibt gleich)
+            // --- RESET PHASE ---
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
-            _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
+            _topButtons.ForEach(b => {
+                b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                b.BorderThickness = new Thickness(0);
+            });
             _powerMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
+
             for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
             {
                 if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
             }
 
-            // Highlight the currently focused element
-            if (_currentFocusArea == FocusArea.Launcher)
+            foreach (var btn in _audioDeviceButtons)
             {
-                if (_launcherAreaButtons.Count > _selectedLauncherAreaIndex)
-                {
-                    var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
-                    AnimateScale(selectedButton, true);
-                    AnimateBorderColor(selectedButton, true);
-                }
+                // Korrektur: Nutze Windows.UI.Color oder direkt Microsoft.UI.Colors
+                btn.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                AnimateScale(btn, false);
             }
-            else if (_currentFocusArea == FocusArea.TopButtons)
+
+            // --- HIGHLIGHT PHASE ---
+            switch (_currentFocusArea)
             {
-                if (_topButtons.Count > _selectedTopButtonIndex)
-                {
-                    var selectedButton = _topButtons[_selectedTopButtonIndex];
-                    selectedButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
-                    selectedButton.BorderThickness = new Thickness(2);
-                }
-            }
-            else if (_currentFocusArea == FocusArea.Cards && ProgramCardPanel.Children.Count > _selectedCardIndex)
-            {
-                if (ProgramCardPanel.Children[_selectedCardIndex] is Border card)
-                {
-                    AnimateScale(card, true);
-                    AnimateBorderColor(card, true);
-                    ScrollToCardAnimated(card);
-                }
-            }
-            else if (_currentFocusArea == FocusArea.PowerMenu)
-            {
-                if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
-                {
-                    var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                    selectedButton.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
-                }
-            }
-            // ### HIER IST DIE VEREINFACHUNG ###
-            // Der alte, komplizierte Code für AppLauncher wird komplett entfernt.
-            // Wir müssen hier nichts mehr tun, da das XAML die Hervorhebung übernimmt.
-            else if (_currentFocusArea == FocusArea.AppLauncher)
-            {
-                // Leer lassen! Die GridView kümmert sich dank des neuen Styles selbst darum.
+                case FocusArea.Launcher:
+                    AnimateInfoPanelFocus(false);
+                    if (_launcherAreaButtons.Count > _selectedLauncherAreaIndex)
+                    {
+                        var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
+                        AnimateScale(selectedButton, true);
+                        AnimateBorderColor(selectedButton, true);
+                    }
+                    break;
+
+                case FocusArea.TopButtons:
+                    AnimateInfoPanelFocus(true);
+                    if (_topButtons.Count > _selectedTopButtonIndex)
+                    {
+                        var selectedButton = _topButtons[_selectedTopButtonIndex];
+                        selectedButton.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
+                        selectedButton.BorderThickness = new Thickness(2);
+                    }
+                    break;
+
+                case FocusArea.Cards:
+                    AnimateInfoPanelFocus(false);
+                    if (ProgramCardPanel.Children.Count > _selectedCardIndex)
+                    {
+                        if (ProgramCardPanel.Children[_selectedCardIndex] is Border card)
+                        {
+                            AnimateScale(card, true);
+                            AnimateBorderColor(card, true);
+                            ScrollToCardAnimated(card);
+                        }
+                    }
+                    break;
+
+                case FocusArea.AudioMenu:
+                    if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                    {
+                        var activeBtn = _audioDeviceButtons[_selectedAudioDeviceIndex];
+                        // Benutze hier Color.FromArgb aus Windows.UI
+                        activeBtn.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 255, 255));
+                        AnimateScale(activeBtn, true);
+                    }
+                    break;
+
+                case FocusArea.PowerMenu:
+                    if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
+                    {
+                        var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
+                        selectedButton.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 255, 255));
+                    }
+                    break;
             }
         }
 
@@ -8004,28 +8287,43 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void AnimateScale(UIElement element, bool isSelected)
         {
-            // Ensure a CompositeTransform exists, creating one if it doesn't.
-            // This prevents conflicts with other animations.
-            if (element.RenderTransform is not CompositeTransform)
+            if (element is not Border border || border.RenderTransform is not CompositeTransform transform) return;
+
+            // SICHERHEITS-CHECK: Banner suchen
+            FrameworkElement banner = null;
+            if (border.Child is Grid g)
             {
-                element.RenderTransform = new CompositeTransform();
+                // Wir suchen nach dem Namen "ButtonBanner"
+                banner = g.Children.OfType<FrameworkElement>().FirstOrDefault(x => x.Name == "ButtonBanner");
             }
 
-            var visual = ElementCompositionPreview.GetElementVisual(element);
-            var compositor = visual.Compositor;
-            var targetScale = isSelected ? new Vector3(1.05f, 1.05f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
+            var sb = new Storyboard();
+            var duration = TimeSpan.FromMilliseconds(250);
+            var ease = new ExponentialEase { Exponent = 6, EasingMode = EasingMode.EaseOut };
 
-            var scaleAnimation = compositor.CreateVector3KeyFrameAnimation();
-            scaleAnimation.Duration = TimeSpan.FromMilliseconds(250);
-            scaleAnimation.InsertKeyFrame(1.0f, targetScale, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
+            // 1. Karten-Transformation (Scale & Lift)
+            var animScaleX = new DoubleAnimation { To = isSelected ? 1.05 : 1.0, Duration = duration, EasingFunction = ease };
+            var animScaleY = new DoubleAnimation { To = isSelected ? 1.05 : 1.0, Duration = duration, EasingFunction = ease };
+            var animTransY = new DoubleAnimation { To = isSelected ? -10 : 0, Duration = duration, EasingFunction = ease };
 
-            // Correctly set the center point for the scaling animation
-            if (element is FrameworkElement fe)
+            Storyboard.SetTarget(animScaleX, transform); Storyboard.SetTargetProperty(animScaleX, "ScaleX");
+            Storyboard.SetTarget(animScaleY, transform); Storyboard.SetTargetProperty(animScaleY, "ScaleY");
+            Storyboard.SetTarget(animTransY, transform); Storyboard.SetTargetProperty(animTransY, "TranslateY");
+
+            sb.Children.Add(animScaleX);
+            sb.Children.Add(animScaleY);
+            sb.Children.Add(animTransY);
+
+            // 2. Banner-Animation (NUR WENN BANNER EXISTIERT)
+            if (banner != null)
             {
-                visual.CenterPoint = new Vector3((float)fe.ActualWidth / 2, (float)fe.ActualHeight / 2, 0f);
+                var animOpacity = new DoubleAnimation { To = isSelected ? 1.0 : 0.0, Duration = duration, EasingFunction = ease };
+                Storyboard.SetTarget(animOpacity, banner);
+                Storyboard.SetTargetProperty(animOpacity, "Opacity");
+                sb.Children.Add(animOpacity);
             }
 
-            visual.StartAnimation("Scale", scaleAnimation);
+            sb.Begin();
         }
 
 
@@ -8038,26 +8336,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 var buttonToClick = _topButtons[_selectedTopButtonIndex];
 
-                // Execute the correct click method
                 if (buttonToClick == ExitGcmButton)
                 {
                     ExitGcmButton_Click_1(null, null);
                 }
-                // =================================================================
-                // ADDED: Logic for the new Settings Button
-                // =================================================================
+                else if (buttonToClick == VolumeButton) // NEU: Reaktion auf A-Taste
+                {
+                    ToggleAudioFlyout();
+                }
                 else if (buttonToClick == SettingsButton)
                 {
                     SettingsButton_Click(null, null);
                 }
-                // =================================================================
                 else if (buttonToClick == AppLauncherButton)
                 {
                     ToggleAppLauncher_Click(null, null);
                 }
                 else if (buttonToClick == ShutdownButton)
                 {
-                    // This opens the Power-Menu, the logic is already in GamepadButtonCheck
                     _currentFocusArea = FocusArea.PowerMenu;
                     _selectedPowerMenuItemIndex = 0;
                     PowerButton_Click(null, null);
@@ -8124,6 +8420,37 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine("[UWP] No visible child window found.");
             }
         }
+
+        private void AnimateInfoPanelFocus(bool hasFocus)
+        {
+            var sb = new Storyboard();
+            var animX = new DoubleAnimation();
+            var animY = new DoubleAnimation();
+
+            animX.Duration = animY.Duration = new Duration(TimeSpan.FromMilliseconds(400));
+
+            // Bounce-Effekt beim Aktivieren
+            if (hasFocus)
+            {
+                animX.To = animY.To = 1.05; // 5% größer
+                animX.EasingFunction = animY.EasingFunction = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut };
+            }
+            else
+            {
+                animX.To = animY.To = 1.0; // Normalgröße
+                animX.EasingFunction = animY.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut };
+            }
+
+            Storyboard.SetTarget(animX, InfoPanelTransform);
+            Storyboard.SetTargetProperty(animX, "ScaleX");
+            Storyboard.SetTarget(animY, InfoPanelTransform);
+            Storyboard.SetTargetProperty(animY, "ScaleY");
+
+            sb.Children.Add(animX);
+            sb.Children.Add(animY);
+            sb.Begin();
+        }
+
 
         /// <summary>
         /// Sucht nach allen laufenden Anwendungen und aktualisiert die UI-Karten.
@@ -8524,35 +8851,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         // In MainWindow.xaml.cs
 
-       
+
         private async void ToggleAppLauncher_Click(object sender, RoutedEventArgs e)
         {
             if (AppLauncher.Visibility == Visibility.Visible)
             {
                 AppLauncher.Visibility = Visibility.Collapsed;
                 _currentFocusArea = FocusArea.TopButtons;
-                UpdateVisualFocus();
-                PlaydeactivationSound();
-                return;
             }
-
-            AppLauncher.Visibility = Visibility.Visible;
-            _currentFocusArea = FocusArea.AppLauncher;
-
-            // NEW: Clear the search bar and reset the list
-            AppSearchBox.Text = "";
-            AppGridView.ItemsSource = AllInstalledApps; // Show the full list again
-
-            if (!isAppListLoaded)
+            else
             {
-                await LoadInstalledAppsAsync();
+                AppLauncher.Visibility = Visibility.Visible;
+                _currentFocusArea = FocusArea.AppLauncher;
+
+                // WICHTIG: Apps nur laden, wenn die Liste noch leer ist
+                if (AllInstalledApps.Count == 0)
+                {
+                    await LoadInstalledAppsAsync();
+                }
+
+                if (AppGridView.Items.Count > 0)
+                {
+                    AppGridView.SelectedIndex = 0;
+                }
             }
-
-            // Set the focus directly into the search bar for intuitive use
-            AppSearchBox.Focus(FocusState.Programmatic);
-
             UpdateVisualFocus();
-            PlayActivationSound();
         }
 
         private void AppGridView_ItemClick(object sender, ItemClickEventArgs e)
