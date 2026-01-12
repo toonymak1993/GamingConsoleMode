@@ -1057,48 +1057,42 @@ namespace gcmloader
         {
             if (_isStartupGracePeriod) return;
 
-            // Handle des eigenen Fensters holen
             IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            // Handle des Fensters, das gerade im Vordergrund ist
             IntPtr foregroundHwnd = GetForegroundWindow();
 
-            // 1. Prüfen, ob unser eigenes Fenster bereits im Fokus ist
+            // KORREKTUR: Direkter Zugriff auf die Eigenschaft MediaPlayer
+            var player = BackgroundVideoPlayer.MediaPlayer;
+
             if (foregroundHwnd == selfHwnd)
             {
-                // Wenn unser Fenster den Fokus hat, aber das Overlay noch aktiv ist -> ausblenden
+                // GCM hat den Fokus
                 if (_isOverlayActive)
                 {
                     _isOverlayActive = false;
                     AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
                 }
-                return; // Nichts weiter zu tun
-            }
 
-            // Wenn wir hier ankommen, hat ein ANDERES Fenster den Fokus.
-            // Wir finden jetzt heraus, welches es ist.
-            StringBuilder classNameBuilder = new StringBuilder(256);
-            GetClassName(foregroundHwnd, classNameBuilder, classNameBuilder.Capacity);
-            string className = classNameBuilder.ToString();
-
-            // 2. Prüfen, ob der Desktop im Fokus ist
-            if (className == "Progman" || className == "WorkerW")
-            {
-                // Der Desktop ist aktiv! Unser GCM holt sich den Fokus zurück.
-                Debug.WriteLine("Desktop is active, reclaiming focus for GCM.");
-                BringToFrontAndFocus(selfHwnd);
-                // Die Logik zum Ausblenden des Overlays wird im nächsten Tick automatisch greifen,
-                // wenn unser Fenster wieder den Fokus hat (siehe Schritt 1).
+                // Video weiterspielen
+                if (player != null && player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
+                {
+                    player.Play();
+                }
             }
-            // 3. Eine andere Anwendung (weder wir noch der Desktop) ist im Fokus
             else
             {
-                // Wenn eine andere App den Fokus hat und unser Overlay noch nicht aktiv ist -> einblenden
+                // Spiel oder andere App hat den Fokus
                 if (!_isOverlayActive)
                 {
                     _isOverlayActive = true;
                     FocusLossOverlay.Opacity = 0;
                     FocusLossOverlay.Visibility = Visibility.Visible;
                     AnimateOverlayOpacity(FocusLossOverlay, 1.0);
+                }
+
+                // KORREKTUR: Video pausieren um GPU/CPU für das Spiel freizugeben
+                if (player != null && player.PlaybackSession.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Playing)
+                {
+                    player.Pause();
                 }
             }
         }
@@ -2893,81 +2887,97 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return principal.IsInRole(WindowsBuiltInRole.Administrator);
             }
         }
+        
+        #region Hybrid Wallpaper Logic (Live & Static)
+
         private void SetBackgroundImage(int width, int height)
         {
             try
             {
-                try
-                {
-                    bool gcmwallpapercheck = AppSettings.Load<bool>("gcmwallpaper");
-                }
-                catch
-                {    // If the setting is not found, default to false
-                    AppSettings.Save("gcmwallpaper", false);
-                }
-
-                string imagePath;
+                string rawPath;
                 bool gcmwallpaper = AppSettings.Load<bool>("gcmwallpaper");
 
                 if (gcmwallpaper)
                 {
-                    // Custom GCM wallpaper logic
-                    imagePath = Settwallpaper(); // <- deine eigene Methode
+                    rawPath = AppSettings.Load<string>("gcmwallpaperpath");
                 }
                 else
                 {
-                    // Fallback: get the current desktop wallpaper from registry
-                    imagePath = Registry.GetValue(
-                        @"HKEY_CURRENT_USER\Control Panel\Desktop",
-                        "WallPaper",
-                        "") as string;
+                    rawPath = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Control Panel\Desktop", "WallPaper", "") as string;
                 }
 
-                if (!File.Exists(imagePath))
+                if (string.IsNullOrEmpty(rawPath)) return;
+
+                // FIX: Entfernt Anführungszeichen, egal ob sie da sind oder nicht
+                string cleanPath = rawPath.Trim('"').Trim();
+
+                if (!File.Exists(cleanPath))
                 {
-                    Debug.WriteLine("Wallpaper path not found: " + imagePath);
+                    Debug.WriteLine($"[Wallpaper] Datei nicht gefunden: {cleanPath}");
                     return;
                 }
 
-                // Create an Image control
-                var backgroundImage = new Microsoft.UI.Xaml.Controls.Image
-                {
-                    Source = new BitmapImage(new Uri(imagePath, UriKind.Absolute)),
-                    Stretch = Stretch.UniformToFill, // WICHTIG: Verhindert Verzerrung
-                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch
-                };
+                string extension = Path.GetExtension(cleanPath).ToLower();
+                string[] videoExtensions = { ".mp4", ".webm", ".mkv", ".mov", ".wmv", ".avi" };
 
-                backgroundImage.SetValue(Canvas.ZIndexProperty, -1);
-
-                if (this.Content is Grid mainGrid)
+                if (videoExtensions.Contains(extension))
                 {
-                    var existingBackground = mainGrid.Children.OfType<Microsoft.UI.Xaml.Controls.Image>().FirstOrDefault();
-                    if (existingBackground != null)
-                    {
-                        existingBackground.Source = backgroundImage.Source;
-                    }
-                    else
-                    {
-                        mainGrid.Children.Insert(0, backgroundImage);
-                    }
+                    Debug.WriteLine($"[Wallpaper] Starte Video: {cleanPath}");
+                    SetupLiveWallpaper(cleanPath);
                 }
                 else
                 {
-                    Grid grid = new Grid();
-                    grid.Children.Add(backgroundImage);
-
-                    if (this.Content != null)
-                        grid.Children.Add((UIElement)this.Content);
-
-                    this.Content = grid;
+                    Debug.WriteLine($"[Wallpaper] Setze Bild: {cleanPath}");
+                    StopLiveWallpaper();
+                    BackgroundImage.Source = new BitmapImage(new Uri(cleanPath, UriKind.Absolute));
+                    BackgroundImage.Visibility = Visibility.Visible;
+                    BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
                 }
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Error setting wallpaper: " + ex.Message);
-            }
+            catch (Exception ex) { Debug.WriteLine($"[Wallpaper Error] {ex.Message}"); }
         }
+
+        private void SetupLiveWallpaper(string videoPath)
+        {
+            try
+            {
+                StopLiveWallpaper();
+
+                // MediaPlayer in WinUI 3 initialisieren
+                var player = new Windows.Media.Playback.MediaPlayer
+                {
+                    Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute)),
+                    IsLoopingEnabled = true,
+                    IsMuted = true, // WICHTIG für Autoplay-Stabilität
+                    AudioCategory = Windows.Media.Playback.MediaPlayerAudioCategory.Other
+                };
+
+                BackgroundVideoPlayer.SetMediaPlayer(player);
+                BackgroundVideoPlayer.Visibility = Visibility.Visible;
+                BackgroundImage.Visibility = Visibility.Collapsed;
+
+                player.Play();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[LiveWallpaper Error] {ex.Message}"); }
+        }
+
+        private void StopLiveWallpaper()
+        {
+            try
+            {
+                var player = BackgroundVideoPlayer.MediaPlayer;
+                if (player != null)
+                {
+                    player.Pause();
+                    BackgroundVideoPlayer.SetMediaPlayer(null);
+                }
+            }
+            catch { }
+        }
+
+      
+
+        #endregion
 
         private string Settwallpaper()
         {
@@ -5021,7 +5031,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             var cardBorder = new Border
             {
                 Width = (item.Name == "Main Launcher") ? 270 : 220,
-                Height = 300,
+                Height = 250,
                 CornerRadius = new CornerRadius(20),
                 Margin = new Thickness(12, 0, 12, 0),
                 Child = contentGrid,
@@ -5913,6 +5923,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "\\Battle.net\\"
 };
 
+
+
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
             var contentGrid = new Grid();
@@ -5920,22 +5932,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // 1. Poster Hintergrund
             var loadedImage = new Image { Name = "LoadedImage", Stretch = Stretch.UniformToFill, Opacity = 0.0 };
 
-            // 2. HAUPT-GLASEFFEKT (Frosted Glass)
+            // 2. HAUPT-GLASEFFEKT (Jetzt deutlich durchsichtiger)
             var glassEffect = new Border
             {
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"],
-                Opacity = 0.85,
+                // Wert von 120 auf 60 gesenkt -> Viel mehr vom Video/Wallpaper sichtbar
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 15, 15, 15)),
                 CornerRadius = new CornerRadius(20),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
+                // Rand etwas deutlicher gemacht, damit die Karte trotz Transparenz Form behält
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 255, 255, 255)),
                 BorderThickness = new Thickness(1.5)
             };
 
-            // 3. TITEL-BEREICH (Blurry Gray)
+            // 3. TITEL-BEREICH (Oben)
             var titleBlurLayer = new Border
             {
                 VerticalAlignment = VerticalAlignment.Top,
                 Height = 55,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 45, 45, 45)),
+                // Auch hier die Transparenz angepasst (von 180 auf 100)
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(100, 20, 20, 20)),
                 CornerRadius = new CornerRadius(20, 20, 0, 0),
                 Child = new TextBlock
                 {
@@ -5951,7 +5965,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             };
 
-            // 4. Icon (Zentriert)
+            // 4. Icon (Bleibt gleich)
             var iconImage = new Image
             {
                 Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
@@ -5961,14 +5975,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 VerticalAlignment = VerticalAlignment.Center
             };
 
-            // 5. BANNER-BEREICH UNTEN (Nur bei Cards + Eigener Blur Layer)
+            // 5. BANNER-BEREICH UNTEN
             var bannerContainer = new Border
             {
-                Name = "ButtonBanner", // WICHTIG: Name für die Animation
+                Name = "ButtonBanner",
                 VerticalAlignment = VerticalAlignment.Bottom,
                 Height = 50,
-                Opacity = 0, // Erscheint bei Fokus
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 45, 45, 45)), // Gleicher Blur wie oben
+                Opacity = 0,
+                // Passend zum Titel-Bereich oben
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(100, 20, 20, 20)),
                 CornerRadius = new CornerRadius(0, 0, 20, 20),
                 Child = new StackPanel
                 {
@@ -5979,7 +5994,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             };
 
-            // Buttons zum StackPanel im Container hinzufügen
             var bannerStack = (StackPanel)bannerContainer.Child;
             SetupButtonLayout(bannerStack, "Xbox");
 
@@ -5989,13 +6003,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             contentGrid.Children.Add(iconImage);
             contentGrid.Children.Add(bannerContainer);
 
-            // In der CreateProgramCard Methode ganz unten:
             var cardBorder = new Border
             {
                 Width = 220,
                 Height = 300,
                 CornerRadius = new CornerRadius(20),
-                // Margin von 12 auf 5 reduziert für engere Abstände
                 Margin = new Thickness(5, 0, 5, 0),
                 Child = contentGrid,
                 Tag = new CardTag { Process = proc, Hwnd = hwnd },
@@ -6004,6 +6016,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath);
             Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(cardBorder).ImplicitAnimations = null;
+
             return cardBorder;
         }
 

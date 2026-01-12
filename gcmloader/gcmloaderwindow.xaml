@@ -17,12 +17,19 @@
             </Style>
         </Grid.Resources>
 
+        
         <ProgressRing IsActive="True" Opacity="0.01" Width="1" Height="1" 
                       HorizontalAlignment="Left" VerticalAlignment="Top"/>
-
+        <MediaPlayerElement x:Name="BackgroundVideoPlayer" 
+                        AutoPlay="True" 
+                        Stretch="UniformToFill"
+                        IsFullWindow="False"
+                        Visibility="Collapsed"
+                        Canvas.ZIndex="-2"/>
+        
         <Grid x:Name="MainContent" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
             <Button x:Name="FocusSink" Width="0" Height="0" IsTabStop="True"/>
-
+ 
             <Image x:Name="BackgroundImage" Stretch="UniformToFill" IsHitTestVisible="False"/>
 
             <StackPanel x:Name="LauncherTileRow" Orientation="Horizontal" Visibility="Collapsed">
