@@ -2,9 +2,6 @@
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup />
   <ItemGroup>
-    <None Update="App.xaml">
-      <SubType>Designer</SubType>
-    </None>
     <None Update="gcmloaderwindow.xaml">
       <SubType>Designer</SubType>
     </None>
