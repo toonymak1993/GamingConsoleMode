@@ -29,6 +29,7 @@
     <Content Remove="Assets\gcm_ui_logo.png" />
     <Content Remove="Assets\launcher\custom_logo.png" />
     <Content Remove="Assets\launcher\gcm_icon.png" />
+    <Content Remove="Assets\launcher\geforcenow.png" />
     <Content Remove="Assets\launcher\playnite_logo.png" />
     <Content Remove="Assets\launcher\steam_logo.png" />
     <Content Remove="Assets\launcher\Xboxlogo.png" />
@@ -66,6 +67,7 @@
     <None Remove="Assets\gcm_ui_logo.png" />
     <None Remove="Assets\launcher\custom_logo.png" />
     <None Remove="Assets\launcher\gcm_icon.png" />
+    <None Remove="Assets\launcher\geforcenow.png" />
     <None Remove="Assets\launcher\playnite_logo.png" />
     <None Remove="Assets\launcher\steam_logo.png" />
     <None Remove="Assets\launcher\Xboxlogo.png" />
@@ -361,6 +363,11 @@
   </ItemGroup>
   <ItemGroup>
     <Page Remove="Home.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\launcher\geforcenow.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\rogally\allybackside.png">

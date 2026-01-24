@@ -1430,8 +1430,43 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         public MainWindow()
         {
+            
+
+            _ = Showwinpartandlauncher();
             Logger.Initialize();
             this.InitializeComponent();
+
+            
+    // [BOOT LOGIK] START: Overlay auf "Boot-Modus" zwingen
+    // -------------------------------------------------------------------------
+
+    // 1. Hintergrund auf 100% Schwarz setzen (statt durchsichtig)
+    FocusLossOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
+            FocusLossOverlay.Opacity = 1.0;
+            FocusLossOverlay.Visibility = Visibility.Visible;
+            _isOverlayActive = true;
+
+            // 2. Das richtige Logo basierend auf der Einstellung laden
+            string currentLauncher = AppSettings.Load<string>("launcher");
+            string bootLogoPath = currentLauncher switch
+            {
+                "steam" => "ms-appx:///Assets/steam_logo.png",
+                "playnite" => "ms-appx:///Assets/playnite_logo.png",
+                "xbox" => "ms-appx:///Assets/xbox_logo.png",
+                "gfn" => "ms-appx:///Assets/geforcenow.png", 
+                _ => "ms-appx:///Assets/gcm_ui_logo.png"
+            };
+
+            // 3. Das BILD im Overlay austauschen
+            // Da wir im XAML dem Image keinen Namen gegeben haben, greifen wir über .Child darauf zu
+            if (FocusLossOverlay.Child is Image logoImage)
+            {
+                logoImage.Source = new BitmapImage(new Uri(bootLogoPath));
+                // Optional: Größe für den Boot etwas anpassen, falls gewünscht
+                logoImage.Width = 150;
+                logoImage.Height = 150;
+            }
+
             EnsureVrrDisabledViaRegistry();
             SetupKeyboardAutoStartTask();
             //Scaling
@@ -1545,16 +1580,36 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ShowTaskManager();
             SetupFocusWatcher();
             SetupMouseIdleBehavior();
-            // NEU: Starte einen einmaligen Timer, der die Gnadenfrist beendet.
+            // -------------------------------------------------------------------------
+            // [BOOT LOGIK] ENDE: Der Timer räumt nach 10 Sekunden auf
+            // -------------------------------------------------------------------------
             var gracePeriodTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(10) 
+                Interval = TimeSpan.FromSeconds(10)
             };
+
             gracePeriodTimer.Tick += (s, e) =>
             {
-                _isStartupGracePeriod = false; // Gnadenfrist beenden
                 gracePeriodTimer.Stop();
+                _isStartupGracePeriod = false;
+
+                // 1. Overlay ausblenden (Fade Out Animation)
+                AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
+                _isOverlayActive = false;
+
+                // 2. Overlay wieder auf "Normalzustand" zurücksetzen (für späteres Alt-Tab)
+                // Hintergrund wieder transparent machen (D8 = ca. 85%)
+                FocusLossOverlay.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(216, 0, 0, 0)); // #D8000000
+
+                // 3. Logo wieder auf das Standard-GCM Logo zurücksetzen
+                if (FocusLossOverlay.Child is Image logoImage)
+                {
+                    logoImage.Source = new BitmapImage(new Uri("ms-appx:///Assets/gcm_ui_logo.png"));
+                    logoImage.Width = 200;  // Originalgröße aus deinem XAML wiederherstellen
+                    logoImage.Height = 200;
+                }
             };
+
             gracePeriodTimer.Start();
 
             //after 10 seconds AND Start Windows Partmode
@@ -3691,7 +3746,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         {
                             UseShellExecute = true
                         });
-                        return; // Fertig.
+                        return;
+                    case "gfn":
+                        await StartGfn();
+                        return;
 
                     case "playnite":
                         // Starte Playnite oder bringe es in den Vordergrund
@@ -3943,18 +4001,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         if (string.IsNullOrEmpty(steamPath) || !File.Exists(steamPath))
                             throw new FileNotFoundException("The Steam path is invalid.");
                         break;
+
                     case "playnite":
                         string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
                         if (string.IsNullOrEmpty(playnitePath) || !File.Exists(playnitePath))
                             throw new FileNotFoundException("The Playnite path is invalid.");
                         break;
+
                     case "custom":
                         string customPath = AppSettings.Load<string>("customlauncherpath");
                         if (string.IsNullOrEmpty(customPath) || !File.Exists(customPath))
                             throw new FileNotFoundException("The Custom Launcher path is invalid.");
                         break;
+
                     case "xbox":
+                        // Xbox braucht keinen Pfad, da es über Protokoll gestartet wird
                         break;
+
+                    // --- NEU: GFN HINZUGEFÜGT ---
+                    case "gfn":
+                        string gfnPath = AppSettings.Load<string>("gfnlauncherpath");
+                        // Wir prüfen, ob der Pfad gültig ist
+                        if (string.IsNullOrEmpty(gfnPath) || !File.Exists(gfnPath))
+                            throw new FileNotFoundException("The GeForce Now path is invalid.");
+                        break;
+                    // ----------------------------
+
                     default:
                         throw new InvalidOperationException($"The launcher '{launcher}' is invalid.");
                 }
@@ -3964,11 +4036,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             catch (Exception ex)
             {
                 // =================================================================
-                // NEW: Write error to a text file and open it for the user
+                // CRASH REPORT LOGIK
                 // =================================================================
                 string logPath = Path.Combine(AppContext.BaseDirectory, "crash.log");
 
-                // 1. Create a user-friendly error message.
                 string errorMessage =
                     "================================================================\r\n" +
                     "                GCM CRASH REPORT\r\n" +
@@ -3983,20 +4054,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     $"{ex.Message}\r\n" +
                     "----------------------------------------------------------------\r\n";
 
-                // 2. Write the message to the crash.log file.
                 File.WriteAllText(logPath, errorMessage);
 
-                // 3. Open the log file in the default text editor (Notepad).
                 try
                 {
                     Process.Start(new ProcessStartInfo(logPath) { UseShellExecute = true });
                 }
-                catch
-                {
-                    // Fallback in case even Notepad can't be started.
-                }
+                catch { }
 
-                // 4. Exit the application cleanly.
                 BackToWindows();
             }
         }
@@ -4446,7 +4511,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Führe die 10-sekündige Verzögerung nur aus, wenn es NICHT der Xbox-Launcher ist.
             if (launcher != "xbox")
             {
-                Debug.WriteLine("Launcher ist nicht Xbox, warte 10 Sekunden für den WinPart-Modus...");
+                Debug.WriteLine($"Launcher ist {launcher}, warte 10 Sekunden für den WinPart-Modus...");
 
                 launcher = AppSettings.Load<string>("launcher");
                 switch (launcher)
@@ -4460,6 +4525,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case "custom":
                         await StartOtherLauncher();
                         break;
+
+                    // --- NEU HINZUFÜGEN ---
+                    case "gfn":
+                        await StartGfn();
+                        break;
+                    // ---------------------
+
                     default:
                         AppSettings.Save("launcher", "steam");
                         await StartSteam();
@@ -4477,7 +4549,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 await StartXbox();
             }
 
-           
+
+            ConsoleModeToShell();
+
         }
         #endregion winparts
 
@@ -4739,21 +4813,122 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private async Task StartGfn()
+        {
+            // Konstante für Maximieren (falls nicht oben definiert)
+            const int SW_SHOWMAXIMIZED = 3;
+
+            try
+            {
+                Debug.WriteLine("[GCM] Prüfe, ob GeForce Now bereits läuft...");
+
+                // -----------------------------------------------------------
+                // FALL 1: GFN LÄUFT BEREITS -> WECHSELN & MAXIMIEREN
+                // -----------------------------------------------------------
+                Process[] runningProcs = Process.GetProcessesByName("GeForceNOW");
+                foreach (var p in runningProcs)
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero && IsWindowVisible(p.MainWindowHandle))
+                    {
+                        Debug.WriteLine("[GCM] GeForce Now läuft bereits. Hole Fenster nach vorne.");
+
+                        // GCM Platz machen lassen
+                        MakeSelfNonTopmost();
+
+                        // Fokus erzwingen
+                        await ForcefullyBringToForeground(p.MainWindowHandle);
+
+                        // --- NEU: ZWINGEND MAXIMIEREN ---
+                        ShowWindow(p.MainWindowHandle, SW_SHOWMAXIMIZED);
+
+                        return; // Fertig, nicht neu starten!
+                    }
+                }
+
+                // -----------------------------------------------------------
+                // FALL 2: GFN STARTEN (NEUSTART)
+                // -----------------------------------------------------------
+
+                Debug.WriteLine("[GCM] GeForce Now läuft nicht. Starte neu...");
+
+                string gfnPath = AppSettings.Load<string>("gfnlauncherpath");
+
+                if (string.IsNullOrWhiteSpace(gfnPath) || !File.Exists(gfnPath))
+                {
+                    string roamingPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string lnkPath = Path.Combine(roamingPath, @"Microsoft\Windows\Start Menu\Programs\NVIDIA GeForce NOW.lnk");
+
+                    if (File.Exists(lnkPath)) gfnPath = lnkPath;
+                    else throw new FileNotFoundException("GeForce Now path not found.");
+                }
+
+                // Starten
+                Process.Start(new ProcessStartInfo(gfnPath) { UseShellExecute = true });
+
+                // Warten auf das Fenster (Loop)
+                int attempts = 0;
+                IntPtr gfnHwnd = IntPtr.Zero;
+
+                while (attempts < 40) // ca. 20 Sekunden Geduld
+                {
+                    await Task.Delay(500);
+
+                    Process[] procs = Process.GetProcessesByName("GeForceNOW");
+                    foreach (var p in procs)
+                    {
+                        if (p.MainWindowHandle != IntPtr.Zero && IsWindowVisible(p.MainWindowHandle))
+                        {
+                            gfnHwnd = p.MainWindowHandle;
+                            break;
+                        }
+                    }
+
+                    if (gfnHwnd != IntPtr.Zero) break;
+                    attempts++;
+                }
+
+                // Wenn Fenster gefunden wurde
+                if (gfnHwnd != IntPtr.Zero)
+                {
+                    Debug.WriteLine("[GCM] GeForce Now Fenster gefunden. Fokus setzen.");
+                    MakeSelfNonTopmost();
+
+                    await ForcefullyBringToForeground(gfnHwnd);
+
+                    // --- NEU: ZWINGEND MAXIMIEREN ---
+                    // Kurze Pause, damit das Fenster bereit ist
+                    await Task.Delay(100);
+                    ShowWindow(gfnHwnd, SW_SHOWMAXIMIZED);
+                }
+                else
+                {
+                    Debug.WriteLine("[GCM] GeForce Now gestartet, aber kein Fenster-Handle gefunden.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in StartGfn: {ex.Message}");
+                await messagebox("Could not start or switch to GeForce Now.");
+            }
+        }
+
 
         #endregion launcher
         #region start
         // ERSETZE DEINE KOMPLETTE Start()-METHODE MIT DIESER VERSION
 
+        #region start
         private async Task Start()
         {
-            
-            // Warten, bis das Video fertig ist
+            // Warten, bis das Video fertig ist (falls aktiv)
             while (startupVideoFinished == false)
             {
                 await Task.Delay(50);
             }
+
             SetupLogging();
             uac("off");
+
             // ===================================
             SettingsVerify();
             KeyboardRedirector.EnableRedirect();
@@ -4763,17 +4938,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             IsJoyxoffInstalledAndStart();
             EnsureTouchKeyboardServiceIsRunning();
             SetupWingamepadTask();
-            await Showwinpartandlauncher();
             cssloader();
-            ConsoleModeToShell();
             preaudio(true, false);
             prestartlist();
             await StartLosslessScaling();
             SwitchToConfiguredLauncher();
+
             await Task.Delay(500); // Gibt dem Launcher kurz Zeit zu starten
-            AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
-            _isOverlayActive = false;
         }
+        #endregion start
         #endregion start
         #region TaskManager
         /// <summary>
@@ -4954,6 +5127,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 "steam" => "ms-appx:///Assets/steam_logo.png",
                 "playnite" => "ms-appx:///Assets/playnite_logo.png",
                 "xbox" => "ms-appx:///Assets/xbox_logo.png",
+                "gfn" => "ms-appx:///Assets/geforcenow.png", 
                 _ => "ms-appx:///Assets/ownlauncher.png"
             };
 
@@ -5764,21 +5938,23 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Task Manager",
     
     // Specific Apps to always ignore
-    "Steam", // The main Steam window, not games
-   "Big-Picture-Modus", // NEW
-    "Big Picture Mode",
-    "Playnite",// NEW
-    "Realtek Audio Console",
-    "NVIDIA App",
-    "Xbox.Apps.TCUI",
-    "Xbox"
+            "Steam",
+            "Big-Picture-Modus",
+            "Big Picture Mode",
+            "Playnite",
+            "Realtek Audio Console",
+            "NVIDIA App",
+            "Xbox.Apps.TCUI",
+            "Xbox",
+            "GeForce NOW"
 };
 
-        private static readonly Dictionary<string, string> _nameOverrides = new()
-{
-    { "Steam Client WebHelper", "Steam" },
-    { "ApplicationFrameHost", "UWP Host" }
-};
+        private static readonly string[] _excludedProcessNames = new[]
+        {
+            "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
+            "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game",
+            "GeForceNOW" 
+        };
 
         [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d")]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -5863,14 +6039,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             GW_CHILD = 5,
             GW_ENABLEDPOPUP = 6
         }
-
-
-        private static readonly string[] _excludedProcessNames = new[]
-{
-    "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
-    "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game"
-};
-        
 
         private static bool IsCloaked(IntPtr hWnd)
         {
