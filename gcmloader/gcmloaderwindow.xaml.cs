@@ -7245,6 +7245,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private Controller[] _xboxControllers = new Controller[4];
         private DateTime _comboStartTime = DateTime.MinValue;
         private bool _comboIsActive = false;
+
         private async Task XboxInputLoop()
         {
             Thread.CurrentThread.Priority = ThreadPriority.Highest;
@@ -7263,10 +7264,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             var gp = state.Gamepad;
                             GamepadButtonFlags btns = (GamepadButtonFlags)gp.Buttons;
 
-                            // --- 1. GLOBALE SHORTCUTS ---
+                            // --- 1. GLOBAL SHORTCUTS ---
                             HandleShortcuts(btns, i);
 
-                            // --- 2. MAUS MODUS TOGGLE ---
+                            // --- 2. MOUSE MODE TOGGLE ---
                             bool comboPressed = btns.HasFlag(GamepadButtonFlags.Back) && btns.HasFlag(GamepadButtonFlags.RightThumb);
                             if (comboPressed)
                             {
@@ -7290,7 +7291,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             }
                             else { _comboIsActive = false; _comboStartTime = DateTime.MinValue; }
 
-                            // --- 3. RICHTUNGS-BERECHNUNG (Wichtig für Park-Logik) ---
+                            // --- 3. DIRECTION CALCULATION ---
                             int xDir = 0;
                             if (gp.LeftThumbX < -menuDeadzone) xDir = -1;
                             else if (gp.LeftThumbX > menuDeadzone) xDir = 1;
@@ -7299,10 +7300,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             if (gp.LeftThumbY < -menuDeadzone) yDir = -1;
                             else if (gp.LeftThumbY > menuDeadzone) yDir = 1;
 
-                            // --- 4. INPUT WEICHE ---
+                            // --- 4. INPUT BRANCHING ---
                             if (_isMouseModeActive)
                             {
-                                // Sicherstellen, dass Cursor im Maus-Modus sichtbar ist
+                                // Ensure cursor is visible in mouse mode
                                 if (!_isCursorVisible)
                                 {
                                     while (ShowCursor(true) < 0) ;
@@ -7312,8 +7313,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             }
                             else
                             {
-                                // --- MAUS WEGSCHIEBEN ---
-                                // Wenn irgendein Button gedrückt wird oder ein Stick bewegt wird
+                                // --- PARK MOUSE ---
+                                // If any input happens, park the mouse
                                 if (btns != GamepadButtonFlags.None || xDir != 0 || yDir != 0)
                                 {
                                     ParkMouseCursor();
@@ -7321,7 +7322,75 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                                 if (IsWindowInForeground())
                                 {
-                                    ProcessUINavigation(btns, xDir, yDir, i);
+                                    if (_currentFocusArea == FocusArea.AppLauncher)
+                                    {
+                                        // 1. Handle Buttons (Immediate)
+                                        var newPresses = btns & ~_lastButtonStates[i];
+
+                                        if (newPresses != GamepadButtonFlags.None)
+                                        {
+                                            DispatcherQueue.TryEnqueue(() =>
+                                            {
+                                                // A - Launch App
+                                                if ((newPresses & GamepadButtonFlags.A) != 0)
+                                                {
+                                                    int selectedIndex = AppGridView.SelectedIndex;
+                                                    if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count && AppGridView.Items[selectedIndex] is AppInfo app)
+                                                    {
+                                                        LaunchApp(app);
+                                                        PlayActivationSound();
+                                                    }
+                                                }
+                                                // B - Close Launcher
+                                                else if ((newPresses & GamepadButtonFlags.B) != 0)
+                                                {
+                                                    ToggleAppLauncher_Click(null, null);
+                                                    PlaydeactivationSound();
+                                                }
+
+                                                // DPad Navigation
+                                                int dpadX = 0; int dpadY = 0;
+                                                if ((newPresses & GamepadButtonFlags.DPadUp) != 0) dpadY = 1;
+                                                else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) dpadY = -1;
+                                                else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) dpadX = -1;
+                                                else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) dpadX = 1;
+
+                                                if (dpadX != 0 || dpadY != 0)
+                                                {
+                                                    HandleAppLauncherNavigation(dpadX, dpadY);
+                                                }
+                                            });
+                                        }
+
+                                        // 2. Handle Stick (Throttled for smooth scrolling)
+                                        bool isStickMoving = (xDir != 0 || yDir != 0);
+                                        if (isStickMoving)
+                                        {
+                                            // Check throttle timer specific to this controller index
+                                            if (DateTime.Now > _nextAllowedInputTime[i])
+                                            {
+                                                DispatcherQueue.TryEnqueue(() => HandleAppLauncherNavigation(xDir, yDir));
+
+                                                // Throttling logic: Slower first step, faster subsequent steps
+                                                _nextAllowedInputTime[i] = _isStickCentered[i] ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
+                                                _isStickCentered[i] = false;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Reset throttle when stick is released
+                                            _nextAllowedInputTime[i] = DateTime.MinValue;
+                                            _isStickCentered[i] = true;
+                                        }
+
+                                        // Update state
+                                        _lastButtonStates[i] = btns;
+                                    }
+                                    else
+                                    {
+                                        // Standard Logic for all other areas (Cards, TopButtons, etc.)
+                                        ProcessUINavigation(btns, xDir, yDir, i);
+                                    }
                                 }
                             }
                         }
@@ -7331,6 +7400,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Thread.Sleep(10);
             }
         }
+
         private List<HidStream> _activePs5Streams = new List<HidStream>();
         private GamepadButtonFlags[] _multiPs5LastButtons = new GamepadButtonFlags[10];
         private GamepadButtonFlags[] _lastPs5Buttons = new GamepadButtonFlags[10];
