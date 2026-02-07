@@ -1,15 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.12.35527.113
+# Visual Studio Version 18
+VisualStudioVersion = 18.2.11415.280 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GAMINGCONSOLEMODE", "GAMINGCONSOLEMODE\GAMINGCONSOLEMODE.csproj", "{7C37F388-B75F-4692-B8FE-4751184BD11B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "gcmloader", "gcmloader\gcmloader.csproj", "{CA93A8F3-C821-4B98-A6D2-F4878974E4F4}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wingamepad", "wingamepad\wingamepad.csproj", "{430255A8-EC63-4BDD-90A9-3608694D7261}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OverlayWindow", "OverlayWindow\OverlayWindow.csproj", "{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "innosetup", "innosetup", "{84D27F74-D2BA-6C25-2661-968F101900D9}"
 	ProjectSection(SolutionItems) = preProject
@@ -74,18 +72,6 @@ Global
 		{430255A8-EC63-4BDD-90A9-3608694D7261}.Release|x64.Build.0 = Release|Any CPU
 		{430255A8-EC63-4BDD-90A9-3608694D7261}.Release|x86.ActiveCfg = Release|Any CPU
 		{430255A8-EC63-4BDD-90A9-3608694D7261}.Release|x86.Build.0 = Release|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Debug|ARM64.ActiveCfg = Debug|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Debug|ARM64.Build.0 = Debug|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Debug|x64.Build.0 = Debug|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Debug|x86.Build.0 = Debug|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|ARM64.ActiveCfg = Release|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|ARM64.Build.0 = Release|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x64.ActiveCfg = Release|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x64.Build.0 = Release|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x86.ActiveCfg = Release|Any CPU
-		{C1DB1E80-D7F6-4CA0-8282-F6DA357F9DB8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
