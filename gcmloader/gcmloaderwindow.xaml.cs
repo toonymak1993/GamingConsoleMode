@@ -1230,12 +1230,34 @@ namespace gcmloader
             public string Key1 { get; set; }
             public string Key2 { get; set; }
             public string Function { get; set; }
+            public double HoldDuration { get; set; } // New: Seconds
             public bool Enabled { get; set; }
         }
 
-        // Die Dictionaries zum Speichern und Ausführen der Shortcuts
-        private Dictionary<(string, string), string> _activeShortcuts = new();
+        // Optimized runtime object to handle input logic without string parsing
+        private class RuntimeShortcut
+        {
+            public GamepadButtonFlags RequiredButtons; // Bitmask of buttons that must be pressed
+            public string FunctionName;
+            public double HoldDurationSeconds;
+
+            // State tracking per controller index (0-3 Xbox, 4+ PS)
+            // We use array size 10 to be safe
+            public DateTime[] HoldStartTimes = new DateTime[10];
+            public bool[] HasTriggered = new bool[10];
+
+            public RuntimeShortcut()
+            {
+                // Initialize arrays with default values
+                for (int i = 0; i < 10; i++) HoldStartTimes[i] = DateTime.MaxValue;
+            }
+        }
+        // The new main list for active shortcuts
+        private List<RuntimeShortcut> _runtimeShortcuts = new();
+
+        // Action mapping remains the same
         private Dictionary<string, System.Action> _shortcutActions = new();
+
 
         // Diese Variable speichert den Xbox-Prozess, damit wir ihn später überwachen können.
         private static Process monitoredXboxProcess = null;
@@ -7567,22 +7589,58 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private void HandleEdgeShortcuts(GamepadButtonFlags currentButtons)
         {
-            // Eigener Status-Check nur für den Edge
+            // Wir nutzen Index 6 für den Edge Controller, um Konflikte mit Xbox (0-3),
+            // Standard-PS5 (4) und dem Edge-Mausmodus (5) im State-Tracking zu vermeiden.
+            int controllerIndex = 6;
+
+            // Berechne, welche Tasten in diesem Frame NEU gedrückt wurden
             var newPresses = currentButtons & ~_lastEdgeShortcutButtons;
             _lastEdgeShortcutButtons = currentButtons;
 
-            if (newPresses == GamepadButtonFlags.None) return;
-
-            foreach (var pair in _activeShortcuts)
+            foreach (var shortcut in _runtimeShortcuts)
             {
-                if (IsButtonPressed(currentButtons, pair.Key.Item1) && IsButtonPressed(newPresses, pair.Key.Item2))
+                // 1. Prüfen, ob die geforderten Tasten (Bitmaske) gedrückt gehalten werden
+                bool requirementsMet = (currentButtons & shortcut.RequiredButtons) == shortcut.RequiredButtons;
+
+                if (requirementsMet)
                 {
-                    if (_shortcutActions.TryGetValue(pair.Value, out var action))
+                    // FALL A: Zeitbasiertes Auslösen (HoldDuration > 0)
+                    if (shortcut.HoldDurationSeconds > 0)
                     {
-                        DispatcherQueue.TryEnqueue(() => {
-                            action.Invoke();
-                            SendOverlayNotification($"Edge Shortcut: {pair.Value}");
-                        });
+                        // Timer starten, falls noch nicht aktiv
+                        if (shortcut.HoldStartTimes[controllerIndex] == DateTime.MaxValue)
+                        {
+                            shortcut.HoldStartTimes[controllerIndex] = DateTime.Now;
+                        }
+
+                        // Prüfen, ob die Zeit abgelaufen ist
+                        var elapsedSeconds = (DateTime.Now - shortcut.HoldStartTimes[controllerIndex]).TotalSeconds;
+
+                        if (elapsedSeconds >= shortcut.HoldDurationSeconds && !shortcut.HasTriggered[controllerIndex])
+                        {
+                            // Aktion ausführen
+                            ExecuteShortcutAction(shortcut.FunctionName, controllerIndex, true);
+                            shortcut.HasTriggered[controllerIndex] = true; // Sperren, damit es nicht mehrfach feuert
+                        }
+                    }
+                    // FALL B: Sofortiges Auslösen (HoldDuration == 0)
+                    else
+                    {
+                        // Bei Sofort-Aktionen muss mindestens eine der nötigen Tasten "neu" sein,
+                        // damit wir nicht 60-mal pro Sekunde feuern.
+                        if ((newPresses & shortcut.RequiredButtons) != GamepadButtonFlags.None)
+                        {
+                            ExecuteShortcutAction(shortcut.FunctionName, controllerIndex, false);
+                        }
+                    }
+                }
+                else
+                {
+                    // Reset, wenn Tasten losgelassen wurden (nur für Hold-Shortcuts relevant)
+                    if (shortcut.HoldDurationSeconds > 0)
+                    {
+                        shortcut.HoldStartTimes[controllerIndex] = DateTime.MaxValue;
+                        shortcut.HasTriggered[controllerIndex] = false;
                     }
                 }
             }
@@ -8130,9 +8188,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // Logging darf niemals crashen
             }
         }
+
         private void LoadShortcutsFromSettings()
         {
-            _activeShortcuts.Clear();
+            _runtimeShortcuts.Clear();
             _shortcutActions.Clear();
 
             string settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "settings.toml");
@@ -8147,46 +8206,76 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 var settingsModel = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
 
-                // 1. Lade die benutzerdefinierten Shortcuts
-                if (settingsModel.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
+                // 1. Helper to parse string keys to GamepadButtonFlags
+                GamepadButtonFlags ParseKey(string key)
                 {
-                    foreach (TomlTable shortcutTable in shortcutsArray)
-                    {
-                        var data = new ShortcutData
-                        {
-                            Key1 = shortcutTable["key1"]?.ToString(),
-                            Key2 = shortcutTable["key2"]?.ToString(),
-                            Function = shortcutTable["function"]?.ToString(),
-                            Enabled = Convert.ToBoolean(shortcutTable["enabled"])
-                        };
+                    if (string.IsNullOrWhiteSpace(key) || key.Equals("None", StringComparison.OrdinalIgnoreCase))
+                        return GamepadButtonFlags.None;
 
-                        // WICHTIG: Lade nur aktivierte Shortcuts
-                        if (data.Enabled && !string.IsNullOrEmpty(data.Key1) && !string.IsNullOrEmpty(data.Key2))
-                        {
-                            _activeShortcuts[(data.Key1, data.Key2)] = data.Function;
-                            LogGamepadInit($"[OK] Loaded Custom Shortcut: {data.Key1} + {data.Key2} -> {data.Function}");
-                        }
-                    }
+                    if (_buttonMap.TryGetValue(key, out var flag))
+                        return flag;
+
+                    // Fallback try enum parse
+                    if (Enum.TryParse(key, true, out GamepadButtonFlags result))
+                        return result;
+
+                    return GamepadButtonFlags.None;
                 }
 
-                // 2. Lade den "Seamless Switch" (winmode_shortcut)
-                if (settingsModel.TryGetValue("winmode_shortcut", out var winShortcutObj) && winShortcutObj is TomlTable winShortcutTable)
+                void AddShortcutToList(string k1, string k2, string func, double duration, bool enabled)
                 {
-                    var data = new ShortcutData
+                    if (!enabled || string.IsNullOrEmpty(func)) return;
+
+                    var flags1 = ParseKey(k1);
+                    var flags2 = ParseKey(k2);
+
+                    // If Key1 is invalid, skip. Key2 can be None.
+                    if (flags1 == GamepadButtonFlags.None) return;
+
+                    var newShortcut = new RuntimeShortcut
                     {
-                        Key1 = winShortcutTable["key1"]?.ToString(),
-                        Key2 = winShortcutTable["key2"]?.ToString(),
-                        Enabled = Convert.ToBoolean(winShortcutTable["enabled"])
+                        RequiredButtons = flags1 | flags2, // Combine bitmasks
+                        FunctionName = func,
+                        HoldDurationSeconds = duration
                     };
 
-                    if (data.Enabled && !string.IsNullOrEmpty(data.Key1) && !string.IsNullOrEmpty(data.Key2))
+                    _runtimeShortcuts.Add(newShortcut);
+                    LogGamepadInit($"[OK] Added Shortcut: {k1} + {k2} ({duration}s) -> {func}");
+                }
+
+                // 2. Load Custom Shortcuts
+                if (settingsModel.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
+                {
+                    foreach (TomlTable table in shortcutsArray)
                     {
-                        _activeShortcuts[(data.Key1, data.Key2)] = "winmodechange"; // Funktion ist hier fest codiert
-                        LogGamepadInit($"[OK] Loaded Seamless Switch: {data.Key1} + {data.Key2} -> winmodechange");
+                        string k1 = table["key1"]?.ToString();
+                        string k2 = table["key2"]?.ToString(); // Can be "None" or null
+                        string func = table["function"]?.ToString();
+                        bool enabled = Convert.ToBoolean(table["enabled"]);
+
+                        // Load Hold Duration (default to 0.0 if missing)
+                        double duration = 0.0;
+                        if (table.ContainsKey("hold_duration"))
+                        {
+                            duration = Convert.ToDouble(table["hold_duration"]);
+                        }
+
+                        AddShortcutToList(k1, k2, func, duration, enabled);
                     }
                 }
 
-                // 3. Weise den geladenen Funktionen die entsprechenden Aktionen zu
+                // 3. Load Seamless Switch (Legacy support via same system)
+                if (settingsModel.TryGetValue("winmode_shortcut", out var winObj) && winObj is TomlTable winTable)
+                {
+                    string k1 = winTable["key1"]?.ToString();
+                    string k2 = winTable["key2"]?.ToString();
+                    bool enabled = Convert.ToBoolean(winTable["enabled"]);
+
+                    // Seamless switch is usually instant (0.0s hold)
+                    AddShortcutToList(k1, k2, "winmodechange", 0.0, enabled);
+                }
+
+                // 4. Map Functions to Actions
                 _shortcutActions["taskmanager"] = BringTaskManagerToFrontAndFocus;
                 _shortcutActions["switch tab"] = SendWinTab;
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
@@ -8199,10 +8288,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
-                LogGamepadInit($"[ERROR] Failed to load shortcuts from TOML: {ex.Message}");
+                LogGamepadInit($"[ERROR] Failed to load shortcuts: {ex.Message}");
             }
         }
-
 
 
         // ########## ANFANG DES KOMPLETTEN CODE-BLOCKS ##########
@@ -8251,39 +8339,90 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
         /// <summary>
-        /// Verarbeitet alle globalen Gamepad-Shortcuts.
+        /// Processes gamepad input against the list of loaded runtime shortcuts.
+        /// Handles both instant combinations and time-based hold triggers.
         /// </summary>
+        /// <param name="currentButtons">The current state of all buttons.</param>
+        /// <param name="index">Controller index (0-3 for Xbox, 4 for PS).</param>
         private void HandleShortcuts(GamepadButtonFlags currentButtons, int index)
         {
-            // Speicher für den vorherigen Zustand pro Controller
-            // WICHTIG: Nutze ein separates Array, damit die Navigation den Zustand nicht löscht
+            // Safety check for array bounds
+            if (index < 0 || index >= 10) return;
+
+            // Calculate which buttons were *just* pressed in this frame
+            // (Used for instant triggers so they don't fire repeatedly)
             var newPresses = currentButtons & ~_lastShortcutButtons[index];
             _lastShortcutButtons[index] = currentButtons;
 
-            if (newPresses == GamepadButtonFlags.None) return;
-
-            foreach (var pair in _activeShortcuts)
+            foreach (var shortcut in _runtimeShortcuts)
             {
-                var key1 = pair.Key.Item1; // z.B. "Back" (Share)
-                var key2 = pair.Key.Item2; // z.B. "RightThumb" (RS)
-                var function = pair.Value;
+                // 1. Check if the required buttons for this shortcut are currently held down
+                bool requirementsMet = (currentButtons & shortcut.RequiredButtons) == shortcut.RequiredButtons;
 
-                // Prüfe ob Key1 (Share) GEHALTEN wird und Key2 (RS) gerade NEU gedrückt wurde
-                // ODER ob beide gleichzeitig in diesem Frame neu sind
-                bool k1Held = IsButtonPressed(currentButtons, key1);
-                bool k2New = IsButtonPressed(newPresses, key2);
-
-                if (k1Held && k2New)
+                if (requirementsMet)
                 {
-                    if (_shortcutActions.TryGetValue(function, out var action))
+                    // CASE A: Time-based Hold (Duration > 0)
+                    if (shortcut.HoldDurationSeconds > 0)
                     {
-                        Debug.WriteLine($"[PS5-Shortcut] Triggering {function} for index {index}");
-                        DispatcherQueue.TryEnqueue(() => {
-                            action.Invoke();
-                            SendOverlayNotification($"Shortcut: {function}");
-                        });
+                        // Start timer if not already started
+                        if (shortcut.HoldStartTimes[index] == DateTime.MaxValue)
+                        {
+                            shortcut.HoldStartTimes[index] = DateTime.Now;
+                        }
+
+                        // Check if enough time has passed
+                        var elapsedSeconds = (DateTime.Now - shortcut.HoldStartTimes[index]).TotalSeconds;
+
+                        if (elapsedSeconds >= shortcut.HoldDurationSeconds && !shortcut.HasTriggered[index])
+                        {
+                            // FIRE ACTION
+                            ExecuteShortcutAction(shortcut.FunctionName, index, true);
+                            shortcut.HasTriggered[index] = true; // Prevent re-firing while holding
+                        }
+                    }
+                    // CASE B: Instant Trigger (Duration == 0)
+                    else
+                    {
+                        // For instant triggers, at least one of the required buttons must be "newly pressed"
+                        // This prevents the action from firing every 10ms while you hold the buttons.
+                        // We check if (NewPresses overlaps with RequiredButtons)
+                        if ((newPresses & shortcut.RequiredButtons) != GamepadButtonFlags.None)
+                        {
+                            ExecuteShortcutAction(shortcut.FunctionName, index, false);
+                        }
                     }
                 }
+                else
+                {
+                    // Reset state if buttons are released
+                    if (shortcut.HoldDurationSeconds > 0)
+                    {
+                        shortcut.HoldStartTimes[index] = DateTime.MaxValue;
+                        shortcut.HasTriggered[index] = false;
+                    }
+                }
+            }
+        }
+
+        // Helper to execute the action safely on the UI thread
+        private void ExecuteShortcutAction(string functionName, int controllerIndex, bool isHoldAction)
+        {
+            if (_shortcutActions.TryGetValue(functionName, out var action))
+            {
+                string triggerType = isHoldAction ? "Held" : "Pressed";
+                Debug.WriteLine($"[Shortcut] {triggerType} {functionName} on Controller {controllerIndex}");
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    action.Invoke();
+
+                    // Optional: Custom text for Hold actions
+                    string msg = isHoldAction ? $"{functionName} (Held)" : $"Shortcut: {functionName}";
+                    SendOverlayNotification(msg);
+
+                    // Vibration feedback
+                    _ = TriggerVibration(controllerIndex, 0.5f, 250);
+                });
             }
         }
 

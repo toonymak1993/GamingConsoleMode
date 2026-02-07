@@ -313,38 +313,93 @@ namespace GAMINGCONSOLEMODE
         }
         #endregion
 
-       
+
 
         #region Top Bar Button
-        private static string exeFolder()
+        private static string GetExeFolder()
         {
-            string exePath = Assembly.GetExecutingAssembly().Location;
-            string folderPath = Path.GetDirectoryName(exePath);
-            return folderPath;
+            // AppContext is the most reliable way to find the base directory in WinUI 3
+            return AppContext.BaseDirectory;
         }
 
-        private void TopbarButton_Click(object sender, RoutedEventArgs e)
+        private async void TopbarButton_Click(object sender, RoutedEventArgs e)
         {
+            // Verwende einen anderen Variablennamen, um Konflikte zu vermeiden
+            Button buttonToDisable = sender as Button;
+            if (buttonToDisable != null)
+            {
+                buttonToDisable.IsEnabled = false;
+            }
+
             try
             {
-                // Navigate to the "gcmloader" subfolder and start the executable inside it.
-                string fullExePath = Path.Combine(exeFolder(), "gcmloader", "gcmloader.exe");
-                Process.Start(new ProcessStartInfo
+                string processName = "gcmloader";
+                string fullExePath = Path.Combine(GetExeFolder(), "gcmloader", "gcmloader.exe");
+
+                // 1. Kill the existing process if it's running
+                var runningProcesses = Process.GetProcessesByName(processName);
+                if (runningProcesses.Length > 0)
                 {
-                    FileName = fullExePath,
-                    UseShellExecute = true
-                });
+                    foreach (var proc in runningProcesses)
+                    {
+                        try
+                        {
+                            proc.Kill();
+                            proc.WaitForExit(2000); // Wait up to 2 seconds
+                        }
+                        catch { /* Process already terminated */ }
+                    }
+                }
+
+                // 2. Wait for 5 seconds (UI remains responsive)
+                await Task.Delay(5000);
+
+                // 3. Start the loader executable
+                if (File.Exists(fullExePath))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = fullExePath,
+                        UseShellExecute = true,
+                        // Ensures the loader finds its local files correctly
+                        WorkingDirectory = Path.GetDirectoryName(fullExePath)
+                    });
+                }
+                else
+                {
+                    throw new FileNotFoundException($"GCM Loader not found at: {fullExePath}");
+                }
             }
             catch (Exception ex)
             {
-                ContentDialog dialog = new ContentDialog();
-                dialog.XamlRoot = (this.Content as FrameworkElement)?.XamlRoot;
-                dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
-                dialog.Title = "Error starting Game Console Mode";
-                dialog.Content = ex.Message;
-                dialog.CloseButtonText = "OK";
-                _ = dialog.ShowAsync();
+                await ShowErrorDialog("Restart Failed", ex.Message);
             }
+            finally
+            {
+                // Re-enable the Button mit dem neuen Variablennamen
+                if (buttonToDisable != null)
+                {
+                    buttonToDisable.IsEnabled = true;
+                }
+            }
+        }
+
+        private async Task ShowErrorDialog(string title, string content)
+        {
+            ContentDialog dialog = new ContentDialog
+            {
+                XamlRoot = this.Content.XamlRoot,
+                Title = title,
+                Content = content,
+                CloseButtonText = "OK"
+            };
+
+            if (Application.Current.Resources.ContainsKey("DefaultContentDialogStyle"))
+            {
+                dialog.Style = Application.Current.Resources["DefaultContentDialogStyle"] as Style;
+            }
+
+            await dialog.ShowAsync();
         }
         #endregion
 
