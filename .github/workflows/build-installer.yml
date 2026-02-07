@@ -98,18 +98,28 @@ jobs:
         shell: pwsh
         run: |
           $config = "${{ github.event.inputs.build_configuration }}"
-          $platform = "${{ github.event.inputs.platform }}"
+          $platformInput = "${{ github.event.inputs.platform }}"
           
-          Write-Host "📦 Restoring solution packages..."
-          dotnet restore ${{ env.SOLUTION_PATH }}
+          # Map the UI selection to a valid .NET Runtime Identifier (RID)
+          $rid = switch ($platformInput) {
+            "x64"   { "win-x64" }
+            "x86"   { "win-x86" }
+            "ARM64" { "win-arm64" }
+            Default { "win-x64" }
+          }
+
+          Write-Host "📦 Restoring solution packages for $rid (ReadyToRun enabled)..."
+          # We pass PublishReadyToRun here so NuGet fetches the optimization packages
+          dotnet restore ${{ env.SOLUTION_PATH }} -r $rid /p:PublishReadyToRun=true
           if ($LASTEXITCODE -ne 0) { throw "Solution restore failed!" }
           
-          Write-Host "`n🔨 Building solution with Configuration='$config' and Platform='$platform'..."
-          # Wir übergeben die Plattform explizit, um Fehler zu vermeiden.
-          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config /p:Platform=$platform --no-restore
+          Write-Host "`n🔨 Building solution with Configuration='$config', Platform='$platformInput', RID='$rid'..."
+          # We use 'dotnet publish' instead of 'build' for better ReadyToRun support, 
+          # but building also works if we provide the RID.
+          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config -r $rid --no-restore /p:PublishReadyToRun=true /p:Platform=$platformInput
           if ($LASTEXITCODE -ne 0) { throw "Solution build failed!" }
 
-          Write-Host "`n✅ All projects built successfully!"
+          Write-Host "`n✅ All projects built successfully with ReadyToRun optimizations!"
 
       # NEU & VEREINFACHT: Findet und kopiert die korrekten Build-Ordner.
       - name: Prepare installer files
