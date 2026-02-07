@@ -1,129 +1,181 @@
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using System;
-using System.Windows.Forms;
-using System.Threading.Tasks;
+    using Microsoft.UI.Xaml;
+    using Microsoft.UI.Xaml.Controls;
+    using System;
+    using System.Windows.Forms;
+    using System.Threading.Tasks;
 
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+    // To learn more about WinUI, the WinUI project structure,
+    // and more about our project templates, see: http://aka.ms/winui-project-info.
 
-namespace GAMINGCONSOLEMODE
-{
-    /// <summary>
-    /// An empty page that can be used on its own or navigated to within a Frame.
-    /// </summary>
-    public sealed partial class launcher : Page
+    namespace GAMINGCONSOLEMODE
     {
-
-        public launcher()
+        /// <summary>
+        /// An empty page that can be used on its own or navigated to within a Frame.
+        /// </summary>
+        public sealed partial class launcher : Page
         {
-            this.InitializeComponent();
-            InitializeUI();
-        }
 
-        #region Methods
+            public launcher()
+            {
+                this.InitializeComponent();
+                InitializeUI();
+            }
 
-        // Handles the button click to toggle the SplitView pane.
-        private void TogglePaneButton_Click(object sender, RoutedEventArgs e)
-        {
-            splitView.IsPaneOpen = !splitView.IsPaneOpen;
-        }
+            #region Methods
+
+            // Handles the button click to toggle the SplitView pane.
+            private void TogglePaneButton_Click(object sender, RoutedEventArgs e)
+            {
+                splitView.IsPaneOpen = !splitView.IsPaneOpen;
+            }
 
         /// <summary>
         /// Sets up the initial state of the UI based on saved settings.
         /// </summary>
         private void InitializeUI()
         {
-            // We'll try to load the saved paths. If it fails (e.g., first launch),
-            // the empty catch block will just let it continue gracefully.
+            // ---------------------------------------------------------
+            // 1. GFN PFAD LADEN (Ganz oben, damit es sicher läuft!)
+            // ---------------------------------------------------------
             try
             {
-                #region Launcher Paths
+                string gfnlauncherpath = AppSettings.Load<string>("gfnlauncherpath");
+
+                // Fallback: Wenn leer, Standardpfad nehmen
+                if (string.IsNullOrEmpty(gfnlauncherpath))
+                {
+                    string roamingPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    gfnlauncherpath = System.IO.Path.Combine(roamingPath, @"Microsoft\Windows\Start Menu\Programs\NVIDIA GeForce NOW.lnk");
+                    AppSettings.Save("gfnlauncherpath", gfnlauncherpath);
+                }
+
+                // In Textbox schreiben
+                textbox_gfn_path.Text = gfnlauncherpath;
+            }
+            catch { /* Ignorieren wenn GFN fehlschlägt */ }
+
+
+            // ---------------------------------------------------------
+            // 2. STEAM PFAD LADEN
+            // ---------------------------------------------------------
+            try
+            {
                 string steamlauncherpath = AppSettings.Load<string>("steamlauncherpath");
                 textbox_steam_path.Text = steamlauncherpath;
+            }
+            catch { }
 
+            // ---------------------------------------------------------
+            // 3. PLAYNITE PFAD LADEN
+            // ---------------------------------------------------------
+            try
+            {
                 string playnitelauncherpath = AppSettings.Load<string>("playnitelauncherpath");
                 textbox_playnite_path.Text = playnitelauncherpath;
+            }
+            catch { }
 
+            // ---------------------------------------------------------
+            // 4. CUSTOM LAUNCHER PFAD LADEN
+            // ---------------------------------------------------------
+            try
+            {
                 string customlauncherpath = AppSettings.Load<string>("customlauncherpath");
                 textbox_custom_path.Text = customlauncherpath;
-                #endregion
+            }
+            catch { }
+
+
+            // ---------------------------------------------------------
+            // 5. SWITCHES SETZEN (Launcher Auswahl)
+            // ---------------------------------------------------------
+            try
+            {
+                string launcher = AppSettings.Load<string>("launcher");
+                switch (launcher)
+                {
+                    case "steam":
+                        use_steam_bp.IsOn = true;
+                        use_playnite.IsOn = false;
+                        use_custom.IsOn = false;
+                        use_xbox.IsOn = false;
+                        use_gfn.IsOn = false;
+                        break;
+
+                    case "playnite":
+                        use_playnite.IsOn = true;
+                        use_steam_bp.IsOn = false;
+                        use_custom.IsOn = false;
+                        use_xbox.IsOn = false;
+                        use_gfn.IsOn = false;
+                        break;
+
+                    case "custom":
+                        use_custom.IsOn = true;
+                        use_playnite.IsOn = false;
+                        use_steam_bp.IsOn = false;
+                        use_xbox.IsOn = false;
+                        use_gfn.IsOn = false;
+                        break;
+
+                    case "xbox":
+                        use_xbox.IsOn = true;
+                        use_custom.IsOn = false;
+                        use_playnite.IsOn = false;
+                        use_steam_bp.IsOn = false;
+                        use_gfn.IsOn = false;
+                        break;
+
+                    case "gfn":
+                        use_gfn.IsOn = true;
+                        use_custom.IsOn = false;
+                        use_playnite.IsOn = false;
+                        use_steam_bp.IsOn = false;
+                        use_xbox.IsOn = false;
+                        break;
+
+                    default:
+                        // Default to Steam
+                        launcher = "steam";
+                        AppSettings.Save("launcher", launcher);
+                        use_steam_bp.IsOn = true;
+                        use_playnite.IsOn = false;
+                        use_custom.IsOn = false;
+                        use_xbox.IsOn = false;
+                        use_gfn.IsOn = false;
+                        break;
+                }
             }
             catch
             {
-                // No settings found? No problem. We'll just start with empty text boxes.
-            }
-
-            // Figure out which launcher was last selected and set the right toggle switch.
-            string launcher = AppSettings.Load<string>("launcher");
-            switch (launcher)
-            {
-                case "steam":
-                    use_steam_bp.IsOn = true;
-                    use_playnite.IsOn = false;
-                    use_custom.IsOn = false;
-                    use_xbox.IsOn = false;
-                    break;
-
-                case "playnite":
-                    use_playnite.IsOn = true;
-                    use_steam_bp.IsOn = false;
-                    use_custom.IsOn = false;
-                    use_xbox.IsOn = false;
-                    break;
-
-                case "custom":
-                    use_custom.IsOn = true;
-                    use_playnite.IsOn = false;
-                    use_steam_bp.IsOn = false;
-                    use_xbox.IsOn = false;
-                    break;
-
-                case "xbox":
-                    use_custom.IsOn = false;
-                    use_playnite.IsOn = false;
-                    use_steam_bp.IsOn = false;
-                    use_xbox.IsOn = true;
-                    break;
-
-                default:
-                    // If we find an invalid or no setting, let's just default to Steam.
-                    Console.WriteLine("Invalid launcher setting. Defaulting to Steam.");
-                    launcher = "steam";
-                    AppSettings.Save("launcher", launcher);
-
-                    use_steam_bp.IsOn = true;
-                    use_playnite.IsOn = false;
-                    use_custom.IsOn = false;
-                    use_xbox.IsOn = false;
-                    break;
+                // Falls hier was schiefgeht, Standard setzen
+                use_steam_bp.IsOn = true;
             }
         }
-
         /// <summary>
         /// Opens a file dialog to let the user pick an executable file.
         /// </summary>
         /// <returns>The full path to the selected .exe, or "none" if canceled.</returns>
         private string GetExePath()
-        {
-            string file = FilePicker.ShowDialog(
-                "C:\\",                         // Where to start looking.
-                new string[] { "exe" },         // We only want .exe files.
-                "Executable Files",             // The description for the filter.
-                "Select an Executable File"     // The title of the dialog window.
-            );
+            {
+                string file = FilePicker.ShowDialog(
+                    "C:\\",                         // Where to start looking.
+                    new string[] { "exe" },         // We only want .exe files.
+                    "Executable Files",             // The description for the filter.
+                    "Select an Executable File"     // The title of the dialog window.
+                );
 
-            if (!string.IsNullOrEmpty(file))
-            {
-                // The user picked a file. Let's return the path.
-                return file;
+                if (!string.IsNullOrEmpty(file))
+                {
+                    // The user picked a file. Let's return the path.
+                    return file;
+                }
+                else
+                {
+                    // The user canceled the dialog.
+                    return "none";
+                }
             }
-            else
-            {
-                // The user canceled the dialog.
-                return "none";
-            }
-        }
 
         /// <summary>
         /// Checks if at least one launcher toggle is active. If not, it shows a popup
@@ -131,7 +183,13 @@ namespace GAMINGCONSOLEMODE
         /// </summary>
         private async Task CheckLauncherActivatedAsync()
         {
-            if (use_steam_bp.IsOn == false & use_playnite.IsOn == false & use_custom.IsOn == false & use_xbox.IsOn == false)
+            // FEHLER GEFUNDEN: Hier fehlte "& use_gfn.IsOn == false"
+            // Der Code prüft jetzt, ob WIRKLICH ALLE aus sind.
+            if (use_steam_bp.IsOn == false &
+                use_playnite.IsOn == false &
+                use_custom.IsOn == false &
+                use_xbox.IsOn == false &
+                use_gfn.IsOn == false) // <--- DIESE ZEILE HAT GEFEHLT!
             {
                 // Whoops, nothing is selected. We need to tell the user and fix it.
                 var dialog = new ContentDialog
@@ -139,7 +197,6 @@ namespace GAMINGCONSOLEMODE
                     Title = "Information",
                     Content = "Please select at least one launcher. The default launcher will now be set.",
                     CloseButtonText = "OK",
-                    // This is crucial - it connects the dialog to our app's main window.
                     XamlRoot = this.Content.XamlRoot
                 };
 
@@ -161,7 +218,6 @@ namespace GAMINGCONSOLEMODE
         private void textbox_steam_path_TextChanged(object sender, TextChangedEventArgs e)
         {
             AppSettings.Save("steamlauncherpath", textbox_steam_path.Text);
-            // Refresh the UI to make sure everything's in sync.
             InitializeUI();
         }
 
@@ -169,17 +225,23 @@ namespace GAMINGCONSOLEMODE
         {
             if (use_steam_bp.IsOn == true)
             {
+                // ZUERST: Alle anderen Schalter auf "Aus" stellen
+                use_playnite.IsOn = false;
+                use_custom.IsOn = false;
+                use_xbox.IsOn = false;
+                use_gfn.IsOn = false; // <--- WICHTIG: GFN ausschalten!
+
                 AppSettings.Save("launcher", "steam");
                 InitializeUI();
-                // Show the relevant settings panel.
+
                 SteamPanel.Visibility = Visibility.Visible;
                 PlaynitePanel.Visibility = Visibility.Collapsed;
                 CustomPanel.Visibility = Visibility.Collapsed;
                 XboxPanel.Visibility = Visibility.Collapsed;
+                gfnPanel.Visibility = Visibility.Collapsed;
             }
             else
             {
-                // Make sure at least one launcher is still active.
                 await CheckLauncherActivatedAsync();
                 SteamPanel.Visibility = Visibility.Collapsed;
             }
@@ -188,19 +250,13 @@ namespace GAMINGCONSOLEMODE
         private void pichsteampath_Click(object sender, RoutedEventArgs e)
         {
             string exepath = GetExePath();
-
-            if (exepath == "none")
-            {
-                return; // User canceled.
-            }
+            if (exepath == "none") return;
 
             string expectedFileName = "steam.exe";
             string selectedFile = System.IO.Path.GetFileName(exepath);
 
-            // Let's make sure they picked the right file.
             if (selectedFile.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
             {
-                // Looks good. Save the path and update the UI.
                 AppSettings.Save("steamlauncherpath", exepath);
                 InitializeUI();
             }
@@ -212,22 +268,16 @@ namespace GAMINGCONSOLEMODE
         #endregion
 
         #region Playnite Events
-
         private void pichplaynitepath_Click(object sender, RoutedEventArgs e)
         {
             string exepath = GetExePath();
-
-            if (exepath == "none")
-            {
-                return; // User canceled.
-            }
+            if (exepath == "none") return;
 
             string expectedFileName = "Playnite.FullscreenApp.exe";
             string selectedFile = System.IO.Path.GetFileName(exepath);
 
             if (selectedFile.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
             {
-                // Correct file. Save and refresh.
                 AppSettings.Save("playnitelauncherpath", exepath);
                 InitializeUI();
             }
@@ -241,13 +291,20 @@ namespace GAMINGCONSOLEMODE
         {
             if (use_playnite.IsOn == true)
             {
+                // ZUERST: Alle anderen Schalter auf "Aus" stellen
+                use_steam_bp.IsOn = false;
+                use_custom.IsOn = false;
+                use_xbox.IsOn = false;
+                use_gfn.IsOn = false; // <--- WICHTIG: GFN ausschalten!
+
                 AppSettings.Save("launcher", "playnite");
                 InitializeUI();
-                // Show the Playnite panel and hide the others.
-                SteamPanel.Visibility = Visibility.Collapsed;
+
                 PlaynitePanel.Visibility = Visibility.Visible;
+                SteamPanel.Visibility = Visibility.Collapsed;
                 CustomPanel.Visibility = Visibility.Collapsed;
                 XboxPanel.Visibility = Visibility.Collapsed;
+                gfnPanel.Visibility = Visibility.Collapsed;
             }
             else
             {
@@ -268,12 +325,20 @@ namespace GAMINGCONSOLEMODE
         {
             if (use_xbox.IsOn == true)
             {
+                // ZUERST: Alle anderen Schalter auf "Aus" stellen
+                use_steam_bp.IsOn = false;
+                use_playnite.IsOn = false;
+                use_custom.IsOn = false;
+                use_gfn.IsOn = false; // <--- WICHTIG: GFN ausschalten!
+
                 AppSettings.Save("launcher", "xbox");
                 InitializeUI();
+
+                XboxPanel.Visibility = Visibility.Visible;
                 SteamPanel.Visibility = Visibility.Collapsed;
                 PlaynitePanel.Visibility = Visibility.Collapsed;
                 CustomPanel.Visibility = Visibility.Collapsed;
-                XboxPanel.Visibility = Visibility.Visible;
+                gfnPanel.Visibility = Visibility.Collapsed;
             }
             else
             {
@@ -284,14 +349,11 @@ namespace GAMINGCONSOLEMODE
         #endregion
 
         #region Custom Launcher Events
-
         private void pichcustompath_Click(object sender, RoutedEventArgs e)
         {
             string exepath = GetExePath();
-
             if (exepath != "none")
             {
-                // For a custom launcher, any .exe is fine.
                 AppSettings.Save("customlauncherpath", exepath);
                 InitializeUI();
             }
@@ -301,12 +363,20 @@ namespace GAMINGCONSOLEMODE
         {
             if (use_custom.IsOn == true)
             {
+                // ZUERST: Alle anderen Schalter auf "Aus" stellen
+                use_steam_bp.IsOn = false;
+                use_playnite.IsOn = false;
+                use_xbox.IsOn = false;
+                use_gfn.IsOn = false; 
+
                 AppSettings.Save("launcher", "custom");
                 InitializeUI();
+
+                CustomPanel.Visibility = Visibility.Visible;
                 SteamPanel.Visibility = Visibility.Collapsed;
                 PlaynitePanel.Visibility = Visibility.Collapsed;
-                CustomPanel.Visibility = Visibility.Visible;
                 XboxPanel.Visibility = Visibility.Collapsed;
+                gfnPanel.Visibility = Visibility.Collapsed;
             }
             else
             {
@@ -320,10 +390,61 @@ namespace GAMINGCONSOLEMODE
             AppSettings.Save("customlauncherpath", textbox_custom_path.Text);
             InitializeUI();
         }
-
         #endregion
 
+        #region gfn Events
+
+        // ACHTUNG: Hier fehlt noch deine Button Click Methode für den GFN Pfad! 
+        // Ich habe sie aus dem vorherigen Schritt hier mit eingefügt, damit es komplett ist.
+        private void pickgfnpath_Click(object sender, RoutedEventArgs e)
+        {
+            string exepath = GetExePath();
+
+            // Wenn abgebrochen wurde (keine Datei gewählt), raus hier
+            if (exepath == "none") return;
+
+            // 1. SOFORT anzeigen (damit du es siehst)
+            textbox_gfn_path.Text = exepath;
+
+            // 2. SOFORT speichern (damit es beim Neustart noch da ist)
+            AppSettings.Save("gfnlauncherpath", exepath);
+        }
+        private void textbox_gfn_path_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Speichert jede Änderung in der Textbox sofort ab
+            AppSettings.Save("gfnlauncherpath", textbox_gfn_path.Text);
+        }
+
+        private async void use_gfn_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (use_gfn.IsOn == true)
+            {
+                // ZUERST: Alle anderen Schalter auf "Aus" stellen
+                use_steam_bp.IsOn = false;
+                use_playnite.IsOn = false;
+                use_custom.IsOn = false;
+                use_xbox.IsOn = false;
+
+                AppSettings.Save("launcher", "gfn");
+                InitializeUI();
+
+                gfnPanel.Visibility = Visibility.Visible;
+                SteamPanel.Visibility = Visibility.Collapsed;
+                PlaynitePanel.Visibility = Visibility.Collapsed;
+                CustomPanel.Visibility = Visibility.Collapsed;
+                XboxPanel.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                gfnPanel.Visibility = Visibility.Collapsed;
+                await CheckLauncherActivatedAsync();
+            }
+        }
+        #endregion gfn Events
+
         #endregion Events
+
+
     }
 
     /// <summary>
@@ -331,63 +452,63 @@ namespace GAMINGCONSOLEMODE
     /// It's a bit old-school, but it gets the job done reliably.
     /// </summary>
     public static class FilePicker
-    {
-        [System.Runtime.InteropServices.DllImport("comdlg32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
-        private static extern bool GetOpenFileName(ref OpenFileName ofn);
-
-        // Here's an example of how you'd use this:
-        // string filename = FilePicker.ShowDialog("C:\\", new string[] { "png", "jpeg" }, "Image Files", "Select an Image...");
-        public static string ShowDialog(string startingDirectory, string[] filters, string filterName, string dialogTitle)
         {
-            var ofn = new OpenFileName();
-            ofn.lStructSize = System.Runtime.InteropServices.Marshal.SizeOf(ofn);
+            [System.Runtime.InteropServices.DllImport("comdlg32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+            private static extern bool GetOpenFileName(ref OpenFileName ofn);
 
-            // Building the filter string in the format the API expects.
-            ofn.lpstrFilter = filterName;
-            foreach (string filter in filters)
+            // Here's an example of how you'd use this:
+            // string filename = FilePicker.ShowDialog("C:\\", new string[] { "png", "jpeg" }, "Image Files", "Select an Image...");
+            public static string ShowDialog(string startingDirectory, string[] filters, string filterName, string dialogTitle)
             {
-                ofn.lpstrFilter += $"\0*.{filter}";
+                var ofn = new OpenFileName();
+                ofn.lStructSize = System.Runtime.InteropServices.Marshal.SizeOf(ofn);
+
+                // Building the filter string in the format the API expects.
+                ofn.lpstrFilter = filterName;
+                foreach (string filter in filters)
+                {
+                    ofn.lpstrFilter += $"\0*.{filter}";
+                }
+
+                ofn.lpstrFile = new string(new char[256]);
+                ofn.nMaxFile = ofn.lpstrFile.Length;
+                ofn.lpstrFileTitle = new string(new char[64]);
+                ofn.nMaxFileTitle = ofn.lpstrFileTitle.Length;
+                ofn.lpstrTitle = dialogTitle;
+                ofn.lpstrInitialDir = startingDirectory;
+
+                if (GetOpenFileName(ref ofn))
+                    return ofn.lpstrFile;
+
+                return string.Empty; // Return an empty string if the user cancels.
             }
+        }
 
-            ofn.lpstrFile = new string(new char[256]);
-            ofn.nMaxFile = ofn.lpstrFile.Length;
-            ofn.lpstrFileTitle = new string(new char[64]);
-            ofn.nMaxFileTitle = ofn.lpstrFileTitle.Length;
-            ofn.lpstrTitle = dialogTitle;
-            ofn.lpstrInitialDir = startingDirectory;
-
-            if (GetOpenFileName(ref ofn))
-                return ofn.lpstrFile;
-
-            return string.Empty; // Return an empty string if the user cancels.
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        public struct OpenFileName
+        {
+            public int lStructSize;
+            public IntPtr hwndOwner;
+            public IntPtr hInstance;
+            public string lpstrFilter;
+            public string lpstrCustomFilter;
+            public int nMaxCustFilter;
+            public int nFilterIndex;
+            public string lpstrFile;
+            public int nMaxFile;
+            public string lpstrFileTitle;
+            public int nMaxFileTitle;
+            public string lpstrInitialDir;
+            public string lpstrTitle;
+            public int Flags;
+            public short nFileOffset;
+            public short nFileExtension;
+            public string lpstrDefExt;
+            public IntPtr lCustData;
+            public IntPtr lpfnHook;
+            public string lpTemplateName;
+            public IntPtr pvReserved;
+            public int dwReserved;
+            public int flagsEx;
         }
     }
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
-    public struct OpenFileName
-    {
-        public int lStructSize;
-        public IntPtr hwndOwner;
-        public IntPtr hInstance;
-        public string lpstrFilter;
-        public string lpstrCustomFilter;
-        public int nMaxCustFilter;
-        public int nFilterIndex;
-        public string lpstrFile;
-        public int nMaxFile;
-        public string lpstrFileTitle;
-        public int nMaxFileTitle;
-        public string lpstrInitialDir;
-        public string lpstrTitle;
-        public int Flags;
-        public short nFileOffset;
-        public short nFileExtension;
-        public string lpstrDefExt;
-        public IntPtr lCustData;
-        public IntPtr lpfnHook;
-        public string lpTemplateName;
-        public IntPtr pvReserved;
-        public int dwReserved;
-        public int flagsEx;
-    }
-}

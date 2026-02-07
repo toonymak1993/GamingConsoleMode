@@ -1,4 +1,5 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
@@ -28,6 +29,7 @@
     <Content Remove="Assets\gcm_ui_logo.png" />
     <Content Remove="Assets\launcher\custom_logo.png" />
     <Content Remove="Assets\launcher\gcm_icon.png" />
+    <Content Remove="Assets\launcher\geforcenow.png" />
     <Content Remove="Assets\launcher\playnite_logo.png" />
     <Content Remove="Assets\launcher\steam_logo.png" />
     <Content Remove="Assets\launcher\Xboxlogo.png" />
@@ -65,6 +67,7 @@
     <None Remove="Assets\gcm_ui_logo.png" />
     <None Remove="Assets\launcher\custom_logo.png" />
     <None Remove="Assets\launcher\gcm_icon.png" />
+    <None Remove="Assets\launcher\geforcenow.png" />
     <None Remove="Assets\launcher\playnite_logo.png" />
     <None Remove="Assets\launcher\steam_logo.png" />
     <None Remove="Assets\launcher\Xboxlogo.png" />
@@ -287,7 +290,7 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="NAudio.Core" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="System.Management" Version="9.0.3" />
+    <PackageReference Include="System.Management" Version="10.0.2" />
     <PackageReference Include="TaskScheduler" Version="2.12.1" />
     <PackageReference Include="Tomlyn" Version="0.19.0" />
   </ItemGroup>
@@ -362,6 +365,11 @@
     <Page Remove="Home.xaml" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\launcher\geforcenow.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Assets\rogally\allybackside.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -380,9 +388,6 @@
     <EmbeddedResource Include="logo.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\gcmloader\gcmloader.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Page Update="taskmanager.xaml">

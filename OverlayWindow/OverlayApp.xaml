@@ -1,9 +1,7 @@
-﻿<Application x:Class="OverlayWindow.App"
+<Application x:Class="OverlayWindow.OverlayApp"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:OverlayWindow"
-             StartupUri="MainWindow.xaml">
+             xmlns:local="clr-namespace:OverlayWindow">
     <Application.Resources>
-
     </Application.Resources>
 </Application>

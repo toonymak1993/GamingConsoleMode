@@ -82,6 +82,20 @@
                     <ToggleSwitch x:Name="use_xbox" Grid.Column="2" HorizontalAlignment="Right" Toggled="use_xbox_Toggled"  Margin="-85,0"/>
                 </Grid>
 
+                <!-- Geforce Now -->
+                <Grid Padding="15,5">
+                    <Grid.ColumnDefinitions>
+                        <!-- Platz für ToggleSwitch + Text -->
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Image Source="/Assets/launcher/geforcenow.png" Width="25" Height="25" Grid.Column="0" VerticalAlignment="Center"/>
+                    <TextBlock Text="GFN" Grid.Column="1" VerticalAlignment="Center" Margin="20,0"/>
+                    <ToggleSwitch x:Name="use_gfn" Grid.Column="2" HorizontalAlignment="Right" Toggled="use_gfn_Toggled"  Margin="-85,0"/>
+                </Grid>
+
                 <!-- Custom Launcher -->
                 <Grid Padding="15,5">
                     <Grid.ColumnDefinitions>
@@ -199,6 +213,41 @@
                         </StackPanel>
                        
                         
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- GFN Panel -->
+            <Grid x:Name="gfnPanel">
+
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                        <GradientStop Color="Black"  Offset="-0.5" />
+                        <GradientStop Color="LawnGreen"  Offset="0.8" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Spacing="20">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                            <Image Source="/Assets/launcher/geforcenow.png" Width="75" Height="75" Margin="5"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="GEFORCE NOW" FontSize="30" FontWeight="SemiBold" Foreground="White"/>
+                                <TextBlock Text="GCM will use GFN on startup" FontSize="12" Foreground="White" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border Background="#1A1A1A" CornerRadius="6" Padding="8">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Select Gfn Path" FontSize="16" FontWeight="Bold" Foreground="White" Margin="8"/>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="pickgfnpath" Content="Select a file" Click="pickgfnpath_Click"/>
+                                    <TextBlock x:Name="textbox_select_gfn_path" TextWrapping="Wrap" Foreground="White"/>
+                                </StackPanel>
+                                <TextBox x:Name="textbox_gfn_path" TextChanged="textbox_gfn_path_TextChanged" PlaceholderText="Enter the Gfn Path" Foreground="White" Background="Transparent" Padding="6"/>
+                            </StackPanel>
+                        </Border>
+
                     </StackPanel>
                 </Grid>
             </Grid>

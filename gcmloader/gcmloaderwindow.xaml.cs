@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
 using HidSharp;
+using Windows.UI;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -65,6 +66,100 @@ namespace gcmloader
         #region soundcontrol
         // Cache for sounds to avoid loading from disk every time
         private readonly Dictionary<string, Uri> _soundCache = new();
+        private List<Button> _audioDeviceButtons = new List<Button>();
+        private int _selectedAudioDeviceIndex = 0;
+
+        private void OpenAudioFlyout()
+        {
+            try
+            {
+                SimpleAudioList.Children.Clear();
+                _audioDeviceButtons.Clear();
+
+                var enumerator = new MMDeviceEnumerator();
+                var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+                var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+
+                foreach (var device in devices)
+                {
+                    // Modernes Button-Styling
+                    var btn = new Button
+                    {
+                        Tag = device.FriendlyName,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Height = 60,
+                        CornerRadius = new CornerRadius(12),
+                        // WinUI 3 Default Style für Buttons im Hintergrund nutzen
+                        Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+                        BorderThickness = new Thickness(0)
+                    };
+
+                    var contentStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 15 };
+
+                    // Icon Logik
+                    string glyph = device.FriendlyName.ToLower().Contains("headset") || device.FriendlyName.ToLower().Contains("kopfhörer") ? "\uE76B" : "\uE7F5";
+                    contentStack.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
+
+                    contentStack.Children.Add(new TextBlock
+                    {
+                        Text = device.FriendlyName,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        FontSize = 15,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                    });
+
+                    if (device.FriendlyName == defaultDevice.FriendlyName)
+                    {
+                        // Akzentfarbe für das aktive Gerät
+                        btn.BorderThickness = new Thickness(2);
+                        // Nutzt die System-Akzentfarbe für Win11 Feeling
+                        btn.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
+                    }
+
+                    btn.Content = contentStack;
+                    btn.Click += (s, e) => SetAudioDevice(device.FriendlyName);
+
+                    _audioDeviceButtons.Add(btn);
+                    SimpleAudioList.Children.Add(btn);
+                }
+
+                AudioOverlay.Visibility = Visibility.Visible;
+                _currentFocusArea = FocusArea.AudioMenu;
+                _selectedAudioDeviceIndex = 0;
+
+                UpdateVisualFocus();
+            }
+            catch (Exception ex) { Debug.WriteLine("Audio Error: " + ex.Message); }
+        }
+
+        private void CloseAudioFlyout()
+        {
+            AudioOverlay.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.TopButtons;
+            UpdateVisualFocus();
+        }
+
+        private void ToggleAudioFlyout()
+        {
+         
+            if (AudioOverlay.Visibility == Visibility.Visible) CloseAudioFlyout();
+            else OpenAudioFlyout();
+        }
+
+        private void AudioOverlay_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            CloseAudioFlyout();
+        }
+
+        private void SetAudioDevice(string deviceName)
+        {
+            // Bereinigung für NirCmd
+            string cleanedName = deviceName.Split('(')[0].Trim();
+            NirCmdUtil.NirCmdHelper.ExecuteCommand($"setdefaultsounddevice \"{cleanedName}\"");
+            SendOverlayNotification("Audio: " + cleanedName);
+            PlayActivationSound();
+            CloseAudioFlyout();
+        }
 
         #endregion soundcontrol
         #region psdualsense
@@ -146,7 +241,20 @@ namespace gcmloader
         #endregion controllerbattery icon
         #region mousecontrol 
 
+        private void ParkMouseCursor()
+        {
+            // Wir schieben die Maus an eine Position weit außerhalb des Bildschirms (9999, 9999).
+            // Da Windows den Cursor oft bei Klicks oder App-Wechseln zurückholt, 
+            // zwingen wir ihn hier aktiv in die Ecke.
+            SetCursorPos(9999, 9999);
 
+            // Falls der Cursor laut System noch sichtbar ist, setzen wir den internen Zähler auf unsichtbar.
+            if (_isCursorVisible)
+            {
+                while (ShowCursor(false) >= 0) ;
+                _isCursorVisible = false;
+            }
+        }
 
 
 
@@ -247,16 +355,115 @@ namespace gcmloader
         #region ui status
         private DispatcherTimer _statusUpdateTimer;
         #endregion ui status
+        #region keyboardatstart
+        private void SetupKeyboardAutoStartTask()
+        {
+            const string taskName = "GCM_KeyboardStart";
+
+            try
+            {
+                using (TaskService ts = new TaskService())
+                {
+                    // Alte Aufgabe entfernen, um Konfiguration sauber zu überschreiben
+                    if (ts.FindTask(taskName) != null)
+                    {
+                        ts.RootFolder.DeleteTask(taskName);
+                    }
+
+                    TaskDefinition td = ts.NewTask();
+                    td.RegistrationInfo.Description = "Startet die Eingabe-UI beim Systemstart unabhängig von der Anmeldung.";
+                    td.RegistrationInfo.Author = "gcm_keyboardstart";
+
+                    // --- TRIGGER: NUR BEIM SYSTEMSTART (BOOT) ---
+                    td.Triggers.Add(new BootTrigger { Enabled = true });
+
+                    // --- SETTINGS (Wie in deinem XML) ---
+                    td.Settings.MultipleInstances = TaskInstancesPolicy.IgnoreNew;
+                    td.Settings.DisallowStartIfOnBatteries = false;
+                    td.Settings.StopIfGoingOnBatteries = false;
+                    td.Settings.AllowHardTerminate = true;
+                    td.Settings.StartWhenAvailable = true; // Wichtig: Starten, sobald der Dienst bereit ist
+                    td.Settings.RunOnlyIfNetworkAvailable = false;
+                    td.Settings.AllowDemandStart = true;
+                    td.Settings.Enabled = true;
+                    td.Settings.Hidden = false;
+                    td.Settings.Priority = ProcessPriorityClass.Normal;
+
+                    // --- AKTION & PFAD ---
+                    string tabTipPath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+                        @"microsoft shared\ink\TabTip.exe");
+
+                    if (File.Exists(tabTipPath))
+                    {
+                        // WICHTIG: Den Pfad in Anführungszeichen setzen, falls Leerzeichen enthalten sind
+                        td.Actions.Add(new ExecAction($"\"{tabTipPath}\"", "startkeyboard"));
+
+                        // --- PRINCIPAL: UNABHÄNGIG VOM NUTZER ---
+                        // "S-1-5-18" ist die SID für das SYSTEM-Konto. 
+                        // Das ist nötig, damit die Aufgabe beim Booten ohne Login läuft.
+                        td.Principal.UserId = "SYSTEM";
+                        td.Principal.LogonType = TaskLogonType.ServiceAccount;
+                        td.Principal.RunLevel = TaskRunLevel.Highest;
+
+                        ts.RootFolder.RegisterTaskDefinition(taskName, td);
+                        Debug.WriteLine($"[Task] {taskName} erfolgreich für System-Boot erstellt.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Task] Fehler: {ex.Message}");
+            }
+        }
+        #endregion keyboardatstart
         #region autoscaling
+        private const int DWMWA_EXCLUDED_FROM_PEEK = 12;
+        private const int DWMWA_FLIP3D_POLICY = 9;
+        private const int DWMFLIP_NONE = 1;
+        //vrr control
+        public void EnsureVrrDisabledViaRegistry()
+        {
+            try
+            {
+                string exePath = Process.GetCurrentProcess().MainModule.FileName;
+                string registryPath = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+
+                // DISABLEDXMAXIMIZEDWINDOWEDMODE = Deaktiviert VRR im Fenstermodus
+                // DISABLEFullScreenOptimizations = Verhindert den "Game-Mode" Wechsel
+                string flags = "~ DISABLEDXMAXIMIZEDWINDOWEDMODE DISABLEFullScreenOptimizations";
+
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(registryPath, true))
+                {
+                    if (key != null)
+                    {
+                        var existingValue = key.GetValue(exePath);
+                        if (existingValue == null || !existingValue.ToString().Contains("DISABLEFullScreenOptimizations"))
+                        {
+                            key.SetValue(exePath, flags);
+                            Debug.WriteLine("[GCM] VRR & Fullscreen-Optimierung via Registry deaktiviert.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Fehler beim Setzen der Registry-Flags: {ex.Message}");
+            }
+        }
+
 
         private void ForceDpiRedraw()
         {
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            int pWidth = GetSystemMetrics(0);
-            int pHeight = GetSystemMetrics(1);
 
-            // Hier ebenfalls den Abzug entfernen:
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040 | 0x0020);
+            // Echte Hardware-Pixel abfragen
+            int pWidth = GetSystemMetrics(0); // SM_CXSCREEN
+            int pHeight = GetSystemMetrics(1); // SM_CYSCREEN
+
+            // WICHTIG: pHeight - 1 sorgt dafür, dass AMD das Fenster als Desktop-Inhalt sieht.
+            // Das verhindert den schwarzen Bildschirm beim Fokus-Wechsel.
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight - 1, 0x0040); // SWP_SHOWWINDOW
 
             if (MainContent != null)
             {
@@ -292,90 +499,6 @@ namespace gcmloader
         // DPI Context Konstanten
         private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
 
-        private void SetupResolutionListener()
-        {
-            Microsoft.UI.Windowing.AppWindow appWindow = GetAppWindowForCurrentWindow();
-
-            // Wir abonnieren das Changed-Event
-            appWindow.Changed += (s, e) =>
-            {
-                // Wir prüfen auf SizeChange oder PositionChange
-                // Das deckt Auflösungsänderungen zuverlässig ab
-                if (e.DidSizeChange || e.DidPositionChange)
-                {
-                    this.DispatcherQueue.TryEnqueue(() => {
-                        UpdateWindowLayout();
-                    });
-                }
-            };
-        }
-
-        private Microsoft.UI.Windowing.AppWindow GetAppWindowForCurrentWindow()
-        {
-            IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            Microsoft.UI.WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
-            return Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
-        }
-
-        private void UpdateWindowLayout()
-        {
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-
-            // 1. Echte Hardware-Pixel abfragen (Win32)
-            int pWidth = GetSystemMetrics(0); // SM_CXSCREEN
-            int pHeight = GetSystemMetrics(1); // SM_CYSCREEN
-
-            // 2. Deine Wunsch-Skalierung basierend auf der Auflösung festlegen
-            double customScale = 1.0;
-
-            if (pWidth >= 3840) // 4K
-            {
-                customScale = 1.5; // 150%
-            }
-            else if (pWidth >= 2560) // 2K / 1440p
-            {
-                customScale = 1.5; // Auch 150% (wie von dir gewünscht)
-            }
-            else if (pWidth >= 1920) // Full HD
-            {
-                customScale = 2.0; // 200% (größere UI für kleine Auflösung)
-            }
-            else // Alles darunter
-            {
-                customScale = 1.0;
-            }
-
-            Debug.WriteLine($"[ResSync] Auflösung: {pWidth}x{pHeight} -> Skalierung: {customScale * 100}%");
-
-            // 3. Fenster Win32-seitig auf Hardware-Pixel setzen
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight - 3,
-                         SWP_SHOWWINDOW | SWP_NOZORDER | 0x0020);
-
-            // 4. XAML-Inhalt manuell anpassen
-            if (this.Content is FrameworkElement rootElement)
-            {
-                // Wir setzen die logische Größe so, dass sie nach der Skalierung den Schirm füllt
-                // Formel: Physische Pixel / Skalierungsfaktor
-                rootElement.Width = pWidth / customScale;
-                rootElement.Height = (pHeight - 3) / customScale;
-
-                // Die ScaleTransform anwenden
-                rootElement.RenderTransformOrigin = new Windows.Foundation.Point(0, 0);
-                rootElement.RenderTransform = new ScaleTransform()
-                {
-                    ScaleX = customScale,
-                    ScaleY = customScale
-                };
-
-                rootElement.InvalidateMeasure();
-                rootElement.UpdateLayout();
-            }
-
-            // 5. Hintergrundbild (sollte immer die vollen Hardware-Pixel ohne Zoom füllen)
-            SetBackgroundImage(pWidth, pHeight);
-        }
-
-
         #endregion autoscaling
         #region window engine
 
@@ -388,7 +511,7 @@ namespace gcmloader
     "chrome",
     "opera gx",
     "opera",
-    "edge",
+    "Microsoft Edge",
     "explorer",
     "moonlight"
 };
@@ -947,48 +1070,42 @@ namespace gcmloader
         {
             if (_isStartupGracePeriod) return;
 
-            // Handle des eigenen Fensters holen
             IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            // Handle des Fensters, das gerade im Vordergrund ist
             IntPtr foregroundHwnd = GetForegroundWindow();
 
-            // 1. Prüfen, ob unser eigenes Fenster bereits im Fokus ist
+            // KORREKTUR: Direkter Zugriff auf die Eigenschaft MediaPlayer
+            var player = BackgroundVideoPlayer.MediaPlayer;
+
             if (foregroundHwnd == selfHwnd)
             {
-                // Wenn unser Fenster den Fokus hat, aber das Overlay noch aktiv ist -> ausblenden
+                // GCM hat den Fokus
                 if (_isOverlayActive)
                 {
                     _isOverlayActive = false;
                     AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
                 }
-                return; // Nichts weiter zu tun
-            }
 
-            // Wenn wir hier ankommen, hat ein ANDERES Fenster den Fokus.
-            // Wir finden jetzt heraus, welches es ist.
-            StringBuilder classNameBuilder = new StringBuilder(256);
-            GetClassName(foregroundHwnd, classNameBuilder, classNameBuilder.Capacity);
-            string className = classNameBuilder.ToString();
-
-            // 2. Prüfen, ob der Desktop im Fokus ist
-            if (className == "Progman" || className == "WorkerW")
-            {
-                // Der Desktop ist aktiv! Unser GCM holt sich den Fokus zurück.
-                Debug.WriteLine("Desktop is active, reclaiming focus for GCM.");
-                BringToFrontAndFocus(selfHwnd);
-                // Die Logik zum Ausblenden des Overlays wird im nächsten Tick automatisch greifen,
-                // wenn unser Fenster wieder den Fokus hat (siehe Schritt 1).
+                // Video weiterspielen
+                if (player != null && player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
+                {
+                    player.Play();
+                }
             }
-            // 3. Eine andere Anwendung (weder wir noch der Desktop) ist im Fokus
             else
             {
-                // Wenn eine andere App den Fokus hat und unser Overlay noch nicht aktiv ist -> einblenden
+                // Spiel oder andere App hat den Fokus
                 if (!_isOverlayActive)
                 {
                     _isOverlayActive = true;
                     FocusLossOverlay.Opacity = 0;
                     FocusLossOverlay.Visibility = Visibility.Visible;
                     AnimateOverlayOpacity(FocusLossOverlay, 1.0);
+                }
+
+                // KORREKTUR: Video pausieren um GPU/CPU für das Spiel freizugeben
+                if (player != null && player.PlaybackSession.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Playing)
+                {
+                    player.Pause();
                 }
             }
         }
@@ -1113,12 +1230,34 @@ namespace gcmloader
             public string Key1 { get; set; }
             public string Key2 { get; set; }
             public string Function { get; set; }
+            public double HoldDuration { get; set; } // New: Seconds
             public bool Enabled { get; set; }
         }
 
-        // Die Dictionaries zum Speichern und Ausführen der Shortcuts
-        private Dictionary<(string, string), string> _activeShortcuts = new();
+        // Optimized runtime object to handle input logic without string parsing
+        private class RuntimeShortcut
+        {
+            public GamepadButtonFlags RequiredButtons; // Bitmask of buttons that must be pressed
+            public string FunctionName;
+            public double HoldDurationSeconds;
+
+            // State tracking per controller index (0-3 Xbox, 4+ PS)
+            // We use array size 10 to be safe
+            public DateTime[] HoldStartTimes = new DateTime[10];
+            public bool[] HasTriggered = new bool[10];
+
+            public RuntimeShortcut()
+            {
+                // Initialize arrays with default values
+                for (int i = 0; i < 10; i++) HoldStartTimes[i] = DateTime.MaxValue;
+            }
+        }
+        // The new main list for active shortcuts
+        private List<RuntimeShortcut> _runtimeShortcuts = new();
+
+        // Action mapping remains the same
         private Dictionary<string, System.Action> _shortcutActions = new();
+
 
         // Diese Variable speichert den Xbox-Prozess, damit wir ihn später überwachen können.
         private static Process monitoredXboxProcess = null;
@@ -1132,7 +1271,7 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher }
+        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu }
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
@@ -1172,12 +1311,7 @@ namespace gcmloader
         #region TaskManager
 
         #region Discord
-        private void DiscordCard_Tapped(object sender, TappedRoutedEventArgs e)
-        {
-            MakeSelfNonTopmost();
-            StartDiscord();
-            PlayActivationSound();
-        }
+       
 
         private void StartDiscord()
         {
@@ -1318,8 +1452,45 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         public MainWindow()
         {
+            
+
+            _ = Showwinpartandlauncher();
             Logger.Initialize();
             this.InitializeComponent();
+
+            
+    // [BOOT LOGIK] START: Overlay auf "Boot-Modus" zwingen
+    // -------------------------------------------------------------------------
+
+    // 1. Hintergrund auf 100% Schwarz setzen (statt durchsichtig)
+    FocusLossOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
+            FocusLossOverlay.Opacity = 1.0;
+            FocusLossOverlay.Visibility = Visibility.Visible;
+            _isOverlayActive = true;
+
+            // 2. Das richtige Logo basierend auf der Einstellung laden
+            string currentLauncher = AppSettings.Load<string>("launcher");
+            string bootLogoPath = currentLauncher switch
+            {
+                "steam" => "ms-appx:///Assets/steam_logo.png",
+                "playnite" => "ms-appx:///Assets/playnite_logo.png",
+                "xbox" => "ms-appx:///Assets/xbox_logo.png",
+                "gfn" => "ms-appx:///Assets/geforcenow.png", 
+                _ => "ms-appx:///Assets/gcm_ui_logo.png"
+            };
+
+            // 3. Das BILD im Overlay austauschen
+            // Da wir im XAML dem Image keinen Namen gegeben haben, greifen wir über .Child darauf zu
+            if (FocusLossOverlay.Child is Image logoImage)
+            {
+                logoImage.Source = new BitmapImage(new Uri(bootLogoPath));
+                // Optional: Größe für den Boot etwas anpassen, falls gewünscht
+                logoImage.Width = 150;
+                logoImage.Height = 150;
+            }
+
+            EnsureVrrDisabledViaRegistry();
+            SetupKeyboardAutoStartTask();
             //Scaling
             _originalScreenWidth = GetScreenWidth();
             _originalScreenWidth = GetSystemMetrics(0);
@@ -1413,7 +1584,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             LoadDynamicLauncherCards();
-            _topButtons = new List<Button> { ExitGcmButton, SettingsButton, AppLauncherButton, ShutdownButton };
+            _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { ShutdownMenuItem, RestartMenuItem, SleepMenuItem , LogOffMenuItem };
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
@@ -1431,16 +1602,36 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ShowTaskManager();
             SetupFocusWatcher();
             SetupMouseIdleBehavior();
-            // NEU: Starte einen einmaligen Timer, der die Gnadenfrist beendet.
+            // -------------------------------------------------------------------------
+            // [BOOT LOGIK] ENDE: Der Timer räumt nach 10 Sekunden auf
+            // -------------------------------------------------------------------------
             var gracePeriodTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(10) 
+                Interval = TimeSpan.FromSeconds(10)
             };
+
             gracePeriodTimer.Tick += (s, e) =>
             {
-                _isStartupGracePeriod = false; // Gnadenfrist beenden
                 gracePeriodTimer.Stop();
+                _isStartupGracePeriod = false;
+
+                // 1. Overlay ausblenden (Fade Out Animation)
+                AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
+                _isOverlayActive = false;
+
+                // 2. Overlay wieder auf "Normalzustand" zurücksetzen (für späteres Alt-Tab)
+                // Hintergrund wieder transparent machen (D8 = ca. 85%)
+                FocusLossOverlay.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(216, 0, 0, 0)); // #D8000000
+
+                // 3. Logo wieder auf das Standard-GCM Logo zurücksetzen
+                if (FocusLossOverlay.Child is Image logoImage)
+                {
+                    logoImage.Source = new BitmapImage(new Uri("ms-appx:///Assets/gcm_ui_logo.png"));
+                    logoImage.Width = 200;  // Originalgröße aus deinem XAML wiederherstellen
+                    logoImage.Height = 200;
+                }
             };
+
             gracePeriodTimer.Start();
 
             //after 10 seconds AND Start Windows Partmode
@@ -1564,7 +1755,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 NoAppsFoundText.Visibility = AllInstalledApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 if (AppLauncher.Visibility == Visibility.Visible && AppGridView.Items.Count > 0)
                 {
-                    AppGridView.SelectedIndex = 0;
+                    if (AppGridView.SelectedIndex == -1) AppGridView.SelectedIndex = 0;
                 }
             });
         }
@@ -2237,25 +2428,29 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion overlay window
 
+        [DllImport("dwmapi.dll")]
+        static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
         private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
         {
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
-            long exStyle = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-            IntPtr style = GetWindowLongPtr(hwnd, GWL_STYLE);
+            // 1. Randlos-Stil setzen
+            SetWindowLongPtr(hwnd, GWL_STYLE, (IntPtr)0x80000000); // WS_POPUP
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)0);
 
-            // WS_EX_TOOLWINDOW sorgt dafür, dass es NICHT im Alt-Tab erscheint
-            SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)(exStyle | 0x00000080L | 0x00080000L));
+            // 2. VRR / Schwarzbild Fix: Erzwinge Standard-Desktop-Rendering
+            int disableFullscreenTransform = 1;
+            DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, ref disableFullscreenTransform, sizeof(int));
 
-            style = (IntPtr)((long)style & ~WS_OVERLAPPEDWINDOW);
-            SetWindowLongPtr(hwnd, GWL_STYLE, style);
+            int policy = DWMFLIP_NONE;
+            DwmSetWindowAttribute(hwnd, DWMWA_FLIP3D_POLICY, ref policy, sizeof(int));
 
-            int screenWidth = GetScreenWidth();
-            int screenHeight = GetScreenHeight();
-
-            // JETZT: Exakte Maße nutzen (kein -3 mehr)
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, screenWidth, screenHeight, SWP_SHOWWINDOW);
+            // 3. Initiale Größe setzen
+            ForceDpiRedraw();
         }
+
+        [DllImport("user32.dll")]
+        static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
         private bool IsWindowInForeground()
         {
@@ -2777,81 +2972,145 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return principal.IsInRole(WindowsBuiltInRole.Administrator);
             }
         }
+
+        #region Hybrid Wallpaper Logic (Live & Static)
+
         private void SetBackgroundImage(int width, int height)
         {
             try
             {
+                string rawPath = "";
+                bool useGcmWallpaper = false;
+
+                // 1. Einstellung laden mit Fehlerprüfung
                 try
                 {
-                    bool gcmwallpapercheck = AppSettings.Load<bool>("gcmwallpaper");
+                    useGcmWallpaper = AppSettings.Load<bool>("gcmwallpaper");
                 }
-                catch
-                {    // If the setting is not found, default to false
-                    AppSettings.Save("gcmwallpaper", false);
+                catch { useGcmWallpaper = false; }
+
+                if (useGcmWallpaper)
+                {
+                    try { rawPath = AppSettings.Load<string>("gcmwallpaperpath"); } catch { rawPath = ""; }
                 }
 
-                string imagePath;
-                bool gcmwallpaper = AppSettings.Load<bool>("gcmwallpaper");
-
-                if (gcmwallpaper)
+                // 2. FALLBACK auf Windows-Standard, falls GCM-Pfad leer oder Datei nicht existiert
+                if (string.IsNullOrEmpty(rawPath) || !File.Exists(rawPath.Trim('"').Trim()))
                 {
-                    // Custom GCM wallpaper logic
-                    imagePath = Settwallpaper(); // <- deine eigene Methode
-                }
-                else
-                {
-                    // Fallback: get the current desktop wallpaper from registry
-                    imagePath = Registry.GetValue(
-                        @"HKEY_CURRENT_USER\Control Panel\Desktop",
-                        "WallPaper",
-                        "") as string;
+                    rawPath = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Control Panel\Desktop", "WallPaper", "") as string;
+                    Debug.WriteLine("[Wallpaper] Nutze Windows Fallback: " + rawPath);
                 }
 
-                if (!File.Exists(imagePath))
+                // 3. Letzte Prüfung: Wenn auch Windows-Pfad leer oder ungültig, Abbruch vor Crash
+                if (string.IsNullOrEmpty(rawPath))
                 {
-                    Debug.WriteLine("Wallpaper path not found: " + imagePath);
+                    Debug.WriteLine("[Wallpaper] Kein Wallpaper gefunden. Nutze leeren Hintergrund.");
+                    StopLiveWallpaper();
+                    BackgroundImage.Source = null;
                     return;
                 }
 
-                // Create an Image control
-                var backgroundImage = new Microsoft.UI.Xaml.Controls.Image
-                {
-                    Source = new BitmapImage(new Uri(imagePath, UriKind.Absolute)),
-                    Stretch = Stretch.UniformToFill, // WICHTIG: Verhindert Verzerrung
-                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch
-                };
+                string cleanPath = rawPath.Trim('"').Trim();
 
-                backgroundImage.SetValue(Canvas.ZIndexProperty, -1);
-
-                if (this.Content is Grid mainGrid)
+                // Falls Datei trotz Registry-Eintrag nicht existiert
+                if (!File.Exists(cleanPath))
                 {
-                    var existingBackground = mainGrid.Children.OfType<Microsoft.UI.Xaml.Controls.Image>().FirstOrDefault();
-                    if (existingBackground != null)
-                    {
-                        existingBackground.Source = backgroundImage.Source;
-                    }
-                    else
-                    {
-                        mainGrid.Children.Insert(0, backgroundImage);
-                    }
+                    Debug.WriteLine("[Wallpaper] Datei existiert nicht: " + cleanPath);
+                    return;
+                }
+
+                // 4. WEICHE: Video oder Bild
+                string extension = Path.GetExtension(cleanPath).ToLower();
+                string[] videoExtensions = { ".mp4", ".webm", ".mkv", ".mov", ".wmv", ".avi" };
+
+                if (videoExtensions.Contains(extension))
+                {
+                    Debug.WriteLine("[Wallpaper] Starte Live-Video: " + cleanPath);
+                    SetupLiveWallpaper(cleanPath);
                 }
                 else
                 {
-                    Grid grid = new Grid();
-                    grid.Children.Add(backgroundImage);
+                    Debug.WriteLine("[Wallpaper] Setze statisches Bild: " + cleanPath);
+                    StopLiveWallpaper();
 
-                    if (this.Content != null)
-                        grid.Children.Add((UIElement)this.Content);
-
-                    this.Content = grid;
+                    // Sicherer Bild-Ladevorgang
+                    try
+                    {
+                        var bitmap = new BitmapImage();
+                        bitmap.UriSource = new Uri(cleanPath, UriKind.Absolute);
+                        BackgroundImage.Source = bitmap;
+                        BackgroundImage.Visibility = Visibility.Visible;
+                        BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("[Wallpaper] Fehler beim Laden des Bildes: " + ex.Message);
+                        // Letzter Notnagel: Hintergrund schwarz/leer lassen statt Absturz
+                        BackgroundImage.Source = null;
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("Error setting wallpaper: " + ex.Message);
+                Debug.WriteLine($"[Wallpaper Critical Error] {ex.Message}");
             }
         }
+
+        private void SetupLiveWallpaper(string videoPath)
+        {
+            try
+            {
+                StopLiveWallpaper();
+
+                var player = new Windows.Media.Playback.MediaPlayer
+                {
+                    Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute)),
+                    IsLoopingEnabled = true,
+                    IsMuted = true,
+                    AudioCategory = Windows.Media.Playback.MediaPlayerAudioCategory.Other
+                };
+
+                // Falls das Video korrupt ist, fangen wir den Fehler ab
+                player.MediaFailed += (s, e) =>
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        Debug.WriteLine("[LiveWallpaper] Media Failed! Wechsel zu Fallback-Bild.");
+                        // Falls das Video scheitert, versuchen wir das normale Windows-Bild zu laden
+                        SetBackgroundImage(0, 0);
+                    });
+                };
+
+                BackgroundVideoPlayer.SetMediaPlayer(player);
+                BackgroundVideoPlayer.Visibility = Visibility.Visible;
+                BackgroundImage.Visibility = Visibility.Collapsed;
+
+                player.Play();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[LiveWallpaper Error] {ex.Message}");
+                StopLiveWallpaper();
+            }
+        }
+
+        private void StopLiveWallpaper()
+        {
+            try
+            {
+                var player = BackgroundVideoPlayer.MediaPlayer;
+                if (player != null)
+                {
+                    player.Pause();
+                    BackgroundVideoPlayer.SetMediaPlayer(null);
+                }
+            }
+            catch { }
+        }
+
+      
+
+        #endregion
 
         private string Settwallpaper()
         {
@@ -3509,7 +3768,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         {
                             UseShellExecute = true
                         });
-                        return; // Fertig.
+                        return;
+                    case "gfn":
+                        await StartGfn();
+                        return;
 
                     case "playnite":
                         // Starte Playnite oder bringe es in den Vordergrund
@@ -3667,61 +3929,80 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private async void ConsoleModeToShell()
         {
-            
-
+            // Die Pfade zur Windows Shell Registry
             const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
             const string valueName = "Shell";
 
             try
             {
-                // 1. Pfad dynamisch ermitteln
+                // 1. SCHUTZ: Prüfen, ob wir Admin-Rechte haben. Ohne diese stürzt die App bei Registry-Schreibzugriffen ab.
+                if (!IsAdministrator())
+                {
+                    Debug.WriteLine("[ConsoleMode] ERROR: Keine Administratorrechte. Überspringe Shell-Registrierung.");
+                    return;
+                }
+
+                // 2. PFAD ERMITTELN: Pfad der aktuellen .exe holen und in Anführungszeichen setzen
                 string targetExecutable = Process.GetCurrentProcess().MainModule.FileName;
                 if (!targetExecutable.StartsWith("\""))
                 {
                     targetExecutable = $"\"{targetExecutable}\"";
                 }
 
+                // 3. REGISTRY ÖFFNEN: LocalMachine erfordert Admin-Rechte
                 using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
                 {
                     if (key == null)
                     {
-                        Console.WriteLine($"[ERROR] Registry key '{keyName}' not found or no access.");
+                        Debug.WriteLine($"[ConsoleMode] ERROR: Registry-Pfad '{keyName}' konnte nicht geöffnet werden.");
                         return;
                     }
 
-                    // 3. NEU: Neuen Shell-Wert mit bis zu 3 Versuchen setzen
+                    // 4. RETRY-LOGIK: Wir versuchen es 3x, falls Windows den Zugriff kurzzeitig blockiert
                     const int maxRetries = 3;
                     bool success = false;
+
                     for (int i = 0; i < maxRetries; i++)
                     {
-                        key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
-
-                        // Kurze Pause, damit Windows die Änderung verarbeiten kann
-                        await Task.Delay(100);
-
-                        string currentValue = key.GetValue(valueName)?.ToString();
-                        if (currentValue != null && currentValue.Equals(targetExecutable, StringComparison.OrdinalIgnoreCase))
+                        try
                         {
-                            Console.WriteLine($"[OK] Shell successfully set on attempt {i + 1}.");
-                            success = true;
-                            break; // Erfolg, die Schleife wird beendet
+                            // Wert setzen
+                            key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
+
+                            // Kurze Pause zur Verarbeitung durch das System
+                            await Task.Delay(150);
+
+                            // Überprüfung: Hat es geklappt?
+                            string currentValue = key.GetValue(valueName)?.ToString();
+                            if (currentValue != null && currentValue.Equals(targetExecutable, StringComparison.OrdinalIgnoreCase))
+                            {
+                                Debug.WriteLine($"[ConsoleMode] Shell erfolgreich gesetzt im Versuch {i + 1}.");
+                                success = true;
+                                break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[ConsoleMode] Versuch {i + 1} fehlgeschlagen: {ex.Message}");
                         }
 
-                        Console.WriteLine($"[WARN] Attempt {i + 1} of {maxRetries} failed. Retrying...");
                         await Task.Delay(500); // Längere Pause vor dem nächsten Versuch
+                    }
+
+                    if (!success)
+                    {
+                        Debug.WriteLine("[ConsoleMode] FATAL: Shell konnte nach mehreren Versuchen nicht geändert werden.");
                     }
                 }
             }
             catch (UnauthorizedAccessException)
             {
-                Console.WriteLine("[ERROR] Access Denied. Run the application as an administrator.");
+                Debug.WriteLine("[ConsoleMode] Zugriff verweigert. Die App muss als Administrator ausgeführt werden.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] An unexpected error occurred in ConsoleModeToShell: {ex.Message}");
+                Debug.WriteLine($"[ConsoleMode] Unbekannter Fehler in ConsoleModeToShell: {ex.Message}");
             }
-
-            
         }
         private void SettingsVerify()
         {
@@ -3742,18 +4023,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         if (string.IsNullOrEmpty(steamPath) || !File.Exists(steamPath))
                             throw new FileNotFoundException("The Steam path is invalid.");
                         break;
+
                     case "playnite":
                         string playnitePath = AppSettings.Load<string>("playnitelauncherpath");
                         if (string.IsNullOrEmpty(playnitePath) || !File.Exists(playnitePath))
                             throw new FileNotFoundException("The Playnite path is invalid.");
                         break;
+
                     case "custom":
                         string customPath = AppSettings.Load<string>("customlauncherpath");
                         if (string.IsNullOrEmpty(customPath) || !File.Exists(customPath))
                             throw new FileNotFoundException("The Custom Launcher path is invalid.");
                         break;
+
                     case "xbox":
+                        // Xbox braucht keinen Pfad, da es über Protokoll gestartet wird
                         break;
+
+                    // --- NEU: GFN HINZUGEFÜGT ---
+                    case "gfn":
+                        string gfnPath = AppSettings.Load<string>("gfnlauncherpath");
+                        // Wir prüfen, ob der Pfad gültig ist
+                        if (string.IsNullOrEmpty(gfnPath) || !File.Exists(gfnPath))
+                            throw new FileNotFoundException("The GeForce Now path is invalid.");
+                        break;
+                    // ----------------------------
+
                     default:
                         throw new InvalidOperationException($"The launcher '{launcher}' is invalid.");
                 }
@@ -3763,11 +4058,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             catch (Exception ex)
             {
                 // =================================================================
-                // NEW: Write error to a text file and open it for the user
+                // CRASH REPORT LOGIK
                 // =================================================================
                 string logPath = Path.Combine(AppContext.BaseDirectory, "crash.log");
 
-                // 1. Create a user-friendly error message.
                 string errorMessage =
                     "================================================================\r\n" +
                     "                GCM CRASH REPORT\r\n" +
@@ -3782,20 +4076,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     $"{ex.Message}\r\n" +
                     "----------------------------------------------------------------\r\n";
 
-                // 2. Write the message to the crash.log file.
                 File.WriteAllText(logPath, errorMessage);
 
-                // 3. Open the log file in the default text editor (Notepad).
                 try
                 {
                     Process.Start(new ProcessStartInfo(logPath) { UseShellExecute = true });
                 }
-                catch
-                {
-                    // Fallback in case even Notepad can't be started.
-                }
+                catch { }
 
-                // 4. Exit the application cleanly.
                 BackToWindows();
             }
         }
@@ -4245,7 +4533,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Führe die 10-sekündige Verzögerung nur aus, wenn es NICHT der Xbox-Launcher ist.
             if (launcher != "xbox")
             {
-                Debug.WriteLine("Launcher ist nicht Xbox, warte 10 Sekunden für den WinPart-Modus...");
+                Debug.WriteLine($"Launcher ist {launcher}, warte 10 Sekunden für den WinPart-Modus...");
 
                 launcher = AppSettings.Load<string>("launcher");
                 switch (launcher)
@@ -4259,6 +4547,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     case "custom":
                         await StartOtherLauncher();
                         break;
+
+                    // --- NEU HINZUFÜGEN ---
+                    case "gfn":
+                        await StartGfn();
+                        break;
+                    // ---------------------
+
                     default:
                         AppSettings.Save("launcher", "steam");
                         await StartSteam();
@@ -4276,7 +4571,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 await StartXbox();
             }
 
-           
+
+            ConsoleModeToShell();
+
         }
         #endregion winparts
 
@@ -4538,21 +4835,122 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private async Task StartGfn()
+        {
+            // Konstante für Maximieren (falls nicht oben definiert)
+            const int SW_SHOWMAXIMIZED = 3;
+
+            try
+            {
+                Debug.WriteLine("[GCM] Prüfe, ob GeForce Now bereits läuft...");
+
+                // -----------------------------------------------------------
+                // FALL 1: GFN LÄUFT BEREITS -> WECHSELN & MAXIMIEREN
+                // -----------------------------------------------------------
+                Process[] runningProcs = Process.GetProcessesByName("GeForceNOW");
+                foreach (var p in runningProcs)
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero && IsWindowVisible(p.MainWindowHandle))
+                    {
+                        Debug.WriteLine("[GCM] GeForce Now läuft bereits. Hole Fenster nach vorne.");
+
+                        // GCM Platz machen lassen
+                        MakeSelfNonTopmost();
+
+                        // Fokus erzwingen
+                        await ForcefullyBringToForeground(p.MainWindowHandle);
+
+                        // --- NEU: ZWINGEND MAXIMIEREN ---
+                        ShowWindow(p.MainWindowHandle, SW_SHOWMAXIMIZED);
+
+                        return; // Fertig, nicht neu starten!
+                    }
+                }
+
+                // -----------------------------------------------------------
+                // FALL 2: GFN STARTEN (NEUSTART)
+                // -----------------------------------------------------------
+
+                Debug.WriteLine("[GCM] GeForce Now läuft nicht. Starte neu...");
+
+                string gfnPath = AppSettings.Load<string>("gfnlauncherpath");
+
+                if (string.IsNullOrWhiteSpace(gfnPath) || !File.Exists(gfnPath))
+                {
+                    string roamingPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    string lnkPath = Path.Combine(roamingPath, @"Microsoft\Windows\Start Menu\Programs\NVIDIA GeForce NOW.lnk");
+
+                    if (File.Exists(lnkPath)) gfnPath = lnkPath;
+                    else throw new FileNotFoundException("GeForce Now path not found.");
+                }
+
+                // Starten
+                Process.Start(new ProcessStartInfo(gfnPath) { UseShellExecute = true });
+
+                // Warten auf das Fenster (Loop)
+                int attempts = 0;
+                IntPtr gfnHwnd = IntPtr.Zero;
+
+                while (attempts < 40) // ca. 20 Sekunden Geduld
+                {
+                    await Task.Delay(500);
+
+                    Process[] procs = Process.GetProcessesByName("GeForceNOW");
+                    foreach (var p in procs)
+                    {
+                        if (p.MainWindowHandle != IntPtr.Zero && IsWindowVisible(p.MainWindowHandle))
+                        {
+                            gfnHwnd = p.MainWindowHandle;
+                            break;
+                        }
+                    }
+
+                    if (gfnHwnd != IntPtr.Zero) break;
+                    attempts++;
+                }
+
+                // Wenn Fenster gefunden wurde
+                if (gfnHwnd != IntPtr.Zero)
+                {
+                    Debug.WriteLine("[GCM] GeForce Now Fenster gefunden. Fokus setzen.");
+                    MakeSelfNonTopmost();
+
+                    await ForcefullyBringToForeground(gfnHwnd);
+
+                    // --- NEU: ZWINGEND MAXIMIEREN ---
+                    // Kurze Pause, damit das Fenster bereit ist
+                    await Task.Delay(100);
+                    ShowWindow(gfnHwnd, SW_SHOWMAXIMIZED);
+                }
+                else
+                {
+                    Debug.WriteLine("[GCM] GeForce Now gestartet, aber kein Fenster-Handle gefunden.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in StartGfn: {ex.Message}");
+                await messagebox("Could not start or switch to GeForce Now.");
+            }
+        }
+
 
         #endregion launcher
         #region start
         // ERSETZE DEINE KOMPLETTE Start()-METHODE MIT DIESER VERSION
 
+        #region start
         private async Task Start()
         {
-            
-            // Warten, bis das Video fertig ist
+            // Warten, bis das Video fertig ist (falls aktiv)
             while (startupVideoFinished == false)
             {
                 await Task.Delay(50);
             }
+
             SetupLogging();
             uac("off");
+
             // ===================================
             SettingsVerify();
             KeyboardRedirector.EnableRedirect();
@@ -4562,17 +4960,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             IsJoyxoffInstalledAndStart();
             EnsureTouchKeyboardServiceIsRunning();
             SetupWingamepadTask();
-            await Showwinpartandlauncher();
             cssloader();
-            ConsoleModeToShell();
             preaudio(true, false);
             prestartlist();
             await StartLosslessScaling();
             SwitchToConfiguredLauncher();
+
             await Task.Delay(500); // Gibt dem Launcher kurz Zeit zu starten
-            AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
-            _isOverlayActive = false;
         }
+        #endregion start
         #endregion start
         #region TaskManager
         /// <summary>
@@ -4744,59 +5140,42 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void LoadDynamicLauncherCards()
         {
-            // First, initialize the list for gamepad navigation.
             _launcherAreaButtons = new List<Border>();
+            LauncherAreaPanel.Children.Clear();
 
-            // 1. Get the configured launcher from settings to determine the main icon.
             string launcher = AppSettings.Load<string>("launcher");
-            string mainLauncherIconPath = null;
-
-            // 2. Select the correct icon path based on the setting.
-            switch (launcher)
+            string mainLauncherIconPath = launcher switch
             {
-                case "steam":
-                    mainLauncherIconPath = "ms-appx:///Assets/steam_logo.png";
-                    break;
-                case "playnite":
-                    mainLauncherIconPath = "ms-appx:///Assets/playnite_logo.png";
-                    break;
-                case "xbox":
-                    mainLauncherIconPath = "ms-appx:///Assets/xbox_logo.png";
-                    break;
+                "steam" => "ms-appx:///Assets/steam_logo.png",
+                "playnite" => "ms-appx:///Assets/playnite_logo.png",
+                "xbox" => "ms-appx:///Assets/xbox_logo.png",
+                "gfn" => "ms-appx:///Assets/geforcenow.png", 
+                _ => "ms-appx:///Assets/ownlauncher.png"
+            };
 
-                default:
-                    mainLauncherIconPath = "ms-appx:///Assets/ownlauncher.png";
-                    break;
-            }
-
-            // 3. Create the main launcher card item WITH the icon path.
+            // 1. MAIN LAUNCHER (Wird groß erstellt: 250x250)
             var mainLauncherItem = new LauncherCardItem
             {
                 Name = "Main Launcher",
-                ImagePath = mainLauncherIconPath, // This will be null for the default icon.
+                ImagePath = mainLauncherIconPath,
                 TapAction = (s, e) => SwitchToConfiguredLauncher()
             };
-            var mainLauncherCard = CreateLauncherCard(mainLauncherItem);
-            LauncherAreaPanel.Children.Add(mainLauncherCard);
-            _launcherAreaButtons.Add(mainLauncherCard);
+            var mainCard = CreateLauncherCard(mainLauncherItem);
+            LauncherAreaPanel.Children.Add(mainCard);
+            _launcherAreaButtons.Add(mainCard);
 
-            // 4. Create and add the Discord card.
+            // 2. DISCORD (Wird klein erstellt: 170x170)
             var discordItem = new LauncherCardItem
             {
                 Name = "Discord",
                 ImagePath = "ms-appx:///Assets/discord.png",
-                TapAction = (s, e) =>
-                {
-                    MakeSelfNonTopmost();
-                    StartDiscord();
-                    PlayActivationSound();
-                }
+                TapAction = (s, e) => { MakeSelfNonTopmost(); StartDiscord(); PlayActivationSound(); }
             };
             var discordCard = CreateLauncherCard(discordItem);
             LauncherAreaPanel.Children.Add(discordCard);
             _launcherAreaButtons.Add(discordCard);
 
-            // 5. Load and add the 5 custom app slots from settings.toml.
+            // 3. DIE 5 CUSTOM CARDS (Alle klein: 170x170)
             for (int i = 1; i <= 5; i++)
             {
                 try
@@ -4805,32 +5184,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     string imagePath = AppSettings.Load<string>($"button{i}image");
                     string args = AppSettings.Load<string>($"button{i}args") ?? "";
 
-                    // Only add if EXE and image are valid and exist.
-                    if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath) &&
-                        !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                     {
                         var customItem = new LauncherCardItem
                         {
-                            Name = $"Custom App {i}",
+                            Name = $"App {i}",
                             ImagePath = imagePath,
-                            ExePath = exePath,
-                            Arguments = args,
                             TapAction = (s, e) =>
                             {
                                 MakeSelfNonTopmost();
-                                try
-                                {
-                                    Process.Start(new ProcessStartInfo(exePath)
-                                    {
-                                        Arguments = args,
-                                        UseShellExecute = true
-                                    });
-                                    PlayActivationSound();
-                                }
-                                catch (Exception ex)
-                                {
-                                    Debug.WriteLine($"[ERROR] Failed to start custom app {i}: {ex.Message}");
-                                }
+                                Process.Start(new ProcessStartInfo(exePath) { Arguments = args, UseShellExecute = true });
+                                PlayActivationSound();
                             }
                         };
                         var customCard = CreateLauncherCard(customItem);
@@ -4838,10 +5202,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         _launcherAreaButtons.Add(customCard);
                     }
                 }
-                catch (Exception)
-                {
-                    // Setting not found, just ignore it and continue with the next slot.
-                }
+                catch { }
             }
         }
 
@@ -4853,86 +5214,78 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private Border CreateLauncherCard(LauncherCardItem item)
         {
-            double cardWidth = (item.Name == "Main Launcher") ? 300 : 150;
-            double cardHeight = (item.Name == "Main Launcher") ? 250 : 180;
-            UIElement cardContent;
+            var contentGrid = new Grid();
 
-            if (item.Name == "Main Launcher")
-            {
-                // If an ImagePath is provided, create a StackPanel with the Image and a TextBlock.
-                if (!string.IsNullOrEmpty(item.ImagePath))
-                {
-                    cardContent = new StackPanel
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Spacing = 15,
-                        Children = {
-                    new Image
-                    {
-                        Source = new BitmapImage(new Uri(item.ImagePath)),
-                        Width = 128,
-                        Height = 128,
-                        Stretch = Stretch.Uniform
-                    },
-                    new TextBlock
-                    {
-                        Text = "LAUNCHER",
-                        FontSize = 22,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        Foreground = new SolidColorBrush(Colors.White),
-                        HorizontalAlignment = HorizontalAlignment.Center
-                    }
-                }
-                    };
-                }
-                else // Otherwise, fall back to the default home icon and text.
-                {
-                    cardContent = new StackPanel
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Spacing = 15,
-                        Children = {
-                    new FontIcon { Glyph = "\uE80F", FontSize = 48, Foreground = new SolidColorBrush(Colors.White) },
-                    new TextBlock { Text = "Launcher", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Colors.White) }
-                }
-                    };
-                }
-            }
-            else // For all other cards (Discord, custom apps)
-            {
-                cardContent = new Image
-                {
-                    Source = new BitmapImage(new Uri(item.ImagePath)),
-                    Width = 80,
-                    Height = 80,
-                    Stretch = Stretch.Uniform,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-            }
+            // LOGIK: Ist es der Haupt-Launcher?
+            bool isMainLauncher = (item.Name == "Main Launcher");
 
-            // This part of the method remains exactly the same
-            var cardBorder = new Border
+            // 1. DIE GLASS-SCHICHT (Clear Glass Look)
+            var glassEffect = new Border
             {
-                Width = cardWidth,
-                Height = cardHeight,
-                Background = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), // #33FFFFFF
-                CornerRadius = new CornerRadius(20),
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Colors.Gray),
-                Child = cardContent,
-                Tag = item
+                Name = "GlassBase",
+                CornerRadius = new CornerRadius(15),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
+                BorderThickness = new Thickness(1.0),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255))
             };
 
-            if (item.TapAction != null)
+            // 2. TITEL-BEREICH (Oben)
+            var titleBlurLayer = new Border
             {
-                cardBorder.Tapped += (s, e) => item.TapAction(s, e);
-            }
+                VerticalAlignment = VerticalAlignment.Top,
+                Height = isMainLauncher ? 55 : 40, // Kleinerer Balken für Apps
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(130, 20, 20, 20)),
+                CornerRadius = new CornerRadius(15, 15, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = item.Name.ToUpper(),
+                    FontSize = isMainLauncher ? 12 : 10, // Kleinere Schrift für Apps
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                    TextAlignment = TextAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(8, 0, 8, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1
+                }
+            };
+
+            // 3. ICON (Zentral)
+            var iconImage = new Image
+            {
+                Source = new BitmapImage(new Uri(item.ImagePath ?? "ms-appx:///Assets/game.png")),
+                Width = isMainLauncher ? 95 : 65,  // Deutlicher Größenunterschied
+                Height = isMainLauncher ? 95 : 65,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, isMainLauncher ? 20 : 10, 0, 0),
+                RenderTransform = new CompositeTransform()
+            };
+
+            contentGrid.Children.Add(glassEffect);
+            contentGrid.Children.Add(titleBlurLayer);
+            contentGrid.Children.Add(iconImage);
+
+            var cardBorder = new Border
+            {
+                // MASSE: Launcher groß, Rest klein
+                Width = isMainLauncher ? 250 : 170,
+                Height = isMainLauncher ? 250 : 170,
+                CornerRadius = new CornerRadius(15),
+                Margin = new Thickness(6, 0, 6, 0), // Näher zusammenrücken
+                Child = contentGrid,
+                Tag = item,
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new CompositeTransform()
+            };
+
+            cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
+            if (item.TapAction != null) cardBorder.Tapped += (s, e) => item.TapAction(s, e);
 
             return cardBorder;
         }
+
+        
 
         private void StartAutoTaskRefresh()
         {
@@ -5607,21 +5960,23 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Task Manager",
     
     // Specific Apps to always ignore
-    "Steam", // The main Steam window, not games
-   "Big-Picture-Modus", // NEW
-    "Big Picture Mode",
-    "Playnite",// NEW
-    "Realtek Audio Console",
-    "NVIDIA App",
-    "Xbox.Apps.TCUI",
-    "Xbox"
+            "Steam",
+            "Big-Picture-Modus",
+            "Big Picture Mode",
+            "Playnite",
+            "Realtek Audio Console",
+            "NVIDIA App",
+            "Xbox.Apps.TCUI",
+            "Xbox",
+            "GeForce NOW"
 };
 
-        private static readonly Dictionary<string, string> _nameOverrides = new()
-{
-    { "Steam Client WebHelper", "Steam" },
-    { "ApplicationFrameHost", "UWP Host" }
-};
+        private static readonly string[] _excludedProcessNames = new[]
+        {
+            "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
+            "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game",
+            "GeForceNOW" 
+        };
 
         [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d")]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -5706,14 +6061,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             GW_CHILD = 5,
             GW_ENABLEDPOPUP = 6
         }
-
-
-        private static readonly string[] _excludedProcessNames = new[]
-{
-    "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
-    "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game"
-};
-        
 
         private static bool IsCloaked(IntPtr hWnd)
         {
@@ -5812,151 +6159,261 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "\\Battle.net\\"
 };
 
+
+
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
-            // This part remains unchanged
-            Color avgColor = Color.FromArgb(255, 60, 60, 60);
-            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
-            {
-                try
-                {
-                    using (var iconBmp = GetBitmapFromExeIcon(exePath))
-                    {
-                        if (iconBmp != null) avgColor = GetAverageColor(iconBmp);
-                    }
-                }
-                catch { /* Ignore */ }
-            }
-            var gradient = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0.5, 0),
-                EndPoint = new Windows.Foundation.Point(0.5, 1),
-                GradientStops = new GradientStopCollection
-                {
-                    new GradientStop { Color = Color.FromArgb(220, avgColor.R, avgColor.G, avgColor.B), Offset = 0.0 },
-                    new GradientStop { Color = Color.FromArgb(220, 20, 20, 20), Offset = 1.0 }
-                }
-            };
-
-            // ### START OF FLICKER FIX ###
             var contentGrid = new Grid();
 
-            // 1. The Image control that will hold the loaded (poster) image.
-            // It starts invisible (Opacity=0) and stretches to fill the card.
+            // 1. POSTER HINTERGRUND
             var loadedImage = new Image
             {
                 Name = "LoadedImage",
-                Stretch = Stretch.UniformToFill, // Fills the card
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Opacity = 0.0 // Starts invisible
+                Stretch = Stretch.UniformToFill,
+                Opacity = 0.0,
+                RenderTransform = new CompositeTransform()
             };
-            contentGrid.Children.Add(loadedImage); // Add first (bottom layer)
 
-            // 2. The default icon (game.png or exe icon)
-            // This is visible by default (Opacity=1) and sits on top.
-            var iconImage = new Image
+            // 2. DIE GLASS-SCHICHT (Der "Clear Glass" Container)
+            var glassEffect = new Border
             {
-                Name = "IconImage",
-                Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
-                Width = 64,
-                Height = 64,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                Name = "GlassBase",
+                CornerRadius = new CornerRadius(10),
+                // Ein sehr feiner, fast weißer Rand für die Lichtbrechung an den Kanten
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
+                BorderThickness = new Thickness(1.0),
+                // --- DER TRICK FÜR CLEAR LOOK ---
+                // Sehr niedriger Alpha-Wert (20-30 statt 100), damit es klarer wirkt
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255))
             };
-            contentGrid.Children.Add(iconImage); // Add second (top layer)
 
-            // 3. Text elements (unchanged)
-            var textBackground = new Border
+            // 3. TITEL-BEREICH (Exakt wie Launcher Card, aber etwas "Cleaner")
+            var titleBlurLayer = new Border
             {
-                Height = 80,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new LinearGradientBrush
+                VerticalAlignment = VerticalAlignment.Top,
+                Height = 55,
+                // Dunkel, aber transparent für den Kontrast
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(130, 20, 20, 20)),
+                CornerRadius = new CornerRadius(10, 10, 0, 0),
+                Child = new TextBlock
                 {
-                    StartPoint = new Windows.Foundation.Point(0.5, 0),
-                    EndPoint = new Windows.Foundation.Point(0.5, 1),
-                    GradientStops = new GradientStopCollection
-                    {
-                        new GradientStop { Color = Color.FromArgb(0, 0, 0, 0), Offset = 0.0 },
-                        new GradientStop { Color = Color.FromArgb(180, 0, 0, 0), Offset = 1.0 }
-                    }
+                    Text = name.ToUpper(),
+                    FontSize = 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                    TextAlignment = TextAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(12, 0, 12, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1
                 }
             };
-            var titleText = new TextBlock
+
+            // 4. ICON
+            var iconImage = new Image
             {
-                Name = "TitleText",
-                Text = name,
-                Foreground = new SolidColorBrush(Colors.White),
-                FontSize = 16,
-                Margin = new Thickness(10, 0, 10, 10),
-                VerticalAlignment = VerticalAlignment.Bottom,
-                TextWrapping = TextWrapping.WrapWholeWords,
-                MaxLines = 2
+                Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
+                Width = 80,
+                Height = 80,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 20, 0, 0),
+                RenderTransform = new CompositeTransform()
             };
-            contentGrid.Children.Add(textBackground);
-            contentGrid.Children.Add(titleText);
+
+            // 5. BANNER-BEREICH (Buttons)
+            var bannerContainer = new Border
+            {
+                Name = "ButtonBanner",
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Height = 50,
+                Opacity = 0,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(90, 10, 10, 10)),
+                CornerRadius = new CornerRadius(0, 0, 10, 10),
+                Child = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Spacing = 15 }
+            };
+            SetupButtonLayout((StackPanel)bannerContainer.Child, "Xbox");
+
+            // Ebenen stapeln
+            contentGrid.Children.Add(loadedImage);
+            contentGrid.Children.Add(glassEffect);
+            contentGrid.Children.Add(titleBlurLayer);
+            contentGrid.Children.Add(iconImage);
+            contentGrid.Children.Add(bannerContainer);
 
             var cardBorder = new Border
             {
                 Width = 220,
-                Height = 260,
-                Background = gradient, // The gradient is the permanent background
-                CornerRadius = new CornerRadius(15),
-                Margin = new Thickness(10),
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)),
+                Height = 280,
+                CornerRadius = new CornerRadius(10),
+                Margin = new Thickness(10, 0, 10, 0),
+                Child = contentGrid,
                 Tag = new CardTag { Process = proc, Hwnd = hwnd },
-                Child = contentGrid
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new CompositeTransform()
             };
 
-            // 4. Call the load method, passing BOTH Image controls
-            LoadCardImageAsync(cardBorder, loadedImage, iconImage, titleText, name, exePath);
-            // ### END OF FLICKER FIX ###
+            // --- EFFEKTE AKTIVIEREN ---
+            // Der Blur-Effekt (Verschwommenheit) bleibt, aber durch das hellere Overlay wirkt es klarer
+            cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
+            LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath);
 
             return cardBorder;
         }
 
-
-
-
-
-
-        private Bitmap GetBitmapFromExeIcon(string exePath)
+        private void ApplyNativeWinUI3Blur(Border target)
         {
-            Icon icon = Icon.ExtractAssociatedIcon(exePath);
-            return icon?.ToBitmap();
-        }
-        private Color GetAverageColor(Bitmap bmp)
-        {
-            long r = 0, g = 0, b = 0;
-            int total = 0;
-
-            for (int y = 0; y < bmp.Height; y += 2)
+            if (target == null) return;
+            try
             {
-                for (int x = 0; x < bmp.Width; x += 2)
-                {
-                    var pixel = bmp.GetPixel(x, y);
-                    r += pixel.R;
-                    g += pixel.G;
-                    b += pixel.B;
-                    total++;
-                }
+                var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(target);
+                if (visual == null) return;
+
+                var compositor = visual.Compositor;
+                var backdropBrush = compositor.CreateBackdropBrush();
+                var spriteVisual = compositor.CreateSpriteVisual();
+                spriteVisual.Brush = backdropBrush;
+
+                var bindSize = compositor.CreateExpressionAnimation("host.Size");
+                bindSize.SetReferenceParameter("host", visual);
+                spriteVisual.StartAnimation("Size", bindSize);
+
+                Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(target, spriteVisual);
             }
-
-            byte avgR = (byte)(r / total);
-            byte avgG = (byte)(g / total);
-            byte avgB = (byte)(b / total);
-
-            return Color.FromArgb(255, avgR, avgG, avgB);
+            catch (Exception ex)
+            {
+                // Falls DWM (Desktop Window Manager) nicht reagiert
+                Debug.WriteLine($"[UI EFFECT ERROR] Blur konnte nicht angewendet werden: {ex.Message}");
+            }
         }
 
 
+        private void SetupButtonLayout(StackPanel banner, string type)
+        {
+            banner.Children.Clear();
 
+            if (type == "Xbox")
+            {
+                // A = Grün, B = Rot
+                banner.Children.Add(CreateControllerButton("A", "#FF22b14c", "Start"));
+                banner.Children.Add(CreateControllerButton("B", "#FFe74c3c", "Close"));
+            }
+            else // PlayStation Style
+            {
+                // X = Weißer Kreis mit grauem Text / Kreis-Symbol = Weißer Kreis
+                banner.Children.Add(CreateControllerButton("\uE739", "#FFFFFFFF", "Start", true)); // X Symbol
+                banner.Children.Add(CreateControllerButton("\uE711", "#FFFFFFFF", "Close", true)); // O Symbol
+            }
+        }
 
+        private StackPanel CreateControllerButton(string symbol, string colorHex, string label, bool isPS = false)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
 
-        private int _lastAnimatedCardIndex = -1;
+            var btnCircle = new Border
+            {
+                Width = 20,
+                Height = 20,
+                CornerRadius = new CornerRadius(10),
+                Background = new SolidColorBrush(HexToColor(colorHex)),
+                Child = new TextBlock
+                {
+                    Text = symbol,
+                    FontSize = isPS ? 10 : 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(isPS ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            sp.Children.Add(btnCircle);
+            sp.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return sp;
+        }
 
-      
+        private Windows.UI.Color HexToColor(string hex)
+        {
+            hex = hex.Replace("#", "");
+            byte r = byte.Parse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber);
+            byte g = byte.Parse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber);
+            byte b = byte.Parse(hex.Substring(6, 2), System.Globalization.NumberStyles.HexNumber);
+            return Windows.UI.Color.FromArgb(255, r, g, b);
+        }
+
+        private StackPanel CreateXboxHint(string button, string colorHex, string label)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+
+            // Der farbige Kreis mit dem Buchstaben
+            var btnCircle = new Border
+            {
+                Width = 18,
+                Height = 18,
+                CornerRadius = new CornerRadius(9),
+                Background = new SolidColorBrush(HexToColor(colorHex)),
+                Child = new TextBlock
+                {
+                    Text = button,
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+
+            sp.Children.Add(btnCircle);
+            sp.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return sp;
+        }
+
+        // Hilfsfunktion für Farben
+        
+
+        // 3. HILFSMETHODE FÜR DIE BUTTON-ANZEIGE
+        private StackPanel CreateKeyHint(string glyph, string text)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            sp.Children.Add(new FontIcon
+            {
+                Glyph = glyph,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons")
+            });
+            sp.Children.Add(new TextBlock
+            {
+                Text = text,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return sp;
+        }
+
+        // Hilfsmethode für die Shortcut-Anzeigen (X Start / O Close)
+        private StackPanel CreateKeyHint(string glyph, string color, string label)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+            sp.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
+            sp.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), VerticalAlignment = VerticalAlignment.Center });
+            return sp;
+        }
 
         /// <summary>
         /// Animiert die Rahmenfarbe eines Borders sanft mit einem Storyboard.
@@ -6000,25 +6457,42 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Aktualisiert die Hervorhebung und ruft die Animationen für Größe und Rahmenfarbe auf.
         /// </summary>
+        /// 
+        // Bei den anderen Index-Variablen einfügen
+        private int _lastSelectedCardIndex = -1; // <--- NEU
         private void HighlightSelectedCard(bool skipScroll = false, bool forceAnimation = true)
         {
-            for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
-            {
-                if (ProgramCardPanel.Children[i] is Border border)
-                {
-                    bool isSelected = (i == _selectedCardIndex);
+            // Sicherheitscheck: Falls die Liste leer ist, abbrechen
+            if (ProgramCardPanel.Children.Count == 0) return;
 
-                    // Rufe jetzt BEIDE Animationen auf. Sie laufen synchron.
-                    AnimateBorderColor(border, isSelected);
-                    AnimateScale(border, isSelected);
+            // 1. Die alte Karte (die den Fokus verliert) sanft zurücksetzen
+            if (_lastSelectedCardIndex != -1 && _lastSelectedCardIndex < ProgramCardPanel.Children.Count)
+            {
+                if (ProgramCardPanel.Children[_lastSelectedCardIndex] is Border oldBorder)
+                {
+                    AnimateBorderColor(oldBorder, false);
+                    AnimateScale(oldBorder, false);
                 }
             }
 
-            // Scrollt zur Karte, aber nur, wenn der Karten-Bereich aktiv ist.
-            if (_currentFocusArea == FocusArea.Cards && !skipScroll && ProgramCardPanel.Children.Count > _selectedCardIndex)
+            // 2. Die neue Karte (die den Fokus bekommt) hervorheben
+            if (_selectedCardIndex >= 0 && _selectedCardIndex < ProgramCardPanel.Children.Count)
             {
-                ScrollToCardAnimated(ProgramCardPanel.Children[_selectedCardIndex]);
+                if (ProgramCardPanel.Children[_selectedCardIndex] is Border newBorder)
+                {
+                    AnimateBorderColor(newBorder, true);
+                    AnimateScale(newBorder, true);
+
+                    // Sofort scrollen, damit die UI dem Stick folgt
+                    if (_currentFocusArea == FocusArea.Cards && !skipScroll)
+                    {
+                        ScrollToCardAnimated(newBorder);
+                    }
+                }
             }
+
+            // 3. Den aktuellen Index für das nächste Mal speichern
+            _lastSelectedCardIndex = _selectedCardIndex;
         }
 
 
@@ -6793,6 +7267,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private Controller[] _xboxControllers = new Controller[4];
         private DateTime _comboStartTime = DateTime.MinValue;
         private bool _comboIsActive = false;
+
         private async Task XboxInputLoop()
         {
             Thread.CurrentThread.Priority = ThreadPriority.Highest;
@@ -6811,11 +7286,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             var gp = state.Gamepad;
                             GamepadButtonFlags btns = (GamepadButtonFlags)gp.Buttons;
 
-                            // --- 1. GLOBALE SHORTCUTS (Immer aktiv, kein Delay) ---
-                            // Wir prüfen die Shortcuts vor allem anderen, damit sie sofort feuern.
+                            // --- 1. GLOBAL SHORTCUTS ---
                             HandleShortcuts(btns, i);
 
-                            // --- 2. MAUS MODUS TOGGLE (2-Sekunden RS + Select) ---
+                            // --- 2. MOUSE MODE TOGGLE ---
                             bool comboPressed = btns.HasFlag(GamepadButtonFlags.Back) && btns.HasFlag(GamepadButtonFlags.RightThumb);
                             if (comboPressed)
                             {
@@ -6824,32 +7298,121 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 {
                                     _isMouseModeActive = !_isMouseModeActive;
                                     _comboIsActive = false; _comboStartTime = DateTime.MaxValue;
+
+                                    if (!_isMouseModeActive) ParkMouseCursor();
+                                    else
+                                    {
+                                        while (ShowCursor(true) < 0) ;
+                                        _isCursorVisible = true;
+                                        SetCursorPos(GetScreenWidth() / 2, GetScreenHeight() / 2);
+                                    }
+
                                     SendOverlayNotification(_isMouseModeActive ? "Mouse Mode: ON" : "Mouse Mode: OFF");
                                     _ = TriggerVibration(i, 0.5f, 300);
                                 }
                             }
                             else { _comboIsActive = false; _comboStartTime = DateTime.MinValue; }
 
-                            // --- 3. INPUT WEICHE ---
+                            // --- 3. DIRECTION CALCULATION ---
+                            int xDir = 0;
+                            if (gp.LeftThumbX < -menuDeadzone) xDir = -1;
+                            else if (gp.LeftThumbX > menuDeadzone) xDir = 1;
+
+                            int yDir = 0;
+                            if (gp.LeftThumbY < -menuDeadzone) yDir = -1;
+                            else if (gp.LeftThumbY > menuDeadzone) yDir = 1;
+
+                            // --- 4. INPUT BRANCHING ---
                             if (_isMouseModeActive)
                             {
+                                // Ensure cursor is visible in mouse mode
+                                if (!_isCursorVisible)
+                                {
+                                    while (ShowCursor(true) < 0) ;
+                                    _isCursorVisible = true;
+                                }
                                 HandleMouseControl(state, i);
                             }
                             else
                             {
-                                // Stick-Richtung für UI-Navigation bestimmen
-                                int xDir = 0;
-                                if (gp.LeftThumbX < -menuDeadzone) xDir = -1;
-                                else if (gp.LeftThumbX > menuDeadzone) xDir = 1;
+                                // --- PARK MOUSE ---
+                                // If any input happens, park the mouse
+                                if (btns != GamepadButtonFlags.None || xDir != 0 || yDir != 0)
+                                {
+                                    ParkMouseCursor();
+                                }
 
-                                int yDir = 0;
-                                if (gp.LeftThumbY < -menuDeadzone) yDir = -1; // Invertiert für UI
-                                else if (gp.LeftThumbY > menuDeadzone) yDir = 1;
-
-                                // Nur navigieren, wenn GCM im Vordergrund ist
                                 if (IsWindowInForeground())
                                 {
-                                    ProcessUINavigation(btns, xDir, yDir, i);
+                                    if (_currentFocusArea == FocusArea.AppLauncher)
+                                    {
+                                        // 1. Handle Buttons (Immediate)
+                                        var newPresses = btns & ~_lastButtonStates[i];
+
+                                        if (newPresses != GamepadButtonFlags.None)
+                                        {
+                                            DispatcherQueue.TryEnqueue(() =>
+                                            {
+                                                // A - Launch App
+                                                if ((newPresses & GamepadButtonFlags.A) != 0)
+                                                {
+                                                    int selectedIndex = AppGridView.SelectedIndex;
+                                                    if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count && AppGridView.Items[selectedIndex] is AppInfo app)
+                                                    {
+                                                        LaunchApp(app);
+                                                        PlayActivationSound();
+                                                    }
+                                                }
+                                                // B - Close Launcher
+                                                else if ((newPresses & GamepadButtonFlags.B) != 0)
+                                                {
+                                                    ToggleAppLauncher_Click(null, null);
+                                                    PlaydeactivationSound();
+                                                }
+
+                                                // DPad Navigation
+                                                int dpadX = 0; int dpadY = 0;
+                                                if ((newPresses & GamepadButtonFlags.DPadUp) != 0) dpadY = 1;
+                                                else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) dpadY = -1;
+                                                else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) dpadX = -1;
+                                                else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) dpadX = 1;
+
+                                                if (dpadX != 0 || dpadY != 0)
+                                                {
+                                                    HandleAppLauncherNavigation(dpadX, dpadY);
+                                                }
+                                            });
+                                        }
+
+                                        // 2. Handle Stick (Throttled for smooth scrolling)
+                                        bool isStickMoving = (xDir != 0 || yDir != 0);
+                                        if (isStickMoving)
+                                        {
+                                            // Check throttle timer specific to this controller index
+                                            if (DateTime.Now > _nextAllowedInputTime[i])
+                                            {
+                                                DispatcherQueue.TryEnqueue(() => HandleAppLauncherNavigation(xDir, yDir));
+
+                                                // Throttling logic: Slower first step, faster subsequent steps
+                                                _nextAllowedInputTime[i] = _isStickCentered[i] ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
+                                                _isStickCentered[i] = false;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Reset throttle when stick is released
+                                            _nextAllowedInputTime[i] = DateTime.MinValue;
+                                            _isStickCentered[i] = true;
+                                        }
+
+                                        // Update state
+                                        _lastButtonStates[i] = btns;
+                                    }
+                                    else
+                                    {
+                                        // Standard Logic for all other areas (Cards, TopButtons, etc.)
+                                        ProcessUINavigation(btns, xDir, yDir, i);
+                                    }
                                 }
                             }
                         }
@@ -6859,6 +7422,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Thread.Sleep(10);
             }
         }
+
         private List<HidStream> _activePs5Streams = new List<HidStream>();
         private GamepadButtonFlags[] _multiPs5LastButtons = new GamepadButtonFlags[10];
         private GamepadButtonFlags[] _lastPs5Buttons = new GamepadButtonFlags[10];
@@ -7025,22 +7589,58 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private void HandleEdgeShortcuts(GamepadButtonFlags currentButtons)
         {
-            // Eigener Status-Check nur für den Edge
+            // Wir nutzen Index 6 für den Edge Controller, um Konflikte mit Xbox (0-3),
+            // Standard-PS5 (4) und dem Edge-Mausmodus (5) im State-Tracking zu vermeiden.
+            int controllerIndex = 6;
+
+            // Berechne, welche Tasten in diesem Frame NEU gedrückt wurden
             var newPresses = currentButtons & ~_lastEdgeShortcutButtons;
             _lastEdgeShortcutButtons = currentButtons;
 
-            if (newPresses == GamepadButtonFlags.None) return;
-
-            foreach (var pair in _activeShortcuts)
+            foreach (var shortcut in _runtimeShortcuts)
             {
-                if (IsButtonPressed(currentButtons, pair.Key.Item1) && IsButtonPressed(newPresses, pair.Key.Item2))
+                // 1. Prüfen, ob die geforderten Tasten (Bitmaske) gedrückt gehalten werden
+                bool requirementsMet = (currentButtons & shortcut.RequiredButtons) == shortcut.RequiredButtons;
+
+                if (requirementsMet)
                 {
-                    if (_shortcutActions.TryGetValue(pair.Value, out var action))
+                    // FALL A: Zeitbasiertes Auslösen (HoldDuration > 0)
+                    if (shortcut.HoldDurationSeconds > 0)
                     {
-                        DispatcherQueue.TryEnqueue(() => {
-                            action.Invoke();
-                            SendOverlayNotification($"Edge Shortcut: {pair.Value}");
-                        });
+                        // Timer starten, falls noch nicht aktiv
+                        if (shortcut.HoldStartTimes[controllerIndex] == DateTime.MaxValue)
+                        {
+                            shortcut.HoldStartTimes[controllerIndex] = DateTime.Now;
+                        }
+
+                        // Prüfen, ob die Zeit abgelaufen ist
+                        var elapsedSeconds = (DateTime.Now - shortcut.HoldStartTimes[controllerIndex]).TotalSeconds;
+
+                        if (elapsedSeconds >= shortcut.HoldDurationSeconds && !shortcut.HasTriggered[controllerIndex])
+                        {
+                            // Aktion ausführen
+                            ExecuteShortcutAction(shortcut.FunctionName, controllerIndex, true);
+                            shortcut.HasTriggered[controllerIndex] = true; // Sperren, damit es nicht mehrfach feuert
+                        }
+                    }
+                    // FALL B: Sofortiges Auslösen (HoldDuration == 0)
+                    else
+                    {
+                        // Bei Sofort-Aktionen muss mindestens eine der nötigen Tasten "neu" sein,
+                        // damit wir nicht 60-mal pro Sekunde feuern.
+                        if ((newPresses & shortcut.RequiredButtons) != GamepadButtonFlags.None)
+                        {
+                            ExecuteShortcutAction(shortcut.FunctionName, controllerIndex, false);
+                        }
+                    }
+                }
+                else
+                {
+                    // Reset, wenn Tasten losgelassen wurden (nur für Hold-Shortcuts relevant)
+                    if (shortcut.HoldDurationSeconds > 0)
+                    {
+                        shortcut.HoldStartTimes[controllerIndex] = DateTime.MaxValue;
+                        shortcut.HasTriggered[controllerIndex] = false;
                     }
                 }
             }
@@ -7329,60 +7929,166 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void ProcessPs5SmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
         {
-            // Buttons (A, B, X, Y) sofort verarbeiten
-            var newPresses = buttons & ~_lastPs5ButtonState;
-            if (newPresses != GamepadButtonFlags.None)
+            // 1. MAUS-PARK LOGIK
+            // Wenn wir nicht im Mausmodus sind, schieben wir die Maus aktiv weg, 
+            // sobald eine Eingabe am Controller erfolgt.
+            if (!_isMouseModeActive)
             {
-                DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, 4));
-            }
-
-            // Stick Smooth Logik
-            if (xDir == 0 && yDir == 0)
-            {
-                _ps5NextAllowedInputTime = DateTime.MinValue;
-                _ps5StickCentered = true;
+                if (buttons != GamepadButtonFlags.None || xDir != 0 || yDir != 0)
+                {
+                    ParkMouseCursor();
+                }
             }
             else
             {
-                if (DateTime.Now > _ps5NextAllowedInputTime)
+                // Falls wir im Maus-Modus sind, stellen wir sicher, dass der Cursor sichtbar ist
+                if (!_isCursorVisible)
                 {
-                    DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4));
-
-                    if (_ps5StickCentered)
-                    {
-                        _ps5NextAllowedInputTime = DateTime.Now.AddMilliseconds(400); // Erster Sprung Pause
-                        _ps5StickCentered = false;
-                    }
-                    else
-                    {
-                        _ps5NextAllowedInputTime = DateTime.Now.AddMilliseconds(150); // Rattern
-                    }
+                    while (ShowCursor(true) < 0) ;
+                    _isCursorVisible = true;
                 }
             }
+
+            // 2. BUTTON-DRÜCKE VERARBEITEN
+            // Wir berechnen, welche Buttons in diesem Frame NEU gedrückt wurden
+            var newPresses = buttons & ~_lastPs5ButtonState;
+
+            // --- UI-Sichere Verarbeitung via Dispatcher ---
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                // A. Spezialfall: App-Launcher (Vollbild-Raster)
+                if (_currentFocusArea == FocusArea.AppLauncher)
+                {
+                    // X-Taste (intern als A gemappt) -> App starten
+                    if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        int selectedIndex = AppGridView.SelectedIndex;
+                        if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count && AppGridView.Items[selectedIndex] is AppInfo app)
+                        {
+                            LaunchApp(app);
+                            PlayActivationSound();
+                        }
+                    }
+                    // Kreis-Taste (intern als B gemappt) -> Launcher schließen
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        ToggleAppLauncher_Click(null, null);
+                        PlaydeactivationSound();
+                    }
+
+                    // Steuerkreuz (D-Pad) Navigation innerhalb des Launchers
+                    int dpadX = 0; int dpadY = 0;
+                    if ((newPresses & GamepadButtonFlags.DPadUp) != 0) dpadY = 1;
+                    else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) dpadY = -1;
+                    else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) dpadX = -1;
+                    else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) dpadX = 1;
+
+                    if (dpadX != 0 || dpadY != 0)
+                    {
+                        HandleAppLauncherNavigation(dpadX, dpadY);
+                    }
+                }
+                // B. Normaler Modus (Haupt-UI)
+                else if (newPresses != GamepadButtonFlags.None)
+                {
+                    // Übergabe an die zentrale Eingabelogik (Controller Index 4 für PS5)
+                    HandleGamepadInput(newPresses, false, false, false, false, 4);
+                }
+            });
+
+            // 3. STICK-NAVIGATION (SMOOTH SCROLLING)
+            if (xDir != 0 || yDir != 0)
+            {
+                // Prüfen, ob die Zeit für den nächsten Navigationsschritt erreicht ist
+                if (DateTime.Now > _ps5NextAllowedInputTime)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (_currentFocusArea == FocusArea.AppLauncher)
+                        {
+                            HandleAppLauncherNavigation(xDir, yDir);
+                        }
+                        else
+                        {
+                            // Übergabe der Stick-Richtungen an die Eingabelogik
+                            HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4);
+                        }
+                    });
+
+                    // Timing-Logik: Der erste Schritt dauert länger (400ms), danach schnelleres Scrollen (150ms)
+                    _ps5NextAllowedInputTime = _ps5StickCentered ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
+                    _ps5StickCentered = false;
+                }
+            }
+            else
+            {
+                // Stick ist wieder in der Mitte
+                _ps5NextAllowedInputTime = DateTime.MinValue;
+                _ps5StickCentered = true;
+            }
+
+            // Aktuellen Button-Zustand für den nächsten Frame speichern
             _lastPs5ButtonState = buttons;
+        }
+
+        // Hilfsmethode für das Raster-Scrolling im App-Launcher
+        private void HandleAppLauncherNavigation(int xDir, int yDir)
+        {
+            if (AppGridView.Items.Count == 0) return;
+
+            int columns = 4; // Standardfall
+            try
+            {
+                if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container)
+                    columns = Math.Max(1, (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth));
+            }
+            catch { }
+
+            int currentIndex = AppGridView.SelectedIndex;
+            int newIndex = currentIndex;
+
+            if (yDir == 1) newIndex = Math.Max(0, currentIndex - columns); // Hoch
+            else if (yDir == -1) newIndex = Math.Min(AppGridView.Items.Count - 1, currentIndex + columns); // Runter
+            else if (xDir == 1) newIndex = (currentIndex + 1) % AppGridView.Items.Count; // Rechts
+            else if (xDir == -1) newIndex = (currentIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; // Links
+
+            if (newIndex != currentIndex)
+            {
+                AppGridView.SelectedIndex = newIndex;
+                AppGridView.ScrollIntoView(AppGridView.SelectedItem);
+                PlayNavigationSound();
+            }
         }
         private void HandleUniversalToggle(GamepadButtonFlags buttons)
         {
-            // Erkennt Create+Options (PS) oder Back+Start (Xbox)
             bool isComboPressed = buttons.HasFlag(GamepadButtonFlags.Back) && buttons.HasFlag(GamepadButtonFlags.Start);
 
             if (isComboPressed)
             {
                 if (!_mouseToggleLocked)
                 {
-                    _isMouseModeActive = !_isMouseModeActive; // Umschalten
-                    _mouseToggleLocked = true; // Sperren bis zum Loslassen
+                    _isMouseModeActive = !_isMouseModeActive;
+                    _mouseToggleLocked = true;
 
-                    // Logge den Wechsel
+                    if (!_isMouseModeActive)
+                    {
+                        // Sofort beim Ausschalten parken
+                        ParkMouseCursor();
+                    }
+                    else
+                    {
+                        // Beim Einschalten: Maus in die Mitte des Bildschirms holen und zeigen
+                        while (ShowCursor(true) < 0) ;
+                        _isCursorVisible = true;
+                        SetCursorPos(GetScreenWidth() / 2, GetScreenHeight() / 2);
+                    }
+
                     ControllerLogger.Log("System", $"Mouse Mode changed to: {_isMouseModeActive}");
-
-                    // Kurzes Feedback im Overlay
                     SendOverlayNotification(_isMouseModeActive ? "Mouse Mode: ON" : "Mouse Mode: OFF");
                 }
             }
             else
             {
-                // Sobald die Kombi losgelassen wird, entsperren wir für den nächsten Druck
                 _mouseToggleLocked = false;
             }
         }
@@ -7482,9 +8188,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // Logging darf niemals crashen
             }
         }
+
         private void LoadShortcutsFromSettings()
         {
-            _activeShortcuts.Clear();
+            _runtimeShortcuts.Clear();
             _shortcutActions.Clear();
 
             string settingsFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "settings.toml");
@@ -7499,46 +8206,76 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 var settingsModel = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
 
-                // 1. Lade die benutzerdefinierten Shortcuts
-                if (settingsModel.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
+                // 1. Helper to parse string keys to GamepadButtonFlags
+                GamepadButtonFlags ParseKey(string key)
                 {
-                    foreach (TomlTable shortcutTable in shortcutsArray)
-                    {
-                        var data = new ShortcutData
-                        {
-                            Key1 = shortcutTable["key1"]?.ToString(),
-                            Key2 = shortcutTable["key2"]?.ToString(),
-                            Function = shortcutTable["function"]?.ToString(),
-                            Enabled = Convert.ToBoolean(shortcutTable["enabled"])
-                        };
+                    if (string.IsNullOrWhiteSpace(key) || key.Equals("None", StringComparison.OrdinalIgnoreCase))
+                        return GamepadButtonFlags.None;
 
-                        // WICHTIG: Lade nur aktivierte Shortcuts
-                        if (data.Enabled && !string.IsNullOrEmpty(data.Key1) && !string.IsNullOrEmpty(data.Key2))
-                        {
-                            _activeShortcuts[(data.Key1, data.Key2)] = data.Function;
-                            LogGamepadInit($"[OK] Loaded Custom Shortcut: {data.Key1} + {data.Key2} -> {data.Function}");
-                        }
-                    }
+                    if (_buttonMap.TryGetValue(key, out var flag))
+                        return flag;
+
+                    // Fallback try enum parse
+                    if (Enum.TryParse(key, true, out GamepadButtonFlags result))
+                        return result;
+
+                    return GamepadButtonFlags.None;
                 }
 
-                // 2. Lade den "Seamless Switch" (winmode_shortcut)
-                if (settingsModel.TryGetValue("winmode_shortcut", out var winShortcutObj) && winShortcutObj is TomlTable winShortcutTable)
+                void AddShortcutToList(string k1, string k2, string func, double duration, bool enabled)
                 {
-                    var data = new ShortcutData
+                    if (!enabled || string.IsNullOrEmpty(func)) return;
+
+                    var flags1 = ParseKey(k1);
+                    var flags2 = ParseKey(k2);
+
+                    // If Key1 is invalid, skip. Key2 can be None.
+                    if (flags1 == GamepadButtonFlags.None) return;
+
+                    var newShortcut = new RuntimeShortcut
                     {
-                        Key1 = winShortcutTable["key1"]?.ToString(),
-                        Key2 = winShortcutTable["key2"]?.ToString(),
-                        Enabled = Convert.ToBoolean(winShortcutTable["enabled"])
+                        RequiredButtons = flags1 | flags2, // Combine bitmasks
+                        FunctionName = func,
+                        HoldDurationSeconds = duration
                     };
 
-                    if (data.Enabled && !string.IsNullOrEmpty(data.Key1) && !string.IsNullOrEmpty(data.Key2))
+                    _runtimeShortcuts.Add(newShortcut);
+                    LogGamepadInit($"[OK] Added Shortcut: {k1} + {k2} ({duration}s) -> {func}");
+                }
+
+                // 2. Load Custom Shortcuts
+                if (settingsModel.TryGetValue("shortcuts", out var shortcutsObj) && shortcutsObj is TomlTableArray shortcutsArray)
+                {
+                    foreach (TomlTable table in shortcutsArray)
                     {
-                        _activeShortcuts[(data.Key1, data.Key2)] = "winmodechange"; // Funktion ist hier fest codiert
-                        LogGamepadInit($"[OK] Loaded Seamless Switch: {data.Key1} + {data.Key2} -> winmodechange");
+                        string k1 = table["key1"]?.ToString();
+                        string k2 = table["key2"]?.ToString(); // Can be "None" or null
+                        string func = table["function"]?.ToString();
+                        bool enabled = Convert.ToBoolean(table["enabled"]);
+
+                        // Load Hold Duration (default to 0.0 if missing)
+                        double duration = 0.0;
+                        if (table.ContainsKey("hold_duration"))
+                        {
+                            duration = Convert.ToDouble(table["hold_duration"]);
+                        }
+
+                        AddShortcutToList(k1, k2, func, duration, enabled);
                     }
                 }
 
-                // 3. Weise den geladenen Funktionen die entsprechenden Aktionen zu
+                // 3. Load Seamless Switch (Legacy support via same system)
+                if (settingsModel.TryGetValue("winmode_shortcut", out var winObj) && winObj is TomlTable winTable)
+                {
+                    string k1 = winTable["key1"]?.ToString();
+                    string k2 = winTable["key2"]?.ToString();
+                    bool enabled = Convert.ToBoolean(winTable["enabled"]);
+
+                    // Seamless switch is usually instant (0.0s hold)
+                    AddShortcutToList(k1, k2, "winmodechange", 0.0, enabled);
+                }
+
+                // 4. Map Functions to Actions
                 _shortcutActions["taskmanager"] = BringTaskManagerToFrontAndFocus;
                 _shortcutActions["switch tab"] = SendWinTab;
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
@@ -7551,10 +8288,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
-                LogGamepadInit($"[ERROR] Failed to load shortcuts from TOML: {ex.Message}");
+                LogGamepadInit($"[ERROR] Failed to load shortcuts: {ex.Message}");
             }
         }
-
 
 
         // ########## ANFANG DES KOMPLETTEN CODE-BLOCKS ##########
@@ -7603,39 +8339,90 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
         /// <summary>
-        /// Verarbeitet alle globalen Gamepad-Shortcuts.
+        /// Processes gamepad input against the list of loaded runtime shortcuts.
+        /// Handles both instant combinations and time-based hold triggers.
         /// </summary>
+        /// <param name="currentButtons">The current state of all buttons.</param>
+        /// <param name="index">Controller index (0-3 for Xbox, 4 for PS).</param>
         private void HandleShortcuts(GamepadButtonFlags currentButtons, int index)
         {
-            // Speicher für den vorherigen Zustand pro Controller
-            // WICHTIG: Nutze ein separates Array, damit die Navigation den Zustand nicht löscht
+            // Safety check for array bounds
+            if (index < 0 || index >= 10) return;
+
+            // Calculate which buttons were *just* pressed in this frame
+            // (Used for instant triggers so they don't fire repeatedly)
             var newPresses = currentButtons & ~_lastShortcutButtons[index];
             _lastShortcutButtons[index] = currentButtons;
 
-            if (newPresses == GamepadButtonFlags.None) return;
-
-            foreach (var pair in _activeShortcuts)
+            foreach (var shortcut in _runtimeShortcuts)
             {
-                var key1 = pair.Key.Item1; // z.B. "Back" (Share)
-                var key2 = pair.Key.Item2; // z.B. "RightThumb" (RS)
-                var function = pair.Value;
+                // 1. Check if the required buttons for this shortcut are currently held down
+                bool requirementsMet = (currentButtons & shortcut.RequiredButtons) == shortcut.RequiredButtons;
 
-                // Prüfe ob Key1 (Share) GEHALTEN wird und Key2 (RS) gerade NEU gedrückt wurde
-                // ODER ob beide gleichzeitig in diesem Frame neu sind
-                bool k1Held = IsButtonPressed(currentButtons, key1);
-                bool k2New = IsButtonPressed(newPresses, key2);
-
-                if (k1Held && k2New)
+                if (requirementsMet)
                 {
-                    if (_shortcutActions.TryGetValue(function, out var action))
+                    // CASE A: Time-based Hold (Duration > 0)
+                    if (shortcut.HoldDurationSeconds > 0)
                     {
-                        Debug.WriteLine($"[PS5-Shortcut] Triggering {function} for index {index}");
-                        DispatcherQueue.TryEnqueue(() => {
-                            action.Invoke();
-                            SendOverlayNotification($"Shortcut: {function}");
-                        });
+                        // Start timer if not already started
+                        if (shortcut.HoldStartTimes[index] == DateTime.MaxValue)
+                        {
+                            shortcut.HoldStartTimes[index] = DateTime.Now;
+                        }
+
+                        // Check if enough time has passed
+                        var elapsedSeconds = (DateTime.Now - shortcut.HoldStartTimes[index]).TotalSeconds;
+
+                        if (elapsedSeconds >= shortcut.HoldDurationSeconds && !shortcut.HasTriggered[index])
+                        {
+                            // FIRE ACTION
+                            ExecuteShortcutAction(shortcut.FunctionName, index, true);
+                            shortcut.HasTriggered[index] = true; // Prevent re-firing while holding
+                        }
+                    }
+                    // CASE B: Instant Trigger (Duration == 0)
+                    else
+                    {
+                        // For instant triggers, at least one of the required buttons must be "newly pressed"
+                        // This prevents the action from firing every 10ms while you hold the buttons.
+                        // We check if (NewPresses overlaps with RequiredButtons)
+                        if ((newPresses & shortcut.RequiredButtons) != GamepadButtonFlags.None)
+                        {
+                            ExecuteShortcutAction(shortcut.FunctionName, index, false);
+                        }
                     }
                 }
+                else
+                {
+                    // Reset state if buttons are released
+                    if (shortcut.HoldDurationSeconds > 0)
+                    {
+                        shortcut.HoldStartTimes[index] = DateTime.MaxValue;
+                        shortcut.HasTriggered[index] = false;
+                    }
+                }
+            }
+        }
+
+        // Helper to execute the action safely on the UI thread
+        private void ExecuteShortcutAction(string functionName, int controllerIndex, bool isHoldAction)
+        {
+            if (_shortcutActions.TryGetValue(functionName, out var action))
+            {
+                string triggerType = isHoldAction ? "Held" : "Pressed";
+                Debug.WriteLine($"[Shortcut] {triggerType} {functionName} on Controller {controllerIndex}");
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    action.Invoke();
+
+                    // Optional: Custom text for Hold actions
+                    string msg = isHoldAction ? $"{functionName} (Held)" : $"Shortcut: {functionName}";
+                    SendOverlayNotification(msg);
+
+                    // Vibration feedback
+                    _ = TriggerVibration(controllerIndex, 0.5f, 250);
+                });
             }
         }
 
@@ -7655,30 +8442,29 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
         /// <summary>
-        /// The central method that processes all gamepad inputs for shortcuts and UI navigation.
+        /// Die zentrale Methode zur Verarbeitung der Gamepad-Eingaben für die UI-Navigation.
+        /// Beinhaltet jetzt die Steuerung für das Audio-Flyout (X-Taste in TopButtons).
         /// </summary>
-        // *** FIX: Signature changed to accept 'newPresses' directly from the loop ***
+        /// <summary>
+        /// Verarbeitet Gamepad-Eingaben für die UI-Navigation und Shortcuts.
+        /// </summary>
         private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
-            // *** FIX: All 'IsWindowInForeground' and 'lastButtonState' logic
-            // is now handled by the background loop before this is called. ***
+            // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
+            if (!IsWindowInForeground()) return;
 
-            bool navigated = false; // Set to true if an area switch occurs
+            bool navigated = false;
 
-            // --- Contextual Navigation (D-Pad, Left Stick, A, B) ---
-            // The logic here is now correct because 'newPresses' only contains
-            // buttons that were *just* pressed this frame.
             switch (_currentFocusArea)
             {
-                // --- 1. TopButtons Area ---
+                // --- 1. TopButtons (Leiste oben) ---
                 case FocusArea.TopButtons:
                     if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
                     {
-                        // DOWN: Go back to the previous area (Cards or Launcher)
+                        // Wechsel zurück zum vorherigen Hauptbereich
                         _currentFocusArea = _previousFocusArea;
-                        _previousTopButtonIndex = _selectedTopButtonIndex; // Remember position
+                        _previousTopButtonIndex = _selectedTopButtonIndex;
 
-                        // Restore the index of the target area
                         if (_currentFocusArea == FocusArea.Cards)
                             _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
                         else if (_currentFocusArea == FocusArea.Launcher)
@@ -7688,213 +8474,181 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _topButtons.Any())
                     {
-                        // Navigate right WITHIN the area
                         _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _topButtons.Any())
                     {
-                        // Navigate left WITHIN the area
                         _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
                         ClickSelectedTopButton();
                         PlayActivationSound();
                     }
+                    else if ((newPresses & GamepadButtonFlags.X) != 0)
+                    {
+                        // NEU: Öffnet das integrierte Audio-Menü
+                        OpenAudioFlyout();
+                        PlayActivationSound();
+                    }
                     break;
 
-                // --- 2. Cards Area (Main Area) ---
+                // --- 2. Cards (Laufende Apps) ---
                 case FocusArea.Cards:
                     if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
                     {
-                        // UP: Go to TopButtons
-                        _previousFocusArea = FocusArea.Cards; // Remember where we came from
-                        _previousCardIndex = _selectedCardIndex; // Remember position
+                        _previousFocusArea = FocusArea.Cards;
+                        _previousCardIndex = _selectedCardIndex;
                         _currentFocusArea = FocusArea.TopButtons;
                         _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
                         navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && ProgramCardPanel.Children.Any())
                     {
-                        // Navigate right WITHIN the area
                         _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
                     {
-                        // Check if there are any cards to navigate
-                        if (ProgramCardPanel.Children.Any())
+                        if (ProgramCardPanel.Children.Any() && _selectedCardIndex > 0)
                         {
-                            // Cards exist. Check if we are at the first one.
-                            if (_selectedCardIndex == 0)
-                            {
-                                // We ARE at the first one (Index 0) -> Jump to Launcher
-                                _previousFocusArea = FocusArea.Cards;
-                                _previousCardIndex = 0;
-                                _currentFocusArea = FocusArea.Launcher;
-                                _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                                navigated = true; // Signals an area switch
-                            }
-                            else
-                            {
-                                // We are NOT at the first one -> Navigate left normally
-                                _selectedCardIndex = (_selectedCardIndex - 1 + ProgramCardPanel.Children.Count) % ProgramCardPanel.Children.Count;
-                                UpdateVisualFocus();
-                                PlayNavigationSound();
-                            }
+                            _selectedCardIndex--;
+                            navigated = true;
                         }
                         else
                         {
-                            // There are NO cards. A press left
-                            // *always* switches to the Launcher area.
+                            // Am Anfang der Liste -> Wechsel zum Mini-Launcher links
                             _previousFocusArea = FocusArea.Cards;
-                            _previousCardIndex = 0; // Reset index
                             _currentFocusArea = FocusArea.Launcher;
                             _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
-                            navigated = true; // Signals an area switch
+                            navigated = true;
                         }
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
-                        TriggerCardAction(_selectedCardIndex, true); // True for launch/focus
+                        TriggerCardAction(_selectedCardIndex, true);
                         PlayActivationSound();
                     }
                     else if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
-                        TriggerCardAction(_selectedCardIndex, false); // False for close/kill
+                        TriggerCardAction(_selectedCardIndex, false);
                         PlaydeactivationSound();
                     }
                     break;
 
-                // --- 3. Launcher Area (Left Column, when active) ---
+                // --- 3. Launcher (Mini-Launcher links) ---
                 case FocusArea.Launcher:
                     if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
                     {
-                        // UP: Go to TopButtons
-                        _previousFocusArea = FocusArea.Launcher; // Remember where we came from
-                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember position
+                        _previousFocusArea = FocusArea.Launcher;
+                        _previousLauncherAreaIndex = _selectedLauncherAreaIndex;
                         _currentFocusArea = FocusArea.TopButtons;
                         _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
                         navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && _launcherAreaButtons.Any())
                     {
-                        // Wrap-around check
                         if (_selectedLauncherAreaIndex == _launcherAreaButtons.Count - 1)
                         {
-                            // YES: Jump to Cards
-                            _previousFocusArea = FocusArea.Launcher; // Remember for Up/Down
-                            _previousLauncherAreaIndex = _selectedLauncherAreaIndex; // Remember for jumping back
+                            // Ende der Liste -> Wechsel zu den Cards
                             _currentFocusArea = FocusArea.Cards;
-                            // Set focus to the FIRST Card-Item (or the remembered one)
-                            _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
-                            navigated = true; // Signals an area switch
+                            _selectedCardIndex = 0;
+                            navigated = true;
                         }
                         else
                         {
-                            // NO: Normal navigation right
-                            _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex + 1) % _launcherAreaButtons.Count;
-                            UpdateVisualFocus();
-                            PlayNavigationSound();
+                            _selectedLauncherAreaIndex++;
+                            navigated = true;
                         }
                     }
-                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _launcherAreaButtons.Any())
+                    else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) && _selectedLauncherAreaIndex > 0)
                     {
-                        // Navigate left WITHIN the area
-                        _selectedLauncherAreaIndex = (_selectedLauncherAreaIndex - 1 + _launcherAreaButtons.Count) % _launcherAreaButtons.Count;
-                        UpdateVisualFocus();
-                        PlayNavigationSound();
+                        _selectedLauncherAreaIndex--;
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
-                        if (_selectedLauncherAreaIndex >= 0 && _selectedLauncherAreaIndex < _launcherAreaButtons.Count && _launcherAreaButtons[_selectedLauncherAreaIndex].Tag is LauncherCardItem item)
+                        if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count)
                         {
-                            item.TapAction?.Invoke(null, null); // Execute action
+                            var item = _launcherAreaButtons[_selectedLauncherAreaIndex].Tag as LauncherCardItem;
+                            item?.TapAction?.Invoke(null, null);
                         }
                         PlayActivationSound();
                     }
                     break;
 
+                // --- 4. AudioMenu (Audio-Geräte Flyout) ---
+                case FocusArea.AudioMenu:
+                    if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioDeviceButtons.Any())
+                    {
+                        _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
+                        navigated = true;
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioDeviceButtons.Any())
+                    {
+                        _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex - 1 + _audioDeviceButtons.Count) % _audioDeviceButtons.Count;
+                        navigated = true;
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0 || (newPresses & GamepadButtonFlags.X) != 0)
+                    {
+                        if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                        {
+                            SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                        }
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        CloseAudioFlyout();
+                        PlaydeactivationSound();
+                    }
+                    break;
+
+                // --- 5. PowerMenu (Shutdown/Restart) ---
                 case FocusArea.PowerMenu:
                     if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _powerMenuItems.Any())
                     {
                         _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
-                        UpdateVisualFocus(); PlayNavigationSound();
+                        navigated = true;
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _powerMenuItems.Any())
                     {
                         _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
-                        UpdateVisualFocus(); PlayNavigationSound();
+                        navigated = true;
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0 && _powerMenuItems.Count > _selectedPowerMenuItemIndex)
                     {
-                        var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                        if (selectedButton == ShutdownMenuItem) ShutdownMenuItem_Click(selectedButton, new RoutedEventArgs());
-                        else if (selectedButton == RestartMenuItem) RestartMenuItem_Click(selectedButton, new RoutedEventArgs());
-                        else if (selectedButton == LogOffMenuItem) LogOffMenuItem_Click(selectedButton, new RoutedEventArgs());
-                        else if (selectedButton == SleepMenuItem) SleepMenuItem_Click(selectedButton, new RoutedEventArgs());
+                        _powerMenuItems[_selectedPowerMenuItemIndex].Focus(FocusState.Programmatic);
+                        // Trigger Click logic for the button
+                        var btn = _powerMenuItems[_selectedPowerMenuItemIndex];
+                        if (btn == ShutdownMenuItem) ShutdownMenuItem_Click(null, null);
+                        else if (btn == RestartMenuItem) RestartMenuItem_Click(null, null);
+                        else if (btn == SleepMenuItem) SleepMenuItem_Click(null, null);
+                        else if (btn == LogOffMenuItem) LogOffMenuItem_Click(null, null);
                         PlayActivationSound();
                     }
                     else if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
                         PowerMenu.Visibility = Visibility.Collapsed;
-                        _currentFocusArea = FocusArea.TopButtons; // Return focus
-                        UpdateVisualFocus(); PlaydeactivationSound();
+                        _currentFocusArea = FocusArea.TopButtons;
+                        navigated = true;
+                        PlaydeactivationSound();
                     }
                     break;
 
+                // --- 6. AppLauncher (Fullscreen Grid) ---
                 case FocusArea.AppLauncher:
-                    if (AppGridView.Items.Count > 0)
+                    if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
-                        int columns = 4; // Default guess
-                        try
-                        {
-                            if (AppGridView.ActualWidth > 0 && AppGridView.ContainerFromIndex(0) is GridViewItem container && container.ActualWidth > 0)
-                            {
-                                columns = Math.Max(1, (int)Math.Floor(AppGridView.ActualWidth / container.ActualWidth));
-                            }
-                        }
-                        catch { /* Ignore potential layout errors */ }
-
-                        int currentIndex = AppGridView.SelectedIndex;
-                        int newIndex = currentIndex;
-                        bool appNavigated = false;
-
-                        if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) { newIndex = Math.Min(AppGridView.Items.Count - 1, currentIndex + columns); appNavigated = true; }
-                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) { newIndex = Math.Max(0, currentIndex - columns); appNavigated = true; }
-                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) { newIndex = (currentIndex + 1) % AppGridView.Items.Count; appNavigated = true; }
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft) { newIndex = (currentIndex - 1 + AppGridView.Items.Count) % AppGridView.Items.Count; appNavigated = true; }
-
-                        if (appNavigated && newIndex != currentIndex)
-                        {
-                            AppGridView.SelectedIndex = newIndex;
-                            AppGridView.ScrollIntoView(AppGridView.SelectedItem); // Ensure visible
-                            PlayNavigationSound();
-                        }
+                        ToggleAppLauncher_Click(null, null);
+                        PlaydeactivationSound();
                     }
-
-                    if ((newPresses & GamepadButtonFlags.A) != 0)
-                    {
-                        int selectedIndex = AppGridView.SelectedIndex;
-                        if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count)
-                        {
-                            if (AppGridView.Items[selectedIndex] is AppInfo app) { LaunchApp(app); }
-                        }
-                        PlayActivationSound();
-                    }
-                    else if ((newPresses & GamepadButtonFlags.B) != 0)
-                    {
-                        ToggleAppLauncher_Click(null, null); // Close
-                    }
+                    // Navigation innerhalb der GridView wird meist durch Windows-Focus-System 
+                    // oder spezifische Index-Berechnungen (siehe dein früherer Code) gehandhabt.
                     break;
             }
 
-            // If an area switch occurred, update the UI
             if (navigated)
             {
                 UpdateVisualFocus();
@@ -7934,63 +8688,89 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Updates the UI performantly by only changing the old and new focused elements.
         /// </summary>
-        
 
+
+        /// <summary>
+        /// Aktualisiert die visuelle Darstellung des Fokus basierend auf der aktuellen FocusArea.
+        /// Enthält Bounce-Animationen für das Infopanel und Scale-Effekte für Buttons.
+        /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
             UpdateLayoutForFocus();
 
-            // Reset all highlights (dieser Teil bleibt gleich)
+            // --- RESET PHASE ---
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); });
-            _topButtons.ForEach(b => { b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.BorderThickness = new Thickness(0); });
+            _topButtons.ForEach(b => {
+                b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                b.BorderThickness = new Thickness(0);
+            });
             _powerMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
+
             for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
             {
                 if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
             }
 
-            // Highlight the currently focused element
-            if (_currentFocusArea == FocusArea.Launcher)
+            foreach (var btn in _audioDeviceButtons)
             {
-                if (_launcherAreaButtons.Count > _selectedLauncherAreaIndex)
-                {
-                    var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
-                    AnimateScale(selectedButton, true);
-                    AnimateBorderColor(selectedButton, true);
-                }
+                // Korrektur: Nutze Windows.UI.Color oder direkt Microsoft.UI.Colors
+                btn.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                AnimateScale(btn, false);
             }
-            else if (_currentFocusArea == FocusArea.TopButtons)
+
+            // --- HIGHLIGHT PHASE ---
+            switch (_currentFocusArea)
             {
-                if (_topButtons.Count > _selectedTopButtonIndex)
-                {
-                    var selectedButton = _topButtons[_selectedTopButtonIndex];
-                    selectedButton.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.WhiteSmoke);
-                    selectedButton.BorderThickness = new Thickness(2);
-                }
-            }
-            else if (_currentFocusArea == FocusArea.Cards && ProgramCardPanel.Children.Count > _selectedCardIndex)
-            {
-                if (ProgramCardPanel.Children[_selectedCardIndex] is Border card)
-                {
-                    AnimateScale(card, true);
-                    AnimateBorderColor(card, true);
-                    ScrollToCardAnimated(card);
-                }
-            }
-            else if (_currentFocusArea == FocusArea.PowerMenu)
-            {
-                if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
-                {
-                    var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
-                    selectedButton.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
-                }
-            }
-            // ### HIER IST DIE VEREINFACHUNG ###
-            // Der alte, komplizierte Code für AppLauncher wird komplett entfernt.
-            // Wir müssen hier nichts mehr tun, da das XAML die Hervorhebung übernimmt.
-            else if (_currentFocusArea == FocusArea.AppLauncher)
-            {
-                // Leer lassen! Die GridView kümmert sich dank des neuen Styles selbst darum.
+                case FocusArea.Launcher:
+                    AnimateInfoPanelFocus(false);
+                    if (_launcherAreaButtons.Count > _selectedLauncherAreaIndex)
+                    {
+                        var selectedButton = _launcherAreaButtons[_selectedLauncherAreaIndex];
+                        AnimateScale(selectedButton, true);
+                        AnimateBorderColor(selectedButton, true);
+                    }
+                    break;
+
+                case FocusArea.TopButtons:
+                    AnimateInfoPanelFocus(true);
+                    if (_topButtons.Count > _selectedTopButtonIndex)
+                    {
+                        var selectedButton = _topButtons[_selectedTopButtonIndex];
+                        selectedButton.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
+                        selectedButton.BorderThickness = new Thickness(2);
+                    }
+                    break;
+
+                case FocusArea.Cards:
+                    AnimateInfoPanelFocus(false);
+                    if (ProgramCardPanel.Children.Count > _selectedCardIndex)
+                    {
+                        if (ProgramCardPanel.Children[_selectedCardIndex] is Border card)
+                        {
+                            AnimateScale(card, true);
+                            AnimateBorderColor(card, true);
+                            ScrollToCardAnimated(card);
+                        }
+                    }
+                    break;
+
+                case FocusArea.AudioMenu:
+                    if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                    {
+                        var activeBtn = _audioDeviceButtons[_selectedAudioDeviceIndex];
+                        // Benutze hier Color.FromArgb aus Windows.UI
+                        activeBtn.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 255, 255));
+                        AnimateScale(activeBtn, true);
+                    }
+                    break;
+
+                case FocusArea.PowerMenu:
+                    if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
+                    {
+                        var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
+                        selectedButton.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 255, 255));
+                    }
+                    break;
             }
         }
 
@@ -8004,28 +8784,55 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void AnimateScale(UIElement element, bool isSelected)
         {
-            // Ensure a CompositeTransform exists, creating one if it doesn't.
-            // This prevents conflicts with other animations.
-            if (element.RenderTransform is not CompositeTransform)
+            if (element is not Border border) return;
+
+            if (border.RenderTransform is not CompositeTransform transform)
             {
-                element.RenderTransform = new CompositeTransform();
+                transform = new CompositeTransform();
+                border.RenderTransform = transform;
+                border.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
             }
 
-            var visual = ElementCompositionPreview.GetElementVisual(element);
-            var compositor = visual.Compositor;
-            var targetScale = isSelected ? new Vector3(1.05f, 1.05f, 1.0f) : new Vector3(1.0f, 1.0f, 1.0f);
-
-            var scaleAnimation = compositor.CreateVector3KeyFrameAnimation();
-            scaleAnimation.Duration = TimeSpan.FromMilliseconds(250);
-            scaleAnimation.InsertKeyFrame(1.0f, targetScale, compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.0f), new Vector2(0.2f, 1.0f)));
-
-            // Correctly set the center point for the scaling animation
-            if (element is FrameworkElement fe)
+            // Banner (A/B Buttons) suchen
+            FrameworkElement banner = null;
+            if (border.Child is Grid g)
             {
-                visual.CenterPoint = new Vector3((float)fe.ActualWidth / 2, (float)fe.ActualHeight / 2, 0f);
+                banner = g.Children.OfType<FrameworkElement>().FirstOrDefault(x => x.Name == "ButtonBanner");
             }
 
-            visual.StartAnimation("Scale", scaleAnimation);
+            // Zeitwerte: Extrem kurz für den Controller
+            var duration = TimeSpan.FromMilliseconds(120);
+            var sb = new Storyboard();
+
+            // 1. SKALIERUNG & POSITION (Karten-Body)
+            var animX = new DoubleAnimation { To = isSelected ? 1.08 : 1.0, Duration = duration };
+            var animY = new DoubleAnimation { To = isSelected ? 1.08 : 1.0, Duration = duration };
+            var animTrans = new DoubleAnimation { To = isSelected ? -10 : 0, Duration = duration };
+
+            Storyboard.SetTarget(animX, transform); Storyboard.SetTargetProperty(animX, "ScaleX");
+            Storyboard.SetTarget(animY, transform); Storyboard.SetTargetProperty(animY, "ScaleY");
+            Storyboard.SetTarget(animTrans, transform); Storyboard.SetTargetProperty(animTrans, "TranslateY");
+            sb.Children.Add(animX); sb.Children.Add(animY); sb.Children.Add(animTrans);
+
+            // 2. BANNER-LOGIK (Der Fix gegen das Zucken)
+            if (banner != null)
+            {
+                if (isSelected)
+                {
+                    // Wenn ausgewählt: Sanft einblenden
+                    var animOp = new DoubleAnimation { To = 1.0, Duration = duration };
+                    Storyboard.SetTarget(animOp, banner);
+                    Storyboard.SetTargetProperty(animOp, "Opacity");
+                    sb.Children.Add(animOp);
+                }
+                else
+                {
+                    // Wenn NICHT ausgewählt: SOFORT ausblenden (verhindert das Nach-Zucken)
+                    banner.Opacity = 0;
+                }
+            }
+
+            sb.Begin();
         }
 
 
@@ -8038,26 +8845,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 var buttonToClick = _topButtons[_selectedTopButtonIndex];
 
-                // Execute the correct click method
                 if (buttonToClick == ExitGcmButton)
                 {
                     ExitGcmButton_Click_1(null, null);
                 }
-                // =================================================================
-                // ADDED: Logic for the new Settings Button
-                // =================================================================
+                else if (buttonToClick == VolumeButton) // NEU: Reaktion auf A-Taste
+                {
+                    ToggleAudioFlyout();
+                }
                 else if (buttonToClick == SettingsButton)
                 {
                     SettingsButton_Click(null, null);
                 }
-                // =================================================================
                 else if (buttonToClick == AppLauncherButton)
                 {
                     ToggleAppLauncher_Click(null, null);
                 }
                 else if (buttonToClick == ShutdownButton)
                 {
-                    // This opens the Power-Menu, the logic is already in GamepadButtonCheck
                     _currentFocusArea = FocusArea.PowerMenu;
                     _selectedPowerMenuItemIndex = 0;
                     PowerButton_Click(null, null);
@@ -8124,6 +8929,37 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine("[UWP] No visible child window found.");
             }
         }
+
+        private void AnimateInfoPanelFocus(bool hasFocus)
+        {
+            var sb = new Storyboard();
+            var animX = new DoubleAnimation();
+            var animY = new DoubleAnimation();
+
+            animX.Duration = animY.Duration = new Duration(TimeSpan.FromMilliseconds(400));
+
+            // Bounce-Effekt beim Aktivieren
+            if (hasFocus)
+            {
+                animX.To = animY.To = 1.05; // 5% größer
+                animX.EasingFunction = animY.EasingFunction = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut };
+            }
+            else
+            {
+                animX.To = animY.To = 1.0; // Normalgröße
+                animX.EasingFunction = animY.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut };
+            }
+
+            Storyboard.SetTarget(animX, InfoPanelTransform);
+            Storyboard.SetTargetProperty(animX, "ScaleX");
+            Storyboard.SetTarget(animY, InfoPanelTransform);
+            Storyboard.SetTargetProperty(animY, "ScaleY");
+
+            sb.Children.Add(animX);
+            sb.Children.Add(animY);
+            sb.Begin();
+        }
+
 
         /// <summary>
         /// Sucht nach allen laufenden Anwendungen und aktualisiert die UI-Karten.
@@ -8338,53 +9174,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                bool useSteamHack;
-                bool useVideo = AppSettings.Load<bool>("usestartupvideo");
-                try
-                {
-                    useSteamHack = AppSettings.Load<bool>("usesteamstartupvideo");
-                }
-                catch
-                {
-                    AppSettings.Save("usesteamstartupvideo", false);
-                }
-               useSteamHack = AppSettings.Load<bool>("usesteamstartupvideo");
-
-                if (!useVideo || useSteamHack)
-                {
-                    TransitionToMainUI();
-                    if (useSteamHack)
-                    {
-                        RenameSteamStartupVideo_Start();
-                    }
-                    return;
-                }
-            }
-            catch
-            {
-                TransitionToMainUI();
-                return;
-            }
-
-            try
-            {
                 string videoPath = AppSettings.Load<string>("startupvideo_path");
+
+                // KRITISCH: Existenzprüfung
                 if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
                 {
+                    Debug.WriteLine("[StartupVideo] Pfad ungültig, überspringe...");
                     TransitionToMainUI();
                     return;
                 }
 
                 _startupMediaPlayer = new MediaPlayer { AutoPlay = true };
                 _startupMediaPlayer.Source = MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute));
+
+                // Timeout-Sicherung: Wenn das Video nach 10 Sekunden nicht fertig ist, UI trotzdem zeigen
+                var timeoutTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+                timeoutTimer.Tick += (s, e) => {
+                    timeoutTimer.Stop();
+                    if (!startupVideoFinished) TransitionToMainUI();
+                };
+                timeoutTimer.Start();
+
                 _startupMediaPlayer.MediaEnded += OnStartupVideoEnded;
                 StartupVideoPlayer.SetMediaPlayer(_startupMediaPlayer);
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[StartupVideo] Error playing video: {ex.Message}");
-                TransitionToMainUI();
-            }
+            catch { TransitionToMainUI(); }
         }
 
         private void OnStartupVideoEnded(MediaPlayer sender, object args)
@@ -8524,35 +9338,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         // In MainWindow.xaml.cs
 
-       
+
         private async void ToggleAppLauncher_Click(object sender, RoutedEventArgs e)
         {
             if (AppLauncher.Visibility == Visibility.Visible)
             {
                 AppLauncher.Visibility = Visibility.Collapsed;
                 _currentFocusArea = FocusArea.TopButtons;
-                UpdateVisualFocus();
-                PlaydeactivationSound();
-                return;
             }
-
-            AppLauncher.Visibility = Visibility.Visible;
-            _currentFocusArea = FocusArea.AppLauncher;
-
-            // NEW: Clear the search bar and reset the list
-            AppSearchBox.Text = "";
-            AppGridView.ItemsSource = AllInstalledApps; // Show the full list again
-
-            if (!isAppListLoaded)
+            else
             {
-                await LoadInstalledAppsAsync();
+                AppLauncher.Visibility = Visibility.Visible;
+                _currentFocusArea = FocusArea.AppLauncher;
+
+                // WICHTIG: Apps nur laden, wenn die Liste noch leer ist
+                if (AllInstalledApps.Count == 0)
+                {
+                    await LoadInstalledAppsAsync();
+                }
+
+                if (AppGridView.Items.Count > 0)
+                {
+                    AppGridView.SelectedIndex = 0;
+                }
             }
-
-            // Set the focus directly into the search bar for intuitive use
-            AppSearchBox.Focus(FocusState.Programmatic);
-
             UpdateVisualFocus();
-            PlayActivationSound();
         }
 
         private void AppGridView_ItemClick(object sender, ItemClickEventArgs e)

@@ -1,38 +1,277 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Window x:Class="OverlayWindow.MainWindow"
 
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 
-    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <PublishTrimmed>false</PublishTrimmed>
-  </PropertyGroup>
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 
-  <ItemGroup>
-    <None Remove="Assets\controller.png" />
-  </ItemGroup>
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
 
-  <ItemGroup>
-    <PackageReference Include="SharpDX.XInput" Version="4.2.0" />
-    <PackageReference Include="Tomlyn" Version="0.19.0" />
-  </ItemGroup>
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
 
-  <ItemGroup>
-    <Resource Include="Assets\controller.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Resource>
-  </ItemGroup>
+        xmlns:local="clr-namespace:OverlayWindow"
 
-  <ItemGroup>
-    <Compile Update="ToastPopup.xaml.cs">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-    </Compile>
-  </ItemGroup>
+        mc:Ignorable="d"
 
-</Project>
+        Title="GCM Overlay"
+
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+
+        Topmost="True" ResizeMode="NoResize"
+
+        Width="400" Height="{x:Static SystemParameters.PrimaryScreenHeight}"
+
+        WindowStartupLocation="Manual" Left="{x:Static SystemParameters.PrimaryScreenWidth}" Top="0">
+
+
+
+    <Window.Resources>
+
+        <local:ToUpperConverter x:Key="ToUpperConverter"/>
+
+
+
+        <Style x:Key="ModernExpanderStyle" TargetType="Expander">
+
+            <Setter Property="Foreground" Value="White"/>
+
+            <Setter Property="Background" Value="Transparent"/>
+
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+
+            <Setter Property="BorderBrush" Value="#44FFFFFF"/>
+
+            <Setter Property="Padding" Value="12,16"/>
+
+            <Setter Property="Template">
+
+                <Setter.Value>
+
+                    <ControlTemplate TargetType="Expander">
+
+                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
+
+                            <DockPanel>
+
+                                <ToggleButton x:Name="HeaderSite" DockPanel.Dock="Top"
+
+                                              IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+
+                                              Style="{DynamicResource ExpanderToggleButtonStyle}"/>
+
+                                <ContentPresenter x:Name="ExpandSite" DockPanel.Dock="Bottom" Visibility="Collapsed" Margin="0,10,0,0"/>
+
+                            </DockPanel>
+
+                        </Border>
+
+                        <ControlTemplate.Triggers>
+
+                            <Trigger Property="IsExpanded" Value="True">
+
+                                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible"/>
+
+                            </Trigger>
+
+                        </ControlTemplate.Triggers>
+
+                    </ControlTemplate>
+
+                </Setter.Value>
+
+            </Setter>
+
+        </Style>
+
+
+
+        <Style x:Key="ExpanderToggleButtonStyle" TargetType="ToggleButton">
+
+            <Setter Property="Template">
+
+                <Setter.Value>
+
+                    <ControlTemplate TargetType="ToggleButton">
+
+                        <Grid Background="Transparent">
+
+                            <Grid.ColumnDefinitions>
+
+                                <ColumnDefinition Width="*"/>
+
+                                <ColumnDefinition Width="Auto"/>
+
+                            </Grid.ColumnDefinitions>
+
+                            <ContentPresenter Grid.Column="0" Content="{Binding Header, RelativeSource={RelativeSource TemplatedParent}}"
+
+                                              VerticalAlignment="Center" TextBlock.FontWeight="SemiBold" TextBlock.FontSize="18"
+
+                                              TextBlock.Foreground="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"/>
+
+                            <Path x:Name="Arrow" Grid.Column="1" Data="M 0 0 L 4 4 L 8 0 Z"
+
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+
+                                  StrokeThickness="2" VerticalAlignment="Center" HorizontalAlignment="Center"
+
+                                  RenderTransformOrigin="0.5,0.5">
+
+                                <Path.RenderTransform>
+
+                                    <RotateTransform Angle="0"/>
+
+                                </Path.RenderTransform>
+
+                            </Path>
+
+                        </Grid>
+
+                        <ControlTemplate.Triggers>
+
+                            <Trigger Property="IsChecked" Value="True">
+
+                                <Trigger.EnterActions>
+
+                                    <BeginStoryboard>
+
+                                        <Storyboard>
+
+                                            <DoubleAnimation Storyboard.TargetName="Arrow" Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" To="180" Duration="0:0:0.2"/>
+
+                                        </Storyboard>
+
+                                    </BeginStoryboard>
+
+                                </Trigger.EnterActions>
+
+                                <Trigger.ExitActions>
+
+                                    <BeginStoryboard>
+
+                                        <Storyboard>
+
+                                            <DoubleAnimation Storyboard.TargetName="Arrow" Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" To="0" Duration="0:0:0.2"/>
+
+                                        </Storyboard>
+
+                                    </BeginStoryboard>
+
+                                </Trigger.ExitActions>
+
+                            </Trigger>
+
+                        </ControlTemplate.Triggers>
+
+                    </ControlTemplate>
+
+                </Setter.Value>
+
+            </Setter>
+
+        </Style>
+
+    </Window.Resources>
+
+
+
+    <Grid>
+
+        <Border Background="#E5202020" CornerRadius="12,0,0,12" Margin="10" BorderThickness="1,0,0,1" BorderBrush="#33FFFFFF">
+
+            <Border.Effect>
+
+                <BlurEffect Radius="15" KernelType="Gaussian"/>
+
+            </Border.Effect>
+
+        </Border>
+
+
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="10" Padding="10">
+
+            <StackPanel x:Name="RootPanel" Orientation="Vertical" Margin="10">
+
+
+
+                <Expander x:Name="ShortcutExpander" Header="SHORTCUTS"
+
+                          IsExpanded="True"
+
+                          Style="{StaticResource ModernExpanderStyle}">
+
+
+
+                    <ItemsControl x:Name="ShortcutList" Focusable="False">
+
+                        <ItemsControl.ItemTemplate>
+
+                            <DataTemplate>
+
+                                <Border x:Name="ItemBorder" Background="#4CFFFFFF" CornerRadius="8" Padding="12" Margin="0,5">
+
+                                    <Grid>
+
+                                        <Grid.ColumnDefinitions>
+
+                                            <ColumnDefinition Width="Auto"/>
+
+                                            <ColumnDefinition Width="*"/>
+
+                                        </Grid.ColumnDefinitions>
+
+
+
+                                        <TextBlock Grid.Column="0" Text="&#xE7FC;" FontFamily="Segoe Fluent Icons" FontSize="28"
+
+                                                   Foreground="White" VerticalAlignment="Center" Margin="0,0,15,0"/>
+
+
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+
+                                            <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="White">
+
+                                                <Run Text="{Binding Key1, Mode=OneWay}"/>
+
+                                                <Run Text=" + "/>
+
+                                                <Run Text="{Binding Key2, Mode=OneWay}"/>
+
+                                            </TextBlock>
+
+                                            <TextBlock FontSize="13" Foreground="#CCCCCC" Text="{Binding Function, Mode=OneWay, Converter={StaticResource ToUpperConverter}}"/>
+
+                                        </StackPanel>
+
+                                    </Grid>
+
+                                </Border>
+
+                                <DataTemplate.Triggers>
+
+                                    <Trigger Property="IsMouseOver" Value="True">
+
+                                        <Setter TargetName="ItemBorder" Property="Background" Value="#66FFFFFF"/>
+
+                                    </Trigger>
+
+                                </DataTemplate.Triggers>
+
+                            </DataTemplate>
+
+                        </ItemsControl.ItemTemplate>
+
+                    </ItemsControl>
+
+                </Expander>
+
+
+
+            </StackPanel>
+
+        </ScrollViewer>
+
+    </Grid>
+
+</Window>
