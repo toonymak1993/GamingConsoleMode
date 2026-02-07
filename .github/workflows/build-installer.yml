@@ -94,13 +94,14 @@ jobs:
       # ENTFERNT: Die unnötige Installation von MAUI-Workloads wurde entfernt.
 
       # NEU & VEREINFACHT: Baut die Projekte so, wie es Visual Studio tut.
+     # FIXED: Restore with RID for ReadyToRun, Build solution via Platform property
       - name: Build Projects
         shell: pwsh
         run: |
           $config = "${{ github.event.inputs.build_configuration }}"
           $platformInput = "${{ github.event.inputs.platform }}"
           
-          # Map the UI selection to a valid .NET Runtime Identifier (RID)
+          # Map input to RID for the restore phase only
           $rid = switch ($platformInput) {
             "x64"   { "win-x64" }
             "x86"   { "win-x86" }
@@ -108,18 +109,18 @@ jobs:
             Default { "win-x64" }
           }
 
-          Write-Host "📦 Restoring solution packages for $rid (ReadyToRun enabled)..."
-          # We pass PublishReadyToRun here so NuGet fetches the optimization packages
+          Write-Host "📦 Restoring solution packages for $rid..."
+          # Restore with RID is allowed on solutions and gets the R2R packages
           dotnet restore ${{ env.SOLUTION_PATH }} -r $rid /p:PublishReadyToRun=true
           if ($LASTEXITCODE -ne 0) { throw "Solution restore failed!" }
           
-          Write-Host "`n🔨 Building solution with Configuration='$config', Platform='$platformInput', RID='$rid'..."
-          # We use 'dotnet publish' instead of 'build' for better ReadyToRun support, 
-          # but building also works if we provide the RID.
-          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config -r $rid --no-restore /p:PublishReadyToRun=true /p:Platform=$platformInput
+          Write-Host "`n🔨 Building solution for Platform='$platformInput'..."
+          # We remove '-r $rid' here to avoid NETSDK1134, but keep /p:Platform
+          # This builds the whole solution just like Visual Studio does.
+          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config /p:Platform=$platformInput --no-restore /p:PublishReadyToRun=true
           if ($LASTEXITCODE -ne 0) { throw "Solution build failed!" }
 
-          Write-Host "`n✅ All projects built successfully with ReadyToRun optimizations!"
+          Write-Host "`n✅ All projects built successfully!"
 
       # NEU & VEREINFACHT: Findet und kopiert die korrekten Build-Ordner.
       - name: Prepare installer files
