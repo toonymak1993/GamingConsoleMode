@@ -101,26 +101,16 @@ jobs:
           $config = "${{ github.event.inputs.build_configuration }}"
           $platformInput = "${{ github.event.inputs.platform }}"
           
-          # Map input to RID for the restore phase only
-          $rid = switch ($platformInput) {
-            "x64"   { "win-x64" }
-            "x86"   { "win-x86" }
-            "ARM64" { "win-arm64" }
-            Default { "win-x64" }
-          }
-
-          Write-Host "📦 Restoring solution packages for $rid..."
-          # Restore with RID is allowed on solutions and gets the R2R packages
-          dotnet restore ${{ env.SOLUTION_PATH }} -r $rid /p:PublishReadyToRun=true
+          Write-Host "📦 Restoring solution packages..."
+          dotnet restore ${{ env.SOLUTION_PATH }}
           if ($LASTEXITCODE -ne 0) { throw "Solution restore failed!" }
           
           Write-Host "`n🔨 Building solution for Platform='$platformInput'..."
-          # We remove '-r $rid' here to avoid NETSDK1134, but keep /p:Platform
-          # This builds the whole solution just like Visual Studio does.
-          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config /p:Platform=$platformInput --no-restore /p:PublishReadyToRun=true
+          # WICHTIG: PublishReadyToRun=false deaktiviert die problematische Optimierung
+          dotnet build ${{ env.SOLUTION_PATH }} --configuration $config /p:Platform=$platformInput --no-restore /p:PublishReadyToRun=false
           if ($LASTEXITCODE -ne 0) { throw "Solution build failed!" }
 
-          Write-Host "`n✅ All projects built successfully!"
+          Write-Host "`n✅ Build erfolgreich ohne SAC-kritische Optimierungen!"
 
       # NEU & VEREINFACHT: Findet und kopiert die korrekten Build-Ordner.
       - name: Prepare installer files
