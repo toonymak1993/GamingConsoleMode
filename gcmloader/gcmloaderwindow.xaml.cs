@@ -63,6 +63,8 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+        
+
         #region soundcontrol
         // Cache for sounds to avoid loading from disk every time
         private readonly Dictionary<string, Uri> _soundCache = new();
@@ -572,7 +574,6 @@ namespace gcmloader
         private const long WS_THICKFRAME = 0x00040000L;
         #endregion window engine
         #region wingamepad
-        private DispatcherTimer _wingamepadMonitor;
         private bool _isExiting = false; 
         #endregion wingamepad
         #region Startup Video
@@ -1468,6 +1469,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             FocusLossOverlay.Visibility = Visibility.Visible;
             _isOverlayActive = true;
 
+
+           
+
             // 2. Das richtige Logo basierend auf der Einstellung laden
             string currentLauncher = AppSettings.Load<string>("launcher");
             string bootLogoPath = currentLauncher switch
@@ -1478,6 +1482,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 "gfn" => "ms-appx:///Assets/geforcenow.png", 
                 _ => "ms-appx:///Assets/gcm_ui_logo.png"
             };
+
+
+
 
             // 3. Das BILD im Overlay austauschen
             // Da wir im XAML dem Image keinen Namen gegeben haben, greifen wir über .Child darauf zu
@@ -2292,69 +2299,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _timer.Start();
         }
         #endregion mainwindow design
-        #region overlay window
-        private static Process _overlayProcess;
-
-        private static async System.Threading.Tasks.Task StartOverlayAsync()
-        {
-            try
-            {
-                string overlayPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GCM", "overlaywindow", "OverlayWindow.exe");
-
-                if (!File.Exists(overlayPath))
-                {
-                    Console.WriteLine($"[ERROR] OverlayWindow.exe not found at: {overlayPath}");
-                    return;
-                }
-
-                // Start overlay process
-                _overlayProcess = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = overlayPath,
-                        WorkingDirectory = Path.GetDirectoryName(overlayPath),
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    }
-                };
-
-                _overlayProcess.Start();
-                Console.WriteLine("[INFO] OverlayWindow started.");
-
-
-                // Load and apply setting for showshortcutsatstartup
-                try
-                {
-                    bool showshortcutsatstartup = AppSettings.Load<bool>("showshortcutsatstartup");
-                    if (showshortcutsatstartup)
-                    {
-                        // Wait a moment to allow it to initialize
-                        await System.Threading.Tasks.Task.Delay(500); // give it time to start the pipe server
-
-                        // Send WELCOME mode to overlay
-                        using var pipeClient = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
-                        pipeClient.Connect(2000); // wait up to 2s
-                        using var writer = new StreamWriter(pipeClient) { AutoFlush = true };
-                        writer.WriteLine("WELCOME");
-                        Console.WriteLine("[INFO] Sent WELCOME command to overlay.");
-
-                        // Wait for welcome animation to complete (e.g. 6 seconds)
-                        await System.Threading.Tasks.Task.Delay(6000);
-                    }
-                }    
-            
-            catch
-            {
-                // If not found or invalid, default to false
-                AppSettings.Save("showshortcutsatstartup", false);
-            }
-        }
-            catch (Exception ex)
-            {
-                Console.WriteLine("[ERROR] Problem starting OverlayWindow: " + ex.Message);
-            }
-        }
 
         private void StartTaskbarHidingLoop()
         {
@@ -2404,29 +2348,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine($"Error starting taskbar hider: {ex.Message}");
             }
         }
-
-
-
-
-        private static void StopOverlay()
-        {
-            try
-            {
-                if (_overlayProcess != null && !_overlayProcess.HasExited)
-                {
-                    _overlayProcess.Kill();
-                    _overlayProcess.WaitForExit();
-                    _overlayProcess.Dispose();
-                    _overlayProcess = null;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Overlay error: {ex.Message}");
-            }
-        }
-
-        #endregion overlay window
 
         [DllImport("dwmapi.dll")]
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
@@ -2533,45 +2454,55 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         public static void SendOverlayNotification(string message)
         {
-            
             try
             {
                 bool shortcutpopup = AppSettings.Load<bool>("shortcutpopup");
 
                 if (shortcutpopup)
                 {
-                    //play sound
-
+                    // 1. Sound abspielen
                     try
                     {
-                        SoundPlayer player = new SoundPlayer(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets\\shortcut.wav"));
-                        player.Play();
+                        string soundPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "shortcut.wav");
+                        if (System.IO.File.Exists(soundPath))
+                        {
+                            new System.Media.SoundPlayer(soundPath).Play();
+                        }
                     }
                     catch { }
 
-
-                    try
+                    // 2. Das neue Popup-Fenster erstellen und anzeigen
+                    // WICHTIG: Wir nutzen App.m_window.DispatcherQueue, um auf den UI-Thread zu kommen.
+                    if (App.m_window != null)
                     {
-                       
-
-
-                        using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
-                        client.Connect(1000);
-                        using var writer = new StreamWriter(client) { AutoFlush = true };
-                        writer.WriteLine("NOTIFY:" + message);
+                        App.m_window.ShowInAppNotification(message);
                     }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine("Could not send toast to overlay: " + ex.Message);
-                    }
-
                 }
             }
             catch
             {
-
                 AppSettings.Save("shortcutpopup", true);
             }
+        }
+
+        public void ShowInAppNotification(string message)
+        {
+            // Wir müssen sicherstellen, dass wir auf dem UI-Thread sind
+            this.DispatcherQueue.TryEnqueue(() =>
+            {
+                // 1. Das neue Notification-Control erstellen
+                var notification = new InAppNotification(message);
+
+                // 2. Event abonnieren: Wenn die Animation fertig ist...
+                notification.AnimationFinished += (s, args) =>
+                {
+                    // ...entfernen wir das Element wieder aus der Liste (Speicher freigeben)
+                    NotificationStack.Children.Remove(notification);
+                };
+
+                // 3. Zum StackPanel hinzufügen (erscheint sofort und animiert sich rein)
+                NotificationStack.Children.Add(notification);
+            });
         }
 
 
@@ -3495,15 +3426,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Console.WriteLine("PluginLoader_noconsole killed");
             CleanupLogging();
             preaudio(false, true);
-            StartWingamepad();
-           
-
-            // Overlay-Prozess beenden
-            foreach (var proc in Process.GetProcessesByName("OverlayWindow"))
-            {
-                try { proc.Kill(); } catch { }
-            }
-
+          
             // UAC-Einstellungen wiederherstellen
             try
             {
@@ -4681,138 +4604,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        private void SetupWingamepadTask()
-        {
-            const string taskName = "GCM_wingamepad";
-            const string processName = "wingamepad";
 
-            // Schritt 1: Beende sofort alle laufenden Instanzen des Prozesses.
-            try
-            {
-                Process[] runningProcesses = Process.GetProcessesByName(processName);
-                foreach (var process in runningProcesses)
-                {
-                    process.Kill();
-                    Console.WriteLine($"Laufender Prozess '{processName}' wurde beendet.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Fehler beim Beenden von '{processName}': {ex.Message}");
-            }
-
-            // Schritt 2: Prüfe die Einstellung.
-            bool seamlessSwitchEnabled = false;
-            try
-            {
-                seamlessSwitchEnabled = AppSettings.Load<bool>("useseamlessswitchtogcm");
-            }
-            catch
-            {
-                AppSettings.Save("useseamlessswitchtogcm", false); // Standardwert setzen, falls nicht vorhanden
-            }
-
-            // Schritt 3: Task erstellen oder löschen.
-            using (TaskService ts = new TaskService())
-            {
-                var existingTask = ts.FindTask(taskName);
-
-                if (seamlessSwitchEnabled)
-                {
-                    // Einstellung ist AN: Task erstellen, falls er noch nicht existiert.
-                    if (existingTask == null)
-                    {
-                        Console.WriteLine($"Task '{taskName}' existiert nicht und wird erstellt...");
-                        TaskDefinition td = ts.NewTask();
-                        td.RegistrationInfo.Description = "Startet den GCM Gamepad Listener für den Seamless Switch.";
-                        td.Principal.LogonType = TaskLogonType.InteractiveToken;
-                        td.Principal.RunLevel = TaskRunLevel.Highest;
-
-                        // Trigger: Bei jeder Benutzeranmeldung
-                        td.Triggers.Add(new LogonTrigger());
-
-                        // Holt den Pfad zum "Programme (x86)"-Ordner, egal wo er auf dem System ist.
-                        string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-                        // Baut den vollständigen Pfad zur .exe-Datei zusammen.
-                        string exePath = Path.Combine(programFilesX86, "GCM", "wingamepad", "wingamepad.exe");
-                       
-                        td.Actions.Add(new ExecAction(exePath));
-
-                        // ### ANPASSUNG FÜR HANDHELDS ###
-                        // Erlaube die Ausführung im Akkubetrieb.
-                        td.Settings.StopIfGoingOnBatteries = false;
-                        td.Settings.DisallowStartIfOnBatteries = false;
-                        // ### ENDE DER ANPASSUNG ###
-
-                        ts.RootFolder.RegisterTaskDefinition(taskName, td);
-                        Console.WriteLine($"Task '{taskName}' wurde erfolgreich erstellt.");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Task '{taskName}' existiert bereits.");
-                    }
-                }
-                else
-                {
-                    // Einstellung ist AUS: Task löschen, falls er existiert.
-                    if (existingTask != null)
-                    {
-                        ts.RootFolder.DeleteTask(taskName);
-                        Console.WriteLine($"Task '{taskName}' wurde entfernt.");
-                    }
-                }
-            }
-        }
-        private void StartWingamepad()
-        {
-            try
-            {
-                // 1. Prüfen, ob die Funktion in den Einstellungen aktiviert ist.
-                if (AppSettings.Load<bool>("useseamlessswitchtogcm"))
-                {
-                
-                    string exePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GCM", "wingamepad", "wingamepad.exe");
-
-
-                    string processName = "wingamepad";
-
-                    // 2. Sicherstellen, dass die Datei existiert.
-                    if (File.Exists(exePath))
-                    {
-                        // NEU: Zuerst alle alten Instanzen von wingamepad.exe beenden.
-                        try
-                        {
-                            Process[] existingProcesses = Process.GetProcessesByName(processName);
-                            foreach (var proc in existingProcesses)
-                            {
-                                proc.Kill();
-                                Console.WriteLine("Alter wingamepad-Prozess wurde beendet.");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Fehler beim Beenden alter wingamepad-Prozesse: {ex.Message}");
-                        }
-
-                        // 3. Den neuen Prozess starten.
-                        Process.Start(exePath);
-                        Console.WriteLine("wingamepad.exe wurde für den Seamless Switch gestartet.");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Fehler: wingamepad.exe wurde nicht unter '{exePath}' gefunden.");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Seamless Switch ist deaktiviert, wingamepad.exe wird nicht gestartet.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Fehler beim Versuch, wingamepad.exe zu starten: {ex.Message}");
-            }
-        }
         private async Task StartOtherLauncher()
         {
             try
@@ -4954,12 +4746,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // ===================================
             SettingsVerify();
             KeyboardRedirector.EnableRedirect();
-            await StartOverlayAsync();
             await Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
             IsJoyxoffInstalledAndStart();
             EnsureTouchKeyboardServiceIsRunning();
-            SetupWingamepadTask();
             cssloader();
             preaudio(true, false);
             prestartlist();
@@ -6928,16 +6718,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         #endregion audio management
         #region shortcut overlay
-        public static void showoverlay()
-        {
 
-            using var client = new NamedPipeClientStream(".", "GCMOverlayPipe", PipeDirection.Out);
-                client.Connect(100); // max 100ms warten
-                using var writer = new StreamWriter(client);
-                writer.WriteLine("TOGGLE");
-                writer.Flush();
-
-        }
         #endregion shortcut overlay
         #region shortcut xbox bar
         public static void xboxbar()
@@ -8280,10 +8061,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _shortcutActions["switch tab"] = SendWinTab;
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
                 _shortcutActions["performance overlay"] = TriggerPerformanceOverlay;
-                _shortcutActions["show overlay"] = showoverlay;
                 _shortcutActions["xbox bar"] = xboxbar;
                 _shortcutActions["lossless scaling"] = LosslessScaling;
-                _shortcutActions["winmodechange"] = Triggerbacktowin;
                 _shortcutActions["xbox keyboard"] = ToggleTouchKeyboard;
             }
             catch (Exception ex)

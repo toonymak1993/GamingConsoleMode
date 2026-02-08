@@ -1,4 +1,5 @@
-﻿using Microsoft.UI.Xaml;
+﻿using GAMINGCONSOLEMODE;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
@@ -29,7 +30,8 @@ namespace gcmloader
 {
     public partial class App : Application
     {
-        private Window m_window;
+        public static MainWindow m_window;
+
         private static Mutex _mutex = null;
         private const string AppName = "GameConsoleModeLoader";
 
@@ -57,7 +59,15 @@ namespace gcmloader
                 return;
             }
 
+            CommunityToolkit.WinUI.Notifications.ToastNotificationManagerCompat.OnActivated += (toastArgs) =>
+            {
+                // Hier könnte man Code ausführen, wenn jemand auf den Toast klickt.
+                // Lassen wir erst mal leer.
+            };
+
             // Nur wenn beide Prüfungen bestanden sind, wird das Fenster erstellt.
+
+            AllyHardwareControl.InitializeAllyButtons();
             m_window = new MainWindow();
             m_window.Activate();
         }

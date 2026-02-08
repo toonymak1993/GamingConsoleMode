@@ -1,0 +1,100 @@
+<UserControl
+    x:Class="gcmloader.InAppNotification"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Width="350" 
+    Height="80">
+
+    <UserControl.Resources>
+        <Storyboard x:Name="EnterStoryboard">
+            <DoubleAnimation Storyboard.TargetName="RootBorder" 
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                             From="400" To="0" Duration="0:0:0.6">
+                <DoubleAnimation.EasingFunction>
+                    <BackEase EasingMode="EaseOut" Amplitude="0.6"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="RootBorder" 
+                             Storyboard.TargetProperty="Opacity"
+                             From="0" To="1" Duration="0:0:0.3"/>
+        </Storyboard>
+
+        <Storyboard x:Name="ExitStoryboard" Completed="ExitStoryboard_Completed">
+            <DoubleAnimation Storyboard.TargetName="RootBorder" 
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                             To="400" Duration="0:0:0.4">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseIn"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="RootBorder" 
+                             Storyboard.TargetProperty="Opacity"
+                             To="0" Duration="0:0:0.3"/>
+        </Storyboard>
+    </UserControl.Resources>
+
+    <Border x:Name="RootBorder"
+            CornerRadius="12"
+            BorderThickness="1"
+            Translation="0,0,32">
+        <Border.RenderTransform>
+            <TranslateTransform X="400"/>
+        </Border.RenderTransform>
+
+        <Border.Background>
+            <SolidColorBrush Color="#121212" Opacity="0.95"/>
+        </Border.Background>
+
+        <Border.BorderBrush>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#40FFFFFF" Offset="0"/>
+                <GradientStop Color="#10FFFFFF" Offset="0.5"/>
+                <GradientStop Color="#00FFFFFF" Offset="1"/>
+            </LinearGradientBrush>
+        </Border.BorderBrush>
+
+        <Border.Shadow>
+            <ThemeShadow/>
+        </Border.Shadow>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="60"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0">
+                <FontIcon Glyph="&#xE946;" 
+                          FontFamily="Segoe Fluent Icons" 
+                          Foreground="#00FF80" 
+                          FontSize="24"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center">
+                    <FontIcon.Shadow>
+                        <ThemeShadow/>
+                    </FontIcon.Shadow>
+                </FontIcon>
+            </Grid>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2" Margin="0,0,15,0">
+                <TextBlock Text="SYSTEM INFO" 
+                           Foreground="#70FFFFFF" 
+                           FontSize="10" 
+                           FontWeight="Bold" 
+                           CharacterSpacing="100"/>
+
+                <TextBlock x:Name="MessageText" 
+                           Text="Notification" 
+                           Foreground="White" 
+                           FontSize="14" 
+                           FontWeight="SemiBold" 
+                           TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+
+            <Rectangle Grid.Column="1" HorizontalAlignment="Right" Width="2" Height="30" RadiusX="1" RadiusY="1" Fill="#20FFFFFF" Margin="0,0,10,0"/>
+        </Grid>
+    </Border>
+</UserControl>
