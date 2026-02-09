@@ -1,14 +1,11 @@
 ; Inno Setup Script für GCM
-; Finale Version - Mit Registry-Cleanup für alte, fehlerhafte Installationen.
+; Finale Version - Mit automatischem Settings-Reset für saubere Migration
 
-; Define version as a preprocessor variable that can be updated by CI
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
 #endif
 
 [Setup]
-; WICHTIG: Eine feste AppId ist der Standard für saubere Upgrades.
-; Ich habe eine für dich generiert. Behalte diese für alle zukünftigen Versionen bei!
 AppId={{5E8D8A7F-7201-4A57-A686-352B3C2A5393}}
 AppName=GCM Game Console Mode
 AppVersion={#MyAppVersion}
@@ -51,15 +48,14 @@ Name: "{commondesktop}\GCM Mode"; Filename: "{app}\gcmloader\gcmloader.exe"; Ico
 Filename: "{app}\GAMINGCONSOLEMODE.exe"; Description: "Launch GCM Settings"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
-// Prozedur zum Beenden laufender Prozesse (verhindert Sperrfehler)
 procedure KillProcess(const exeName: string);
 var
   ResultCode: Integer;
 begin
+  // Taskkill works best with /F (force) and /IM (imagename)
   Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM ' + exeName + '.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// Verzeichnisse löschen (für alte Pfade)
 procedure DeleteDirectory(const dirPath: string);
 begin
   if DirExists(dirPath) then
@@ -72,18 +68,30 @@ procedure InitializeWizard;
 var
   processList: array of string;
   dirsToDelete: array of string;
+  settingsPath: string;
   i: Integer;
 begin
-  // 1. Prozesse beenden
+  // 1. Terminate all running GCM processes to prevent file locks
   processList := ['wingamepad', 'gcmloader', 'GAMINGCONSOLEMODE', 'Overlaywindow', 'flowlauncher'];
   for i := 0 to GetArrayLength(processList) - 1 do
     KillProcess(processList[i]);
 
-  // 2. Alte/falsche Ordnerpfade aufräumen
+  // 2. Clean up old/obsolete installation paths
   dirsToDelete := [
     ExpandConstant('{pf32}\GCMcrew'),
     ExpandConstant('{pf32}\GCM\GCM')
   ];
   for i := 0 to GetArrayLength(dirsToDelete) - 1 do
     DeleteDirectory(dirsToDelete[i]);
+
+  // 3. Reset Settings for migration (Deletes the gcmsettings folder in AppData)
+  // This ensures the new TOML logic can generate a fresh, valid config.
+  settingsPath := ExpandConstant('{userappdata}\gcmsettings');
+  if DirExists(settingsPath) then
+  begin
+    if DelTree(settingsPath, True, True, True) then
+      Log('Successfully cleared old settings for migration.')
+    else
+      Log('Note: Could not clear settings folder, might be in use.');
+  end;
 end;
