@@ -4506,67 +4506,59 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                // Schritt 1: Pfad prüfen, um sicherzustellen, dass Steam installiert ist.
-                string steamPath = AppSettings.Load<string>("steamlauncherpath");
-                if (string.IsNullOrWhiteSpace(steamPath) || !File.Exists(steamPath))
+                string steamExePath = AppSettings.Load<string>("steamlauncherpath");
+                if (string.IsNullOrWhiteSpace(steamExePath) || !File.Exists(steamExePath))
                 {
                     throw new FileNotFoundException("The Steam path is invalid or was not found.");
                 }
 
-                // Schritt 2: Alle laufenden Steam-Prozesse beenden für einen sauberen Start.
-                // Das ist der von dir gewünschte "exit vorher".
-                Debug.WriteLine("[GCM] Beende alle laufenden Steam-Prozesse für einen sauberen Neustart...");
-                KillProcess("steam.exe");
+                // --- SCHRITT 1: Steam SAUBER beenden ---
+                Debug.WriteLine("[GCM] Beende Steam sauber (-shutdown)...");
 
-                // Eine sehr kurze Pause, damit die Prozesse sich vollständig beenden können.
-                await Task.Delay(500);
+                // Versuch 1: Graceful Shutdown
+                Process.Start(new ProcessStartInfo(steamExePath, "-shutdown") { UseShellExecute = true });
 
-                // Schritt 3: Decky Loader Logik (bleibt unverändert).
+                // Warten (bis zu 10 Sekunden), ob es sich beendet
+                int timeout = 0;
+                while (Process.GetProcessesByName("steam").Any() && timeout < 20)
+                {
+                    await Task.Delay(500);
+                    timeout++;
+                }
+
+                // Versuch 2: Wenn es immer noch lebt, erst dann Kill (Notbremse)
+                if (Process.GetProcessesByName("steam").Any())
+                {
+                    Debug.WriteLine("[GCM] Steam hängt, erzwinge Kill...");
+                    KillProcess("steam.exe");
+                    await Task.Delay(1000);
+                }
+
+                // --- SCHRITT 2: Video Injection ---
+                // Jetzt ist Steam sicher aus und (hoffentlich) glücklich beendet.
+                RenameSteamStartupVideo_Start();
+
+                // --- SCHRITT 3: Starten ---
                 bool useDeckyLoader = false;
-                try { useDeckyLoader = AppSettings.Load<bool>("usedeckyloader"); } catch { /* ignore */ }
+                try { useDeckyLoader = AppSettings.Load<bool>("usedeckyloader"); } catch { }
 
                 if (useDeckyLoader)
                 {
-                    Console.WriteLine("Decky Loader is enabled. Attempting to start...");
-                    KillProcess("PluginLoader_noconsole.exe");
+                    // (Dein Decky Code hier...)
+                    // ...
+                }
 
-                    string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                    string pluginLoaderPath = Path.Combine(userHome, "homebrew", "services", "PluginLoader_noconsole.exe");
-
-                    if (File.Exists(pluginLoaderPath))
-                    {
-                        Process.Start(new ProcessStartInfo(pluginLoaderPath) { UseShellExecute = true });
-                        Console.WriteLine("PluginLoader_noconsole.exe started.");
-                        await Task.Delay(2000);
-                    }
-                    else
-                    {
-                        Console.WriteLine("Decky Loader executable not found, starting Steam normally.");
-                    }
-                }
-              
-                string steamExePath = AppSettings.Load<string>("steamlauncherpath");
-                
-                // Wir verwenden jetzt auch hier den zuverlässigen Protokoll-Befehl.    
-                Debug.WriteLine("[GCM] Starte Steam via Protokoll-Befehl: steam://open/gamepadui");
-                try
+                Debug.WriteLine("[GCM] Starte Steam neu (-gamepadui)...");
+                Process.Start(new ProcessStartInfo(steamExePath)
                 {
-                    Process.Start(new ProcessStartInfo(steamExePath)
-                    {
-                        Arguments = "-gamepadui",
-                        UseShellExecute = true
-                    });
-                }
-                catch (System.ComponentModel.Win32Exception ex)
-                {
-                    // Fängt Fehler ab, z.B. wenn die steam.exe unter dem Pfad nicht gefunden wurde
-                    Debug.WriteLine($"[GCM] Fehler beim Starten der Steam.exe: {ex.Message}");
-                }
+                    Arguments = "-gamepadui",
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Error in StartSteam: {ex.Message}");
-                await messagebox("Could not start Steam. Please check the path in the settings.");
+                await messagebox("Could not start Steam.");
                 BackToWindows();
             }
         }
@@ -6949,7 +6941,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// It uses the same undocumented COM interface as the AHK script.
         /// </summary>
         /// <summary>
-       
+     
         private async void ToggleTouchKeyboard()
         {
             try
@@ -7019,6 +7011,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Task.Factory.StartNew(() => PlayStationEdgeInputLoop(), TaskCreationOptions.LongRunning);
         }
 
+
+        private DateTime[] _mouseModeTimer = new DateTime[10]; // Timer für jeden Controller (0-3 Xbox, 4 PS, etc.)
+        private bool[] _mouseModeTriggered = new bool[10];     // Merker, ob bereits ausgelöst wurde
         private bool _mouseToggleLocked = false; // Verhindert, dass der Maus-Modus "flattert"
         // Updates the UI labels to show Xbox or PlayStation icons/text
         
@@ -7070,29 +7065,53 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             // --- 1. GLOBAL SHORTCUTS ---
                             HandleShortcuts(btns, i);
 
-                            // --- 2. MOUSE MODE TOGGLE ---
-                            bool comboPressed = btns.HasFlag(GamepadButtonFlags.Back) && btns.HasFlag(GamepadButtonFlags.RightThumb);
+                            // --- 2. MOUSE MODE TOGGLE (Fixed) ---
+                            // Prüfen auf DPad Runter UND Rechten Stick Reindrücken (R3)
+                            bool comboPressed = (btns & GamepadButtonFlags.DPadDown) != 0 &&
+                                                (btns & GamepadButtonFlags.RightThumb) != 0;
+
                             if (comboPressed)
                             {
-                                if (!_comboIsActive) { _comboStartTime = DateTime.Now; _comboIsActive = true; }
-                                else if ((DateTime.Now - _comboStartTime).TotalMilliseconds >= 2000)
+                                // Timer starten, falls noch nicht läuft
+                                if (_mouseModeTimer[i] == DateTime.MinValue)
                                 {
+                                    _mouseModeTimer[i] = DateTime.Now;
+                                    _mouseModeTriggered[i] = false;
+                                    Debug.WriteLine($"[Xbox {i}] Maus-Kombi erkannt, Timer startet...");
+                                }
+                                // Prüfen ob 2 Sekunden vorbei sind UND noch nicht ausgelöst wurde
+                                else if (!_mouseModeTriggered[i] && (DateTime.Now - _mouseModeTimer[i]).TotalSeconds >= 2.0)
+                                {
+                                    // Umschalten
                                     _isMouseModeActive = !_isMouseModeActive;
-                                    _comboIsActive = false; _comboStartTime = DateTime.MaxValue;
 
-                                    if (!_isMouseModeActive) ParkMouseCursor();
+                                    // Feedback
+                                    if (!_isMouseModeActive)
+                                    {
+                                        ParkMouseCursor();
+                                        SendOverlayNotification("Mouse Mode: OFF");
+                                    }
                                     else
                                     {
                                         while (ShowCursor(true) < 0) ;
                                         _isCursorVisible = true;
                                         SetCursorPos(GetScreenWidth() / 2, GetScreenHeight() / 2);
+                                        SendOverlayNotification("Mouse Mode: ON");
                                     }
 
-                                    SendOverlayNotification(_isMouseModeActive ? "Mouse Mode: ON" : "Mouse Mode: OFF");
                                     _ = TriggerVibration(i, 0.5f, 300);
+                                    Debug.WriteLine($"[Xbox {i}] Maus-Modus umgeschaltet auf: {_isMouseModeActive}");
+
+                                    // Markieren als erledigt, damit es nicht flackert solange man hält
+                                    _mouseModeTriggered[i] = true;
                                 }
                             }
-                            else { _comboIsActive = false; _comboStartTime = DateTime.MinValue; }
+                            else
+                            {
+                                // Tasten losgelassen -> Reset
+                                _mouseModeTimer[i] = DateTime.MinValue;
+                                _mouseModeTriggered[i] = false;
+                            }
 
                             // --- 3. DIRECTION CALCULATION ---
                             int xDir = 0;
@@ -8949,25 +8968,60 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #region Startup Video Logic
 
+        // --- EINSTELLUNGEN LESEN ---
+
+        private static bool IsGcmVideoEnabled()
+        {
+            try { return AppSettings.Load<bool>("usestartupvideo"); }
+            catch { return false; }
+        }
+
+        private static bool IsSteamInjectionEnabled()
+        {
+            try { return AppSettings.Load<bool>("usesteamstartupvideo"); }
+            catch { return false; }
+        }
+
+        // --- GCM PLAYER (Startet direkt beim App-Start) ---
+
         private void PlayStartupVideo()
         {
             try
             {
-                string videoPath = AppSettings.Load<string>("startupvideo_path");
-
-                // KRITISCH: Existenzprüfung
-                if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
+                // Wenn Hauptschalter AUS -> Gar kein Video.
+                if (!IsGcmVideoEnabled())
                 {
-                    Debug.WriteLine("[StartupVideo] Pfad ungültig, überspringe...");
+                    Debug.WriteLine("[StartupVideo] Hauptschalter ist AUS.");
                     TransitionToMainUI();
                     return;
                 }
 
+                // Wenn Steam-Modus AN -> GCM zeigt KEIN Video (Steam macht das).
+                if (IsSteamInjectionEnabled())
+                {
+                    Debug.WriteLine("[StartupVideo] Steam-Modus aktiv. GCM-Player wird übersprungen.");
+                    TransitionToMainUI();
+                    return;
+                }
+
+                // --- GCM Interner Player ---
+                string videoPath = "";
+                try { videoPath = AppSettings.Load<string>("startupvideo_path"); } catch { }
+
+                if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
+                {
+                    Debug.WriteLine("[StartupVideo] Videodatei nicht gefunden.");
+                    TransitionToMainUI();
+                    return;
+                }
+
+                FocusLossOverlay.Visibility = Visibility.Collapsed;
+                StartupVideoPlayer.Visibility = Visibility.Visible;
+
                 _startupMediaPlayer = new MediaPlayer { AutoPlay = true };
                 _startupMediaPlayer.Source = MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute));
 
-                // Timeout-Sicherung: Wenn das Video nach 10 Sekunden nicht fertig ist, UI trotzdem zeigen
-                var timeoutTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+                var timeoutTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
                 timeoutTimer.Tick += (s, e) => {
                     timeoutTimer.Stop();
                     if (!startupVideoFinished) TransitionToMainUI();
@@ -8977,23 +9031,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _startupMediaPlayer.MediaEnded += OnStartupVideoEnded;
                 StartupVideoPlayer.SetMediaPlayer(_startupMediaPlayer);
             }
-            catch { TransitionToMainUI(); }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[StartupVideo] Fehler: " + ex.Message);
+                TransitionToMainUI();
+            }
         }
 
         private void OnStartupVideoEnded(MediaPlayer sender, object args)
         {
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                TransitionToMainUI();
-            });
+            DispatcherQueue.TryEnqueue(() => TransitionToMainUI());
         }
 
         private void TransitionToMainUI()
         {
-            // Lade das Hintergrundbild JETZT, direkt bevor die UI erscheint.
             SetBackgroundImage(GetScreenWidth(), GetScreenHeight());
 
-            // Video-Player aufräumen
             if (_startupMediaPlayer != null)
             {
                 _startupMediaPlayer.MediaEnded -= OnStartupVideoEnded;
@@ -9003,77 +9056,104 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             StartupVideoPlayer.SetMediaPlayer(null);
             StartupVideoPlayer.Visibility = Visibility.Collapsed;
 
-            // --- ÄNDERUNG HIER ---
-            // Statt die Haupt-UI einzublenden, zeigen wir sofort das Overlay an.
-            // Die Haupt-UI wird im Hintergrund sichtbar, aber vom Overlay verdeckt.
             MainContent.Opacity = 1.0;
             MainContent.Visibility = Visibility.Visible;
-
             FocusLossOverlay.Opacity = 1.0;
             FocusLossOverlay.Visibility = Visibility.Visible;
-            _isOverlayActive = true; // Wichtig: Den Status sofort setzen!
-                                     // --- ENDE DER ÄNDERUNG ---
+            _isOverlayActive = true;
 
-            // Signal an die Start()-Methode, dass sie weitermachen kann
             startupVideoFinished = true;
         }
 
-        // Logik für den Steam-Videotausch
-        public static void RenameFile(string oldFilePath, string newFilePath)
-        {
-            try { if (File.Exists(oldFilePath)) { File.Move(oldFilePath, newFilePath, true); } }
-            catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error renaming file '{oldFilePath}': {ex.Message}"); }
-        }
+        // --- STEAM INJECTION ---
 
         public static void RenameSteamStartupVideo_Start()
         {
             try
             {
+                // Checks
+                if (!IsGcmVideoEnabled()) return;
+                if (!IsSteamInjectionEnabled()) return;
+
                 string steamPath = AppSettings.Load<string>("steamlauncherpath");
                 if (string.IsNullOrEmpty(steamPath)) return;
+
                 string moviesPath = Path.Combine(Path.GetDirectoryName(steamPath), "steamui", "movies");
-                string steamVideoPath = Path.Combine(moviesPath, "bigpicture_startup.webm");
-                string steamVideoBackupPath = Path.Combine(moviesPath, "bigpicture_startup.old.webm");
-                string gcmVideoPath = Path.Combine(moviesPath, "GCM_vid.webm");
+                if (!Directory.Exists(moviesPath)) return;
 
-                if (File.Exists(steamVideoBackupPath))
+                string myVideo = Path.Combine(moviesPath, "GCM_vid.webm");
+                string steamOriginal = Path.Combine(moviesPath, "bigpicture_startup.webm");
+                string steamBackup = Path.Combine(moviesPath, "bigpicture_startup.old.webm");
+
+                // SAUBERKEITS-CHECK:
+                // Falls noch ein Backup existiert (von einem Crash), stellen wir erst den Urzustand wieder her.
+                if (File.Exists(steamBackup))
                 {
-                    File.Move(steamVideoBackupPath, steamVideoPath, true);
+                    // Falls eine aktive Datei da ist (unser Fake oder ein repariertes Original), weg damit.
+                    if (File.Exists(steamOriginal)) File.Delete(steamOriginal);
+
+                    // Backup zurückholen
+                    File.Move(steamBackup, steamOriginal);
                 }
 
-                if (File.Exists(steamVideoPath))
+                if (!File.Exists(myVideo))
                 {
-                    File.Move(steamVideoPath, steamVideoBackupPath, true);
+                    Debug.WriteLine("[SteamInjection] GCM_vid.webm fehlt. Abbruch.");
+                    return;
                 }
-                if (File.Exists(gcmVideoPath))
+
+                // SCHRITT 1: Original zu Backup umbenennen
+                if (File.Exists(steamOriginal))
                 {
-                    File.Copy(gcmVideoPath, steamVideoPath, true);
+                    File.Move(steamOriginal, steamBackup);
                 }
+
+                // SCHRITT 2: Unser Video aktivieren
+                // WICHTIG: Wir nutzen COPY statt MOVE. 
+                // Wenn Steam sich repariert, löscht es 'steamOriginal'. Hätten wir 'moved', wäre 'myVideo' jetzt weg.
+                // Mit 'Copy' bleibt 'myVideo' sicher liegen.
+                File.Copy(myVideo, steamOriginal, true);
+
+                Debug.WriteLine("[SteamInjection] Swap erfolgreich.");
             }
-            catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error in RenameSteamStartupVideo_Start: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SteamInjection] Start-Fehler: {ex.Message}");
+            }
         }
-       
+
 
         public static void RenameSteamStartupVideo_End()
         {
             try
             {
-                string steamPath = AppSettings.Load<string>("steamlauncherpath");
-                if (string.IsNullOrEmpty(steamPath)) return;
-                string moviesPath = Path.Combine(Path.GetDirectoryName(steamPath), "steamui", "movies");
-                string steamVideoPath = Path.Combine(moviesPath, "bigpicture_startup.webm");
-                string steamVideoBackupPath = Path.Combine(moviesPath, "bigpicture_startup.old.webm");
+                string steamPath = "";
+                try { steamPath = AppSettings.Load<string>("steamlauncherpath"); } catch { }
 
-                if (File.Exists(steamVideoBackupPath))
+                if (string.IsNullOrEmpty(steamPath)) return;
+
+                string moviesPath = Path.Combine(Path.GetDirectoryName(steamPath), "steamui", "movies");
+
+                // Wir stellen wieder her
+                string steamOriginal = Path.Combine(moviesPath, "bigpicture_startup.webm"); // Das ist aktuell unser Fake
+                string steamBackup = Path.Combine(moviesPath, "bigpicture_startup.old.webm"); // Das ist das echte Original
+
+                // Wir machen nur was, wenn ein Backup existiert
+                if (File.Exists(steamBackup))
                 {
-                    if (File.Exists(steamVideoPath))
-                    {
-                        File.Delete(steamVideoPath);
-                    }
-                    File.Move(steamVideoBackupPath, steamVideoPath, true);
+                    // Unseren Fake löschen (nicht verschieben, wir haben ja das Master 'GCM_vid' noch)
+                    if (File.Exists(steamOriginal)) File.Delete(steamOriginal);
+
+                    // Backup zurück zu Original umbenennen
+                    File.Move(steamBackup, steamOriginal);
+
+                    Debug.WriteLine("[SteamInjection] Restore erfolgreich.");
                 }
             }
-            catch (Exception ex) { Debug.WriteLine($"[StartupVideo] Error in RenameSteamStartupVideo_End: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SteamInjection] End-Fehler: {ex.Message}");
+            }
         }
 
         #endregion

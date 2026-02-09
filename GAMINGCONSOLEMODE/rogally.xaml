@@ -29,7 +29,7 @@
 
             <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="10" Margin="10">
                 <TextBlock Text="Button M2" FontWeight="Bold" HorizontalAlignment="Center" FontSize="18"/>
-                <ComboBox x:Name="ComboM2" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ComboM_SelectionChanged">
+                <ComboBox x:Name="ComboM2" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ComboM_SelectionChanged" IsEnabled="False">
                     <ComboBoxItem Content="None"/>
                     <ComboBoxItem Content="Steam"/>
                     <ComboBoxItem Content="Steam Sidepanel"/>
@@ -47,7 +47,7 @@
 
             <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="10" Margin="10">
                 <TextBlock Text="Button M1" FontWeight="Bold" HorizontalAlignment="Center" FontSize="18"/>
-                <ComboBox x:Name="ComboM1" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ComboM_SelectionChanged">
+                <ComboBox x:Name="ComboM1" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ComboM_SelectionChanged" IsEnabled="False">
                     <ComboBoxItem Content="None"/>
                     <ComboBoxItem Content="Steam"/>
                     <ComboBoxItem Content="Steam Sidepanel"/>
