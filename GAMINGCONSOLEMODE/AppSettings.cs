@@ -232,26 +232,31 @@ namespace GAMINGCONSOLEMODE
                         ["onboarding"] = false
                     };
 
-                    // 2. Create the list for default shortcuts.
+                    // 2. Create the list for default shortcuts in the new format.
+                    // We now include "time" for hold duration to match our new logic.
                     var defaultShortcuts = new TomlTableArray
-                    {
-                        // Default Shortcut 1: Task Manager
-                        new TomlTable
-                        {
-                            ["key1"] = "Back",
-                            ["key2"] = "Start",
-                            ["function"] = "taskmanager",
-                            ["enabled"] = true
-                        },
-                        // Default Shortcut 2: Show Overlay
-                        new TomlTable
-                        {
-                            ["key1"] = "RightThumb",
-                            ["key2"] = "DPadLeft",
-                            ["function"] = "show overlay",
-                            ["enabled"] = true
-                        }
-                    };
+            {
+                // Default Shortcut 1: GCM Taskmanager
+                // Triggered by Back + X held for 1 second.
+                new TomlTable
+                {
+                    ["key1"] = "Back",
+                    ["key2"] = "X",
+                    ["function"] = "taskmanager",
+                    ["time"] = 1000,
+                    ["enabled"] = true
+                },
+                // Default Shortcut 2: Show Overlay
+                // Immediate trigger (0ms) as requested for a snappier feel.
+                //new TomlTable
+                //{
+                 //   ["key1"] = "RightThumb",
+                 //   ["key2"] = "DPadLeft",
+                 //   ["function"] = "show overlay",
+                 //   ["time"] = 0,
+                 //  ["enabled"] = true
+                //}
+            };
 
                     // 3. Add the shortcut list to the main settings.
                     defaultSettings["shortcuts"] = defaultShortcuts;
@@ -260,11 +265,11 @@ namespace GAMINGCONSOLEMODE
                     var tomlText = Toml.FromModel(defaultSettings);
                     File.WriteAllText(SettingsFilePath, tomlText);
 
-                    Console.WriteLine($"Default settings file with shortcuts created at: {SettingsFilePath}");
+                    Console.WriteLine($"[GCM] Default config created successfully with new shortcut format at: {SettingsFilePath}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error in initialconfig method: {ex.Message}");
+                    Console.WriteLine($"[GCM] Error creating initial config: {ex.Message}");
                 }
             }
         }
@@ -279,7 +284,6 @@ namespace GAMINGCONSOLEMODE
                 File.Delete(SettingsFilePath);
             }
             initialconfig();
-            MessageBoxHelper.Show(window, "The initial setup is complete. The application will now restart to apply the new settings.", "Restart Required");
             RestartApplication();
         }
 

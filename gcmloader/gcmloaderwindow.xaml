@@ -226,7 +226,17 @@
                 </Grid>
             </Border>
         </Grid>
-
+        
+        <StackPanel x:Name="NotificationStack"
+                    Orientation="Vertical"
+                    VerticalAlignment="Bottom" 
+                    HorizontalAlignment="Right"
+                    Margin="0,0,20,50"
+                    Canvas.ZIndex="1000"
+                    Width="400"
+                    Spacing="10"
+                    IsHitTestVisible="True"/>
+        
         <Border x:Name="PowerMenu" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Top" Background="#CC1C1C1C" CornerRadius="5" Margin="30,30" Canvas.ZIndex="300">
             <StackPanel Spacing="5" Margin="5">
                 <Button x:Name="ShutdownMenuItem" Style="{StaticResource PowerMenuStyle}" Click="ShutdownMenuItem_Click">

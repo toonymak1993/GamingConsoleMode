@@ -5,6 +5,9 @@
     <None Update="gcmloaderwindow.xaml">
       <SubType>Designer</SubType>
     </None>
+    <Page Update="InAppNotification.xaml">
+      <SubType>Designer</SubType>
+    </Page>
     <None Update="Package.appxmanifest">
       <SubType>Designer</SubType>
     </None>

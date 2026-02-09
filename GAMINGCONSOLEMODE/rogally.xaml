@@ -9,24 +9,52 @@
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
-    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20" Spacing="20">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
-        <!-- Mode -->
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20">
-            <RadioButton Content="Handheld Companion" GroupName="Modes" IsEnabled="False"/>
-            <RadioButton Content="Armoury Create" GroupName="Modes" IsEnabled="False"/>
-            <RadioButton Content="G Helper" GroupName="Modes" IsEnabled="False"/>
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="ROG Ally Button Mapper" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"/>
+            <TextBlock Text="Configure your back macro buttons" Foreground="Gray" HorizontalAlignment="Center"/>
         </StackPanel>
-        <StackPanel Spacing="10" HorizontalAlignment="Center">
-            <TextBlock Text="Nothing to see here yet - but soon..." FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
 
-        </StackPanel>
-        <!-- picture -->
-        <Image Source="ms-appx:///Assets/rogally/allyfrontside.png" Width="500" Height= "400" HorizontalAlignment="Center"/>
+        <Grid Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Stretch">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="1*"/>
+            </Grid.ColumnDefinitions>
 
-      
-   
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="10" Margin="10">
+                <TextBlock Text="Button M2" FontWeight="Bold" HorizontalAlignment="Center" FontSize="18"/>
+                <ComboBox x:Name="ComboM2" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ComboM_SelectionChanged" IsEnabled="False">
+                    <ComboBoxItem Content="None"/>
+                    <ComboBoxItem Content="Steam"/>
+                    <ComboBoxItem Content="Steam Sidepanel"/>
+                    <ComboBoxItem Content="Switch Tab"/>
+                </ComboBox>
+                <TextBlock Text="(Left Rear)" FontSize="12" Foreground="Gray" HorizontalAlignment="Center"/>
+            </StackPanel>
 
+            <Image Grid.Column="1" 
+                   Source="ms-appx:///Assets/rogally/allyfrontside.png" 
+                   MaxWidth="600" 
+                   Stretch="Uniform" 
+                   HorizontalAlignment="Center" 
+                   VerticalAlignment="Center"/>
 
-    </StackPanel>
+            <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="10" Margin="10">
+                <TextBlock Text="Button M1" FontWeight="Bold" HorizontalAlignment="Center" FontSize="18"/>
+                <ComboBox x:Name="ComboM1" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ComboM_SelectionChanged" IsEnabled="False">
+                    <ComboBoxItem Content="None"/>
+                    <ComboBoxItem Content="Steam"/>
+                    <ComboBoxItem Content="Steam Sidepanel"/>
+                    <ComboBoxItem Content="Switch Tab"/>
+                </ComboBox>
+                <TextBlock Text="(Right Rear)" FontSize="12" Foreground="Gray" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
 </Page>

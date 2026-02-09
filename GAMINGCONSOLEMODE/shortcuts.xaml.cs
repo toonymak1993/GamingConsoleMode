@@ -46,7 +46,6 @@ namespace GAMINGCONSOLEMODE
                 { "switch tab", "Simulates Alt+Tab to cycle through your open windows and applications quickly." },
                 { "audio switch", "Cycles through your available audio output devices (e.g., switching from Speakers to Headset)." },
                 { "performance overlay", "Toggles the GCM performance monitoring tool to view FPS, CPU, and GPU metrics in-game." },
-                { "show overlay", "Brings up the Gaming Console Mode system menu for quick access to core features." },
                 { "xbox bar", "Triggers the native Windows Game Bar for social features, recording, and broadcasting." },
                 { "lossless scaling", "Activates the Lossless Scaling tool to improve image quality and frame rates in windowed games." },
                 { "xbox keyboard", "Forces the Windows on-screen keyboard to appear for text input using your controller." }
