@@ -86,7 +86,7 @@ namespace gcmloader
 
             if (_isAudioMixerMode)
             {
-                // UI Updates für Mixer Modus
+                // UI updates for mixer mode
                 TabHeaderDevices.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 TabHeaderDevices.Opacity = 0.5;
                 TabHeaderMixer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255));
@@ -102,7 +102,7 @@ namespace gcmloader
             }
             else
             {
-                // UI Updates für Geräte Modus
+                // UI updates for devices mode
                 TabHeaderDevices.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255));
                 TabHeaderDevices.Opacity = 1.0;
                 TabHeaderMixer.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -115,14 +115,14 @@ namespace gcmloader
                 LegendMixer.Visibility = Visibility.Collapsed;
             }
 
-            // WICHTIG: Visuelles Update leicht verzögern, damit das Layout Zeit hat
+            // IMPORTANT: Slightly delay the visual update so the layout has time to settle
             this.DispatcherQueue.TryEnqueue(() => UpdateAudioVisualFocus());
         }
 
-        // ROBUSTE Version von RefreshMixerList
+        // More robust implementation of RefreshMixerList
         private void RefreshMixerList()
         {
-            // Sicherheitscheck: Existieren die UI-Elemente?
+            // Safety check: ensure UI elements exist
             if (MixerListStackPanel == null) return;
 
             MixerListStackPanel.Children.Clear();
@@ -132,7 +132,7 @@ namespace gcmloader
             try
             {
                 var enumerator = new MMDeviceEnumerator();
-                // Versuche das Standardgerät zu holen. Wenn keins da ist (z.B. kein Treiber), abbrechen.
+                // Try to get the default device. If none is available (e.g. no driver), abort.
                 MMDevice device;
                 try
                 {
@@ -140,7 +140,7 @@ namespace gcmloader
                 }
                 catch
                 {
-                    // Kein Audio-Gerät gefunden -> Nichts tun, aber nicht abstürzen
+                    // No audio device found — do nothing and avoid crashing
                     return;
                 }
 
@@ -151,7 +151,7 @@ namespace gcmloader
                 {
                     var session = sessionManager.Sessions[i];
 
-                    // Abgelaufene Sessions ignorieren
+                    // Ignore expired sessions
                     if (session.State == AudioSessionState.AudioSessionStateExpired) continue;
 
                     string displayName = "System / Unbekannt";
@@ -164,15 +164,14 @@ namespace gcmloader
                         {
                             var proc = Process.GetProcessById((int)pid);
 
-                            // Prozessname holen (das geht meistens)
+                            // Get the process name (usually available)
                             if (!string.IsNullOrEmpty(proc.ProcessName))
                             {
                                 displayName = proc.ProcessName;
                             }
 
-                            // KRITISCHER PUNKT: Icons laden
-                            // Das hier stürzt oft ab bei Systemprozessen. 
-                            // Wir kapseln das in einem eigenen try-catch.
+                            // Critical section: loading icons
+                            // This often fails for system processes, so wrap it in a try-catch.
                             try
                             {
                                 if (proc.MainModule != null && !string.IsNullOrEmpty(proc.MainModule.FileName))
@@ -193,7 +192,7 @@ namespace gcmloader
                         }
                     }
 
-                    // Zeile erstellen und zur UI hinzufügen
+                    // Create the row and add it to the UI
                     var row = CreateMixerRow(displayName, iconImage, session);
                     MixerListStackPanel.Children.Add(row);
                     _audioMixerRows.Add(row);
@@ -206,7 +205,7 @@ namespace gcmloader
             }
         }
 
-        // Erstellt eine einzelne Zeile für den Mixer
+        // Creates a single row for the mixer
         private Border CreateMixerRow(string name, BitmapImage icon, AudioSessionControl session)
         {
             var border = new Border
@@ -224,7 +223,7 @@ namespace gcmloader
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5)
             };
 
-            // RESPONSIVES GRID LAYOUT
+            // Responsive grid layout
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // 0: Icon
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) }); // 1: Name
@@ -254,7 +253,7 @@ namespace gcmloader
             };
             Grid.SetColumn(txtName, 1);
 
-            // 3. Slider Container
+            // 3. Slider container
             var sliderContainer = new Grid
             {
                 Height = 8,
@@ -285,7 +284,7 @@ namespace gcmloader
             sliderContainer.Children.Add(fillRect);
             Grid.SetColumn(sliderContainer, 2);
 
-            // Event für Responsive Slider
+            // Event for responsive slider
             sliderContainer.SizeChanged += (s, e) =>
             {
                 try
@@ -296,7 +295,7 @@ namespace gcmloader
                 catch { }
             };
 
-            // 4. Prozent Text
+            // 4. Percent text
             var txtPercent = new TextBlock
             {
                 Name = "VolText",
@@ -317,7 +316,7 @@ namespace gcmloader
 
             border.Child = grid;
 
-            // Initiales Update beim Laden (Sicher)
+            // Initial update when loaded (safe)
             border.Loaded += (s, e) =>
             {
                 try
@@ -331,29 +330,29 @@ namespace gcmloader
             return border;
         }
 
-        // Aktualisiert den Balken und Text
+        // Updates the bar and the text
         private void UpdateMixerRowVisuals(Border row, float volume)
         {
             if (row.Child is Grid grid)
             {
-                // 1. Text updaten (Spalte 3)
-                // Wir suchen das Element in Column 3, um sicherzugehen
+                // 1. Update text (column 3)
+                // Find the element in column 3 to be sure
                 var txtBlock = grid.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetColumn(t) == 3);
                 if (txtBlock != null)
                 {
                     txtBlock.Text = $"{(int)(volume * 100)}%";
                 }
 
-                // 2. Slider Breite updaten (Spalte 2)
+                // 2. Update slider width (column 2)
                 var sliderGrid = grid.Children.OfType<Grid>().FirstOrDefault(g => Grid.GetColumn(g) == 2);
                 if (sliderGrid != null && sliderGrid.Children.Count > 1)
                 {
                     if (sliderGrid.Children[1] is Microsoft.UI.Xaml.Shapes.Rectangle fillRect)
                     {
-                        // Die Magie: Wir nehmen die TATSÄCHLICHE Breite des Containers auf dem Bildschirm
+                        // The trick: use the actual rendered width of the container on screen
                         double totalWidth = sliderGrid.ActualWidth;
 
-                        // Falls UI noch nicht gerendert, Standardwert nutzen
+                        // If the UI hasn't rendered yet, bail out
                         if (totalWidth <= 0) return;
 
                         // Neue Breite berechnen
@@ -501,19 +500,19 @@ namespace gcmloader
         {
             try
             {
-                // 1. ZURÜCKSETZEN: Immer im "Output Devices"-Tab starten, nicht im Mixer
-                // (Falls die Methode ToggleAudioTab noch nicht existiert, musst du den Code aus dem vorherigen Schritt einfügen)
+                // 1. RESET: always start in the "Output Devices" tab, not the mixer
+                // (If ToggleAudioTab doesn't exist yet, include it from the other section)
                 ToggleAudioTab(false);
 
-                // 2. Listen bereinigen
+                // 2. Clear lists
                 SimpleAudioList.Children.Clear();
                 _audioDeviceButtons.Clear();
 
-                // 3. Audio-Geräte via NAudio abrufen
+                // 3. Retrieve audio devices via NAudio
                 var enumerator = new MMDeviceEnumerator();
                 var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
 
-                // Versuchen, das Standardgerät zu finden (try-catch falls keines da ist)
+                // Try to find the default device (try-catch in case none exists)
                 MMDevice defaultDevice = null;
                 try { defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia); } catch { }
 
@@ -9226,13 +9225,49 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     break;
 
                 // --- 6. AppLauncher (Fullscreen Grid) ---
+                // --- 6. AppLauncher (Fullscreen Grid) ---
                 case FocusArea.AppLauncher:
+                    // B = Schließen (wie bisher)
                     if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
                         ToggleAppLauncher_Click(null, null);
                         PlaydeactivationSound();
                     }
-                    // Navigation innerhalb der GridView wird durch HandleAppLauncherNavigation im InputLoop behandelt
+                    // A = App starten (NEU)
+                    else if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        if (AppGridView.SelectedItem is AppInfo selectedApp)
+                        {
+                            LaunchApp(selectedApp);
+                        }
+                    }
+                    // Navigation (D-Pad & Stick) (NEU)
+                    else
+                    {
+                        int xDir = 0;
+                        int yDir = 0;
+
+                        // D-Pad Erfassung
+                        if ((newPresses & GamepadButtonFlags.DPadUp) != 0) yDir = 1;
+                        else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) yDir = -1;
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) xDir = -1;
+                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) xDir = 1;
+
+                        // Stick Erfassung (wird von der Input-Loop übergeben)
+                        if (xDir == 0 && yDir == 0)
+                        {
+                            if (stickMovedUp) yDir = 1;
+                            else if (stickMovedDown) yDir = -1;
+                            else if (stickMovedLeft) xDir = -1;
+                            else if (stickMovedRight) xDir = 1;
+                        }
+
+                        // Wenn eine Bewegung erkannt wurde, an die Hilfsmethode leiten
+                        if (xDir != 0 || yDir != 0)
+                        {
+                            HandleAppLauncherNavigation(xDir, yDir);
+                        }
+                    }
                     break;
 
                 // --- 7. ImageSelection (Bildauswahl Overlay) ---
@@ -9325,11 +9360,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Updates the UI performantly by only changing the old and new focused elements.
         /// </summary>
 
-
-        /// <summary>
-        /// Aktualisiert die visuelle Darstellung des Fokus basierend auf der aktuellen FocusArea.
-        /// Enthält Bounce-Animationen für das Infopanel und Scale-Effekte für Buttons.
-        /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
             UpdateLayoutForFocus();
