@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
+using NAudio.CoreAudioApi.Interfaces;
 using Microsoft.Win32;
 using Microsoft.Win32.TaskScheduler;
 using NAudio.CoreAudioApi;
@@ -63,9 +64,433 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
-        
+        #region cardimagecontrol
+        private ProgramCardEntry _currentEditingCardEntry = null; // Stores the card we are currently editing
+        private List<string> _currentImageSearchResults = new List<string>();
+        private int _selectedImageGridIndex = 0;
+        #endregion
 
         #region soundcontrol
+
+        #region AudioMixerLogic
+
+        // --- Audio Mixer Variables ---
+        private bool _isAudioMixerMode = false; // False = Devices, True = Mixer
+        private int _selectedMixerIndex = 0;
+        private List<Border> _audioMixerRows = new List<Border>();
+
+        // Toggles between Output Devices and App Mixer
+        private void ToggleAudioTab(bool toMixer)
+        {
+            _isAudioMixerMode = toMixer;
+
+            if (_isAudioMixerMode)
+            {
+                // UI updates for mixer mode
+                TabHeaderDevices.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                TabHeaderDevices.Opacity = 0.5;
+                TabHeaderMixer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255));
+                TabHeaderMixer.Opacity = 1.0;
+
+                AudioDevicesScrollViewer.Visibility = Visibility.Collapsed;
+                AudioMixerScrollViewer.Visibility = Visibility.Visible;
+
+                LegendDevices.Visibility = Visibility.Collapsed;
+                LegendMixer.Visibility = Visibility.Visible;
+
+                RefreshMixerList();
+            }
+            else
+            {
+                // UI updates for devices mode
+                TabHeaderDevices.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(34, 255, 255, 255));
+                TabHeaderDevices.Opacity = 1.0;
+                TabHeaderMixer.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                TabHeaderMixer.Opacity = 0.5;
+
+                AudioDevicesScrollViewer.Visibility = Visibility.Visible;
+                AudioMixerScrollViewer.Visibility = Visibility.Collapsed;
+
+                LegendDevices.Visibility = Visibility.Visible;
+                LegendMixer.Visibility = Visibility.Collapsed;
+            }
+
+            // IMPORTANT: Slightly delay the visual update so the layout has time to settle
+            this.DispatcherQueue.TryEnqueue(() => UpdateAudioVisualFocus());
+        }
+
+        // More robust implementation of RefreshMixerList
+        private void RefreshMixerList()
+        {
+            // Safety check: ensure UI elements exist
+            if (MixerListStackPanel == null) return;
+
+            MixerListStackPanel.Children.Clear();
+            _audioMixerRows.Clear();
+            _selectedMixerIndex = 0;
+
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+                // Try to get the default device. If none is available (e.g. no driver), abort.
+                MMDevice device;
+                try
+                {
+                    device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                }
+                catch
+                {
+                    // No audio device found — do nothing and avoid crashing
+                    return;
+                }
+
+                var sessionManager = device.AudioSessionManager;
+                sessionManager.RefreshSessions();
+
+                for (int i = 0; i < sessionManager.Sessions.Count; i++)
+                {
+                    var session = sessionManager.Sessions[i];
+
+                    // Ignore expired sessions
+                    if (session.State == AudioSessionState.AudioSessionStateExpired) continue;
+
+                    string displayName = "System / Unbekannt";
+                    BitmapImage iconImage = null;
+                    uint pid = session.GetProcessID;
+
+                    if (pid > 0)
+                    {
+                        try
+                        {
+                            var proc = Process.GetProcessById((int)pid);
+
+                            // Get the process name (usually available)
+                            if (!string.IsNullOrEmpty(proc.ProcessName))
+                            {
+                                displayName = proc.ProcessName;
+                            }
+
+                            // Critical section: loading icons
+                            // This often fails for system processes, so wrap it in a try-catch.
+                            try
+                            {
+                                if (proc.MainModule != null && !string.IsNullOrEmpty(proc.MainModule.FileName))
+                                {
+                                    iconImage = GetAppIconAsBitmapImage(proc.MainModule.FileName);
+                                }
+                            }
+                            catch
+                            {
+                                // Zugriff verweigert (z.B. Systemprozess oder Admin-Prozess).
+                                // Wir ignorieren das einfach und behalten das Standard-Icon.
+                            }
+                        }
+                        catch
+                        {
+                            // Prozess existiert nicht mehr oder Zugriff komplett verweigert
+                            continue;
+                        }
+                    }
+
+                    // Create the row and add it to the UI
+                    var row = CreateMixerRow(displayName, iconImage, session);
+                    MixerListStackPanel.Children.Add(row);
+                    _audioMixerRows.Add(row);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Fang alles andere ab (z.B. NAudio Fehler)
+                Debug.WriteLine($"[AudioMixer CRITICAL ERROR]: {ex.Message}");
+            }
+        }
+
+        // Creates a single row for the mixer
+        private Border CreateMixerRow(string name, BitmapImage icon, AudioSessionControl session)
+        {
+            var border = new Border
+            {
+                Height = 70,
+                CornerRadius = new CornerRadius(12),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(15, 0, 15, 0),
+                // WICHTIG: Margin sorgt dafür, dass beim Zoomen nichts abgeschnitten wird
+                Margin = new Thickness(12, 4, 12, 4),
+                Tag = session,
+                // Transform direkt vorbereiten für flüssigere Animation
+                RenderTransform = new CompositeTransform { CenterX = 0.5, CenterY = 0.5 },
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5)
+            };
+
+            // Responsive grid layout
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // 0: Icon
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) }); // 1: Name
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) }); // 2: Slider
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // 3: Text
+
+            // 1. Icon
+            var img = new Image
+            {
+                Source = icon ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
+                Width = 36,
+                Height = 36,
+                Stretch = Stretch.Uniform,
+                Margin = new Thickness(0, 0, 15, 0)
+            };
+            Grid.SetColumn(img, 0);
+
+            // 2. Name
+            var txtName = new TextBlock
+            {
+                Text = name,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 15,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 15, 0)
+            };
+            Grid.SetColumn(txtName, 1);
+
+            // 3. Slider container
+            var sliderContainer = new Grid
+            {
+                Height = 8,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 15, 0),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var bgRect = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                RadiusX = 4,
+                RadiusY = 4,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var fillRect = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Fill = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"],
+                HorizontalAlignment = HorizontalAlignment.Left,
+                RadiusX = 4,
+                RadiusY = 4,
+                Name = "FillRect",
+                Width = 0
+            };
+
+            sliderContainer.Children.Add(bgRect);
+            sliderContainer.Children.Add(fillRect);
+            Grid.SetColumn(sliderContainer, 2);
+
+            // Event for responsive slider
+            sliderContainer.SizeChanged += (s, e) =>
+            {
+                try
+                {
+                    if (session.State != AudioSessionState.AudioSessionStateExpired)
+                        UpdateMixerRowVisuals(border, session.SimpleAudioVolume.Volume);
+                }
+                catch { }
+            };
+
+            // 4. Percent text
+            var txtPercent = new TextBlock
+            {
+                Name = "VolText",
+                Text = "0%",
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 255, 255, 255)),
+                Width = 40,
+                TextAlignment = TextAlignment.Right
+            };
+            Grid.SetColumn(txtPercent, 3);
+
+            grid.Children.Add(img);
+            grid.Children.Add(txtName);
+            grid.Children.Add(sliderContainer);
+            grid.Children.Add(txtPercent);
+
+            border.Child = grid;
+
+            // Initial update when loaded (safe)
+            border.Loaded += (s, e) =>
+            {
+                try
+                {
+                    if (session.State != AudioSessionState.AudioSessionStateExpired)
+                        UpdateMixerRowVisuals(border, session.SimpleAudioVolume.Volume);
+                }
+                catch { }
+            };
+
+            return border;
+        }
+
+        // Updates the bar and the text
+        private void UpdateMixerRowVisuals(Border row, float volume)
+        {
+            if (row.Child is Grid grid)
+            {
+                // 1. Update text (column 3)
+                // Find the element in column 3 to be sure
+                var txtBlock = grid.Children.OfType<TextBlock>().FirstOrDefault(t => Grid.GetColumn(t) == 3);
+                if (txtBlock != null)
+                {
+                    txtBlock.Text = $"{(int)(volume * 100)}%";
+                }
+
+                // 2. Update slider width (column 2)
+                var sliderGrid = grid.Children.OfType<Grid>().FirstOrDefault(g => Grid.GetColumn(g) == 2);
+                if (sliderGrid != null && sliderGrid.Children.Count > 1)
+                {
+                    if (sliderGrid.Children[1] is Microsoft.UI.Xaml.Shapes.Rectangle fillRect)
+                    {
+                        // The trick: use the actual rendered width of the container on screen
+                        double totalWidth = sliderGrid.ActualWidth;
+
+                        // If the UI hasn't rendered yet, bail out
+                        if (totalWidth <= 0) return;
+
+                        // Neue Breite berechnen
+                        fillRect.Width = totalWidth * volume;
+                    }
+                }
+            }
+        }
+
+        // Adjusts volume and updates the UI bar
+        private void AdjustSessionVolume(int rowIndex, float change)
+        {
+            if (rowIndex < 0 || rowIndex >= _audioMixerRows.Count) return;
+
+            var row = _audioMixerRows[rowIndex];
+            if (row.Tag is AudioSessionControl session)
+            {
+                try
+                {
+                    float current = session.SimpleAudioVolume.Volume;
+                    float newVol = Math.Clamp(current + change, 0.0f, 1.0f);
+
+                    session.SimpleAudioVolume.Volume = newVol;
+                    UpdateMixerRowVisuals(row, newVol);
+                }
+                catch { }
+            }
+        }
+
+
+
+        // Fokus Visualisierung für Audio Menü (MIT AUTO-SCROLLING)
+        private void UpdateAudioVisualFocus()
+        {
+            // 1. Reset aller Hintergründe & Skalierungen
+            foreach (var btn in _audioDeviceButtons)
+            {
+                AnimateScale(btn, false);
+                btn.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255));
+            }
+            foreach (var row in _audioMixerRows)
+            {
+                AnimateScale(row, false);
+                row.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255));
+            }
+
+            if (_isAudioMixerMode)
+            {
+                // --- MIXER MODUS ---
+                if (_audioMixerRows.Count > _selectedMixerIndex && _selectedMixerIndex >= 0)
+                {
+                    var active = _audioMixerRows[_selectedMixerIndex];
+
+                    // Highlight setzen
+                    active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                    AnimateScale(active, true);
+
+                    // --- AUTO-SCROLLING LOGIK ---
+                    try
+                    {
+                        // Prüfen, ob das Element und der ScrollViewer bereit sind
+                        if (AudioMixerScrollViewer != null && active.ActualHeight > 0)
+                        {
+                            // Position des Elements relativ zum ScrollViewer ermitteln
+                            var transform = active.TransformToVisual(AudioMixerScrollViewer);
+                            var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+
+                            // Aktuelle Scroll-Position und Viewport-Höhe
+                            double currentScroll = AudioMixerScrollViewer.VerticalOffset;
+                            double viewportHeight = AudioMixerScrollViewer.ViewportHeight;
+                            double itemTop = position.Y; // Relativ zum sichtbaren Bereich
+                            double itemBottom = itemTop + active.ActualHeight;
+
+                            // 1. Wenn Element OBERHALB des Sichtbereichs ist -> Hochscrollen
+                            if (itemTop < 10) // 10px Puffer
+                            {
+                                // Wir wollen, dass das Element oben bündig ist (minus etwas Puffer)
+                                double newOffset = currentScroll + itemTop - 10;
+                                AudioMixerScrollViewer.ChangeView(null, newOffset, null, true); // true = Animation aus für knackiges Feedback
+                            }
+                            // 2. Wenn Element UNTERHALB des Sichtbereichs ist -> Runterscrollen
+                            else if (itemBottom > viewportHeight - 10)
+                            {
+                                // Wir wollen, dass das Element unten bündig ist
+                                double newOffset = currentScroll + (itemBottom - viewportHeight) + 10;
+                                AudioMixerScrollViewer.ChangeView(null, newOffset, null, true);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[AudioScroll Error]: {ex.Message}");
+                    }
+                }
+            }
+            else
+            {
+                // --- OUTPUT DEVICES MODUS ---
+                if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex && _selectedAudioDeviceIndex >= 0)
+                {
+                    var active = _audioDeviceButtons[_selectedAudioDeviceIndex];
+
+                    // Highlight
+                    active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                    AnimateScale(active, true);
+
+                    // --- AUTO-SCROLLING LOGIK (Auch für die Geräteliste) ---
+                    try
+                    {
+                        if (AudioDevicesScrollViewer != null && active.ActualHeight > 0)
+                        {
+                            var transform = active.TransformToVisual(AudioDevicesScrollViewer);
+                            var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+
+                            double currentScroll = AudioDevicesScrollViewer.VerticalOffset;
+                            double viewportHeight = AudioDevicesScrollViewer.ViewportHeight;
+                            double itemTop = position.Y;
+                            double itemBottom = itemTop + active.ActualHeight;
+
+                            if (itemTop < 10)
+                            {
+                                double newOffset = currentScroll + itemTop - 10;
+                                AudioDevicesScrollViewer.ChangeView(null, newOffset, null, true);
+                            }
+                            else if (itemBottom > viewportHeight - 10)
+                            {
+                                double newOffset = currentScroll + (itemBottom - viewportHeight) + 10;
+                                AudioDevicesScrollViewer.ChangeView(null, newOffset, null, true);
+                            }
+                        }
+                    }
+                    catch { /* Ignorieren bei Layout-Problemen */ }
+                }
+            }
+        }
+        #endregion
+
+
         // Cache for sounds to avoid loading from disk every time
         private readonly Dictionary<string, Uri> _soundCache = new();
         private List<Button> _audioDeviceButtons = new List<Button>();
@@ -75,63 +500,78 @@ namespace gcmloader
         {
             try
             {
+                // 1. RESET: always start in the "Output Devices" tab, not the mixer
+                // (If ToggleAudioTab doesn't exist yet, include it from the other section)
+                ToggleAudioTab(false);
+
+                // 2. Clear lists
                 SimpleAudioList.Children.Clear();
                 _audioDeviceButtons.Clear();
 
+                // 3. Retrieve audio devices via NAudio
                 var enumerator = new MMDeviceEnumerator();
                 var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
-                var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+
+                // Try to find the default device (try-catch in case none exists)
+                MMDevice defaultDevice = null;
+                try { defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia); } catch { }
 
                 foreach (var device in devices)
                 {
-                    // Modernes Button-Styling
+                    // Modernes Button-Styling (WinUI 3 Look)
                     var btn = new Button
                     {
                         Tag = device.FriendlyName,
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         Height = 60,
                         CornerRadius = new CornerRadius(12),
-                        // WinUI 3 Default Style für Buttons im Hintergrund nutzen
-                        Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+                        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
                         BorderThickness = new Thickness(0)
                     };
 
                     var contentStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 15 };
 
-                    // Icon Logik
+                    // Icon Logik: Kopfhörer vs Lautsprecher
                     string glyph = device.FriendlyName.ToLower().Contains("headset") || device.FriendlyName.ToLower().Contains("kopfhörer") ? "\uE76B" : "\uE7F5";
                     contentStack.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
 
+                    // Gerätename Text
                     contentStack.Children.Add(new TextBlock
                     {
                         Text = device.FriendlyName,
                         VerticalAlignment = VerticalAlignment.Center,
                         FontSize = 15,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        TextTrimming = TextTrimming.CharacterEllipsis
                     });
 
-                    if (device.FriendlyName == defaultDevice.FriendlyName)
+                    // Markierung für das aktuell aktive Gerät (Akzentfarbe)
+                    if (defaultDevice != null && device.ID == defaultDevice.ID)
                     {
-                        // Akzentfarbe für das aktive Gerät
                         btn.BorderThickness = new Thickness(2);
-                        // Nutzt die System-Akzentfarbe für Win11 Feeling
                         btn.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
                     }
 
                     btn.Content = contentStack;
+
+                    // Klick-Event zum Wechseln des Geräts
                     btn.Click += (s, e) => SetAudioDevice(device.FriendlyName);
 
                     _audioDeviceButtons.Add(btn);
                     SimpleAudioList.Children.Add(btn);
                 }
 
+                // 4. Overlay sichtbar machen und Fokus setzen
                 AudioOverlay.Visibility = Visibility.Visible;
                 _currentFocusArea = FocusArea.AudioMenu;
                 _selectedAudioDeviceIndex = 0;
 
                 UpdateVisualFocus();
             }
-            catch (Exception ex) { Debug.WriteLine("Audio Error: " + ex.Message); }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Audio Error: " + ex.Message);
+            }
         }
 
         private void CloseAudioFlyout()
@@ -583,6 +1023,67 @@ namespace gcmloader
         #endregion
         #region steamgriddb - picture for taskmanager
 
+        private static void LogImageMapping(string message)
+        {
+            try
+            {
+                // Pfad exakt wie von dir gewünscht
+                string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                              "gcmsettings", "image_cache", "image_mapping_log.txt");
+
+                string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}";
+                File.AppendAllText(logPath, logEntry);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Mapping Log Error: " + ex.Message);
+            }
+        }
+
+        // Speichert welche Bilder wir bereits auf der Platte gefunden haben (Key -> Pfad)
+        private Dictionary<string, string> _verifiedImageCache = new Dictionary<string, string>();
+        // Zeitstempel, um den Cache alle 30 Sekunden mal zu aktualisieren
+        private DateTime _lastCacheRefresh = DateTime.MinValue;
+
+        
+
+        private string FindCachedImageFile(string cleanName)
+        {
+            if (string.IsNullOrWhiteSpace(cleanName)) return null;
+
+            // Nur alle 5 Sekunden wirklich auf die Festplatte schauen
+            // Das verhindert das Ruckeln komplett, erkennt neue Bilder aber schnell genug.
+            if ((DateTime.Now - _lastCacheRefresh).TotalSeconds > 5)
+            {
+                _verifiedImageCache.Clear();
+                if (Directory.Exists(_imageCachePath))
+                {
+                    try
+                    {
+                        var files = Directory.GetFiles(_imageCachePath, "*.*", SearchOption.TopDirectoryOnly)
+                            .Where(s => s.EndsWith(".jpg") || s.EndsWith(".png") || s.EndsWith(".webp") || s.EndsWith(".jpeg"));
+
+                        foreach (var file in files)
+                        {
+                            string nameOnly = Path.GetFileNameWithoutExtension(file).ToLowerInvariant();
+                            if (!_verifiedImageCache.ContainsKey(nameOnly))
+                                _verifiedImageCache.Add(nameOnly, file);
+                        }
+                    }
+                    catch { }
+                }
+                _lastCacheRefresh = DateTime.Now;
+            }
+
+            // Blitzschneller RAM-Zugriff
+            if (_verifiedImageCache.TryGetValue(cleanName.ToLowerInvariant(), out string cachedPath))
+            {
+                return cachedPath;
+            }
+
+            return null;
+        }
+
         // Cache for the local name search
         private List<string> _steamLibraryPathsCache = null;
         private Dictionary<string, string> _localGameNameCache = new Dictionary<string, string>();
@@ -598,32 +1099,85 @@ namespace gcmloader
 
         public class SteamGridDBHelper
         {
-            // Die record-Definitionen wurden nach oben in die MainWindow-Klasse verschoben.
-            // Die Klasse ist jetzt sauberer.
-
             private readonly HttpClient _httpClient = new();
             private readonly string _apiKey;
-            public bool IsApiKeySet => !string.IsNullOrEmpty(_apiKey);
-            public SteamGridDBHelper(string apiKey)
+
+            private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
             {
-                _apiKey = apiKey;
+                PropertyNameCaseInsensitive = true
+            };
+
+            // Wir nutzen den Hardcoded Key, um Fehler in den Settings auszuschließen
+            public bool IsApiKeySet => true;
+
+            public SteamGridDBHelper(string apiKeyFromSettings)
+            {
+                // Dein Key (Hardcoded zur Sicherheit)
+                _apiKey = "fff543e81e7e53d7a8e08935a7349d36".Trim();
+
+                _httpClient.DefaultRequestHeaders.Clear();
                 _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
             }
 
-            /// <summary>
-            /// Searches for a game on SteamGridDB and returns the entire search result object.
-            /// </summary>
+            public async Task<List<string>> GetVerticalImagesForGameAsync(int gameId)
+            {
+                var urls = new List<string>();
+                try
+                {
+                    // FEHLERBEHEBUNG:
+                    // Statt "?styles=vertical" nutzen wir "?dimensions=600x900"
+                    // Das ist der korrekte Filter für Steam-Cover.
+                    var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/grids/game/{gameId}?dimensions=600x900");
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Debug.WriteLine($"[SteamGridDB Images] Error {response.StatusCode}");
+                        // Fallback: Versuche es ohne Filter, falls gar nichts geht (dann kommen aber auch breite Bilder)
+                        // response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/grids/game/{gameId}");
+                        return urls;
+                    }
+
+                    var json = await response.Content.ReadAsStringAsync();
+                    var imageData = JsonSerializer.Deserialize<ImageResponse>(json, _jsonOptions);
+
+                    if (imageData != null && imageData.success && imageData.data != null)
+                    {
+                        // Nimm die ersten 20 Ergebnisse
+                        foreach (var img in imageData.data.Take(20))
+                        {
+                            urls.Add(img.url);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SteamGridDB List Error] {ex.Message}");
+                }
+                return urls;
+            }
+
             public async Task<SearchResult> SearchForGameIdAsync(string gameName)
             {
-                if (string.IsNullOrEmpty(_apiKey)) return null;
+                if (string.IsNullOrWhiteSpace(gameName)) return null;
 
                 try
                 {
-                    var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/search/autocomplete/{Uri.EscapeDataString(gameName)}");
-                    if (!response.IsSuccessStatusCode) return null;
+                    string encodedName = Uri.EscapeDataString(gameName);
+                    var url = $"https://www.steamgriddb.com/api/v2/search/autocomplete/{encodedName}";
+
+                    Debug.WriteLine($"[SteamGridDB] Searching: {url}");
+
+                    var response = await _httpClient.GetAsync(url);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        string errorContent = await response.Content.ReadAsStringAsync();
+                        throw new Exception($"API Error: {response.StatusCode} - {errorContent}");
+                    }
 
                     var json = await response.Content.ReadAsStringAsync();
-                    var searchData = JsonSerializer.Deserialize<SearchResponse>(json);
+                    var searchData = JsonSerializer.Deserialize<SearchResponse>(json, _jsonOptions);
 
                     if (searchData != null && searchData.success && searchData.data.Length > 0)
                     {
@@ -632,40 +1186,108 @@ namespace gcmloader
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[SteamGridDB] Error searching for '{gameName}': {ex.Message}");
+                    Debug.WriteLine($"[SteamGridDB Search Error] {ex.Message}");
+                    throw;
                 }
                 return null;
             }
 
-            /// <summary>
-            /// Gets the URL for the most popular grid/cover image for a given game ID.
-            /// </summary>
+            // Alte Methode (leitet an die neue weiter)
             public async Task<string> GetGridImageUrlAsync(int gameId)
             {
-                if (string.IsNullOrEmpty(_apiKey)) return null;
-
                 try
                 {
-                    var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/grids/game/{gameId}");
-                    if (!response.IsSuccessStatusCode) return null;
+                    var list = await GetVerticalImagesForGameAsync(gameId);
+                    return list.FirstOrDefault();
+                }
+                catch { return null; }
+            }
+        }
 
-                    var json = await response.Content.ReadAsStringAsync();
-                    var imageData = JsonSerializer.Deserialize<ImageResponse>(json);
+        // --- Helper to verify or create the cache directory ---
+        private void EnsureCacheDirectoryExists()
+        {
+            if (!Directory.Exists(_imageCachePath)) Directory.CreateDirectory(_imageCachePath);
+        }
 
-                    if (imageData != null && imageData.success && imageData.data.Length > 0)
+        // --- Helper to generate a clean filename for the cache ---
+        private string GetCacheFileName(string gameName)
+        {
+            // Use your existing cleaner method
+            string cleaned = CleanGameNameForSearch(gameName);
+
+            // Replace characters that are invalid in file names
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
+                cleaned = cleaned.Replace(c, '_');
+            }
+
+            // Ensure the filename is not too long
+            if (cleaned.Length > 50) cleaned = cleaned.Substring(0, 50);
+
+            return Path.Combine(_imageCachePath, $"{cleaned}.jpg");
+        }
+
+        // --- Helper to load an image from disk into the UI thread safely ---
+        // --- PERFORMANCE FIX: Bild beim Laden skalieren ---
+        // --- PERFORMANCE FIX: Bild im Hintergrund laden & skalieren ---
+        // --- FIX: Robustes Laden über MemoryStream ---
+        private async Task LoadImageToUiAsync(
+      Border card,
+      Image imgControl,
+      Image iconControl,
+      TextBlock txtControl,
+      string filePath,
+      string titleOverride)
+        {
+            // Datei lesen (im Hintergrund)
+            byte[] imageBytes;
+            try
+            {
+                var info = new FileInfo(filePath);
+                if (info.Length == 0) return; // Leere Dateien ignorieren
+
+                imageBytes = await File.ReadAllBytesAsync(filePath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ImageLoad] Fehler beim Lesen von {filePath}: {ex.Message}");
+                return;
+            }
+
+            // UI Update (im Vordergrund)
+            card.DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    using (var ms = new MemoryStream(imageBytes))
                     {
-                        return imageData.data[0].url;
+                        var bitmap = new BitmapImage();
+                        bitmap.DecodePixelWidth = 300; // Performance!
+
+                        // WICHTIG: SetSourceAsync liest den Stream. Da ms im using ist, muss das await hier stehen.
+                        await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
+
+                        imgControl.Source = bitmap;
+                        imgControl.Stretch = Stretch.UniformToFill;
+
+                        // Wenn Bild da ist -> Icon wegblenden
+                        AnimateCrossFade(imgControl, iconControl);
+                    }
+
+                    if (txtControl != null && !string.IsNullOrEmpty(titleOverride))
+                    {
+                        txtControl.Text = titleOverride.ToUpper();
                     }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[SteamGridDB] Error getting grid for game ID '{gameId}': {ex.Message}");
+                    Debug.WriteLine($"[ImageLoad] Bild defekt oder Format falsch: {filePath} ({ex.Message})");
+                    // Optional: Defekte Datei löschen, damit sie neu geladen wird
+                    // try { File.Delete(filePath); } catch { }
                 }
-                return null;
-            }
+            });
         }
-
-
         private string GetSteamInstallPath()
         {
             try
@@ -865,81 +1487,58 @@ namespace gcmloader
             return null;
         }
 
-      
+
         private async Task<string> FindLocalSteamImageAsync(string exePath)
         {
-            Logger.Log($"[DEBUG] FindLocalSteamImageAsync started. Searching for: {exePath}");
+            Logger.Log($"[DEBUG] FindLocalSteamImageAsync: Searching strict vertical cover for: {exePath}");
             try
             {
-                // --- Priority 1 & 2: Check game's .exe folder and parent folder ---
-                string exeDirectory = Path.GetDirectoryName(exePath);
-                if (Directory.Exists(exeDirectory))
-                {
-                    string[] foundFiles = await Task.Run(() =>
-                        Directory.GetFiles(exeDirectory, "library_*.jpg"));
-                    if (foundFiles.Length > 0)
-                    {
-                        Logger.Log($"[DEBUG] Prio 1 (EXE-Folder): Image found: {foundFiles[0]}");
-                        return foundFiles[0];
-                    }
-                    string headerPath = Path.Combine(exeDirectory, "header.jpg");
-                    if (File.Exists(headerPath))
-                    {
-                        Logger.Log($"[DEBUG] Prio 1 (EXE-Folder): 'header.jpg' found: {headerPath}");
-                        return headerPath;
-                    }
-                }
-                DirectoryInfo parentDir = Directory.GetParent(exeDirectory);
-                if (parentDir != null)
-                {
-                    string parentDirectoryPath = parentDir.FullName;
-                    string[] foundParentFiles = await Task.Run(() =>
-                        Directory.GetFiles(parentDirectoryPath, "library_*.jpg"));
-                    if (foundParentFiles.Length > 0)
-                    {
-                        Logger.Log($"[DEBUG] Prio 2 (Parent-Folder): Image found: {foundParentFiles[0]}");
-                        return foundParentFiles[0];
-                    }
-                    string headerParentPath = Path.Combine(parentDirectoryPath, "header.jpg");
-                    if (File.Exists(headerParentPath))
-                    {
-                        Logger.Log($"[DEBUG] Prio 2 (Parent-Folder): 'header.jpg' found: {headerParentPath}");
-                        return headerParentPath;
-                    }
-                }
-                Logger.Log($"[DEBUG] Prio 1 & 2: No image found in game folders.");
-
-
-                // --- Priority 3: Check the central Steam Cache (Primary method) ---
+                // 1. AppID ermitteln (nötig für den Steam Cache)
                 string steamAppId = await Task.Run(() => GetSteamAppIdFromExePath(exePath));
                 string steamInstallPath = GetSteamInstallPath();
 
-                Logger.Log($"[DEBUG] Prio 3 (Steam-Cache):\n    Image Cache Path (C:): {steamInstallPath}\n    Found AppID (from D:): {(string.IsNullOrEmpty(steamAppId) ? "NONE" : steamAppId)}");
-
                 if (string.IsNullOrEmpty(steamInstallPath) || string.IsNullOrEmpty(steamAppId))
                 {
-                    Logger.Log("[DEBUG] Prio 3: Steam path or AppID is invalid. Skipping Steam-Cache search.");
                     return null;
                 }
 
-            
-                string appCacheDirectory = Path.Combine(steamInstallPath, "appcache", "librarycache", steamAppId);
-                string imagePath = await SearchCacheFolderForImageAsync(appCacheDirectory);
+                // 2. Der Pfad zum Steam Library Cache
+                // Hier liegen die von Steam selbst heruntergeladenen Cover
+                string appCacheDirectory = Path.Combine(steamInstallPath, "appcache", "librarycache");
 
-                if (!string.IsNullOrEmpty(imagePath))
+                // Steam speichert die Hochkant-Cover (600x900) meistens direkt in diesem Ordner
+                // Dateiname ist meistens: {AppID}_library_600x900.jpg
+                string directVerticalPath = Path.Combine(appCacheDirectory, $"{steamAppId}_library_600x900.jpg");
+
+                if (File.Exists(directVerticalPath))
                 {
-                    return imagePath; // SUCCESS!
+                    Logger.Log($"[DEBUG] Success! Found official Steam vertical cover: {directVerticalPath}");
+                    return directVerticalPath;
                 }
-                // ### END OF FIX V5 ###
-                // ==================================================================
+
+                // 3. Fallback: Manchmal liegen sie in Unterordnern (alte Logik, aber strenger gefiltert)
+                // Wir suchen im Cache-Ordner, aber NUR nach Dateien, die "600x900" im Namen haben.
+                // Wir ignorieren "header.jpg", "hero.jpg", etc., da diese das Bild verzerren würden.
+                string strictSearchPath = Path.Combine(steamInstallPath, "appcache", "librarycache", steamAppId);
+                if (Directory.Exists(strictSearchPath))
+                {
+                    // Suche rekursiv nach der korrekten Auflösung
+                    var files = Directory.GetFiles(strictSearchPath, "*600x900.jpg", SearchOption.AllDirectories);
+                    if (files.Length > 0)
+                    {
+                        Logger.Log($"[DEBUG] Found vertical cover in subfolder: {files[0]}");
+                        return files[0];
+                    }
+                }
+
+                Logger.Log("[DEBUG] No local VERTICAL image found. (Ignoring banners to prevent distortion)");
+                return null; // Zwingt das System, online bei SteamGridDB zu suchen
             }
             catch (Exception ex)
             {
-                Logger.Log($"[DEBUG] FindLocalSteamImageAsync: FATAL ERROR: {ex.Message}");
+                Logger.Log($"[DEBUG] FindLocalSteamImageAsync Error: {ex.Message}");
+                return null;
             }
-
-            Logger.Log("[DEBUG] FindLocalSteamImageAsync: Search finished. NO local image found.");
-            return null;
         }
 
 
@@ -1272,7 +1871,7 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu }
+        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu, ImageSelection }
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
@@ -2450,6 +3049,314 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion Handhelds
         #endregion needed
         #region methodes
+        #region Image Selection & Instant Update Logic
+
+        /// <summary>
+        /// Opens the overlay to change the artwork for a specific card.
+        /// Triggers an automatic search using the game's name.
+        /// </summary>
+        private void OpenImageSelectionForCard(ProgramCardEntry entry)
+        {
+            if (entry == null) return;
+
+            _currentEditingCardEntry = entry;
+            _currentFocusArea = FocusArea.ImageSelection; // Switch input focus
+
+            // Reset UI state
+            ImageSelectionOverlay.Visibility = Visibility.Visible;
+            ImageSearchBox.Text = entry.ProductName; // Pre-fill game name
+            ImageResultsGrid.ItemsSource = null;
+            NoImagesFoundText.Visibility = Visibility.Collapsed;
+
+            // Start auto-search immediately
+            ImageSearchButton_Click(null, null);
+        }
+
+        /// <summary>
+        /// Handles the search button click. Fetches vertical covers from SteamGridDB.
+        /// </summary>
+        private async void ImageSearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_steamGridHelper == null || !_steamGridHelper.IsApiKeySet)
+            {
+                NoImagesFoundText.Text = "Error: API Key is missing in settings.toml";
+                NoImagesFoundText.Visibility = Visibility.Visible;
+                return;
+            }
+
+            string searchTerm = ImageSearchBox.Text;
+            if (string.IsNullOrWhiteSpace(searchTerm)) return;
+
+            ImageSearchProgress.Visibility = Visibility.Visible;
+            NoImagesFoundText.Visibility = Visibility.Collapsed;
+            ImageResultsGrid.ItemsSource = null;
+
+            try
+            {
+                string cleanedName = CleanGameNameForSearch(searchTerm);
+
+                // Debug-Text während der Suche
+                NoImagesFoundText.Text = $"Searching ID for '{cleanedName}'...";
+                NoImagesFoundText.Visibility = Visibility.Visible;
+
+                var searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedName);
+
+                if (searchResult != null)
+                {
+                    var urls = await _steamGridHelper.GetVerticalImagesForGameAsync(searchResult.id);
+                    _currentImageSearchResults = urls;
+
+                    if (urls.Count > 0)
+                    {
+                        ImageResultsGrid.ItemsSource = urls;
+                        _selectedImageGridIndex = 0;
+                        ImageResultsGrid.SelectedIndex = 0;
+                        ImageResultsGrid.Focus(FocusState.Programmatic);
+                        NoImagesFoundText.Visibility = Visibility.Collapsed;
+                    }
+                    else
+                    {
+                        NoImagesFoundText.Text = $"Game found (ID: {searchResult.id}), but no vertical images.";
+                        NoImagesFoundText.Visibility = Visibility.Visible;
+                    }
+                }
+                else
+                {
+                    NoImagesFoundText.Text = $"Game '{cleanedName}' not found on SteamGridDB.";
+                    NoImagesFoundText.Visibility = Visibility.Visible;
+                }
+            }
+            catch (Exception ex)
+            {
+                // HIER wird der echte Fehler angezeigt!
+                NoImagesFoundText.Text = $"API Error: {ex.Message}";
+                NoImagesFoundText.Visibility = Visibility.Visible;
+            }
+            finally
+            {
+                ImageSearchProgress.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// Handles clicking on an image in the grid.
+        /// </summary>
+        private void ImageResultsGrid_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is string url)
+            {
+                DownloadAndApplyImage(url);
+            }
+        }
+
+        /// <summary>
+        /// Downloads the selected image, overwrites the cache file, and INSTANTLY refreshes the UI card.
+        /// </summary>
+        private async void DownloadAndApplyImage(string url)
+        {
+            if (_currentEditingCardEntry == null) return;
+
+            ImageSearchProgress.Visibility = Visibility.Visible;
+
+            try
+            {
+                await Task.Run(async () =>
+                {
+                    // Wir nutzen den Prozess-basierten Key zum Speichern!
+                    string stableKey = GetStableCacheKey(
+                        _currentEditingCardEntry.ProductName,
+                        _currentEditingCardEntry.ExePath,
+                        _currentEditingCardEntry.Proc);
+
+                    string cachePath = Path.Combine(_imageCachePath, $"{stableKey}.jpg");
+
+                    using (var client = new HttpClient())
+                    {
+                        var data = await client.GetByteArrayAsync(url);
+                        await File.WriteAllBytesAsync(cachePath, data);
+                    }
+
+                    this.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        RefreshCardImageVisuals(cachePath);
+                        CloseImageSelectorButton_Click(null, null);
+                        SendOverlayNotification("Artwork saved as: " + stableKey);
+                        ImageSearchProgress.Visibility = Visibility.Collapsed;
+                    });
+                });
+            }
+            catch { ImageSearchProgress.Visibility = Visibility.Collapsed; }
+        }
+
+        /// <summary>
+        /// Handles the "Browse Local" button to pick a file from disk.
+        /// </summary>
+        private async void BrowseLocalButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentEditingCardEntry == null) return;
+
+            // 1. Fenster Handle holen
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+            // 2. Fenster kurz minimieren, damit der Dialog nicht verdeckt wird
+            ShowWindow(hwnd, 6); // 6 = SW_MINIMIZE
+
+            // Kurze Pause, damit die Animation durchläuft
+            await Task.Delay(200);
+
+            // 3. Den "Old School" Dialog starten (läuft im selben Thread, blockiert aber nicht die Logik)
+            var dialog = new Win32OpenFileDialog();
+            bool result = dialog.ShowDialog(hwnd);
+
+            // 4. Fenster sofort wiederherstellen
+            ShowWindow(hwnd, 9); // 9 = SW_RESTORE
+            BringToFrontAndFocus(hwnd);
+
+            if (result)
+            {
+                string sourcePath = dialog.FileName;
+
+                if (!File.Exists(sourcePath)) return;
+
+                ImageSearchProgress.Visibility = Visibility.Visible;
+
+                // Verarbeitung im Hintergrund, damit die UI nicht einfriert
+                await Task.Run(async () =>
+                {
+                    try
+                    {
+                        // A. Namen generieren (passend zur Scanner-Logik)
+                        string stableKey = GetStableCacheKey(
+                            _currentEditingCardEntry.ProductName,
+                            _currentEditingCardEntry.ExePath,
+                            _currentEditingCardEntry.Proc
+                        );
+
+                        string cachePath = Path.Combine(_imageCachePath, $"{stableKey}.jpg");
+
+                        // B. Datei sicher kopieren (Stream verhindert Sperr-Fehler)
+                        using (var sourceStream = File.OpenRead(sourcePath))
+                        using (var memoryStream = new MemoryStream())
+                        {
+                            await sourceStream.CopyToAsync(memoryStream);
+                            byte[] data = memoryStream.ToArray();
+                            await File.WriteAllBytesAsync(cachePath, data);
+                        }
+
+                        // C. UI aktualisieren
+                        this.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            RefreshCardImageVisuals(cachePath);
+                            CloseImageSelectorButton_Click(null, null);
+                            SendOverlayNotification("Artwork saved as: " + stableKey);
+                            ImageSearchProgress.Visibility = Visibility.Collapsed;
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        this.DispatcherQueue.TryEnqueue(async () =>
+                        {
+                            ImageSearchProgress.Visibility = Visibility.Collapsed;
+                            await messagebox($"Fehler beim Speichern: {ex.Message}");
+                        });
+                    }
+                });
+            }
+        }
+
+        // Füge das ganz am Ende der Datei ein, NACH der letzten geschweiften Klammer } von MainWindow
+        public class Win32OpenFileDialog
+        {
+            [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+            private static extern bool GetOpenFileName(ref OPENFILENAME ofn);
+
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+            private struct OPENFILENAME
+            {
+                public int lStructSize;
+                public IntPtr hwndOwner;
+                public IntPtr hInstance;
+                public string lpstrFilter;
+                public string lpstrCustomFilter;
+                public int nMaxCustFilter;
+                public int nFilterIndex;
+                public string lpstrFile;
+                public int nMaxFile;
+                public string lpstrFileTitle;
+                public int nMaxFileTitle;
+                public string lpstrInitialDir;
+                public string lpstrTitle;
+                public int Flags;
+                public short nFileOffset;
+                public short nFileExtension;
+                public string lpstrDefExt;
+                public IntPtr lCustData;
+                public IntPtr lpfnHook;
+                public string lpTemplateName;
+                public IntPtr pvReserved;
+                public int dwReserved;
+                public int FlagsEx;
+            }
+
+            public string FileName { get; private set; }
+
+            public bool ShowDialog(IntPtr owner)
+            {
+                var ofn = new OPENFILENAME();
+                ofn.lStructSize = Marshal.SizeOf(ofn);
+                ofn.hwndOwner = owner;
+                ofn.lpstrFilter = "Bilder (JPG, PNG, WEBP)\0*.jpg;*.jpeg;*.png;*.webp\0Alle Dateien\0*.*\0";
+                ofn.lpstrFile = new string(new char[256]);
+                ofn.nMaxFile = ofn.lpstrFile.Length;
+                ofn.lpstrFileTitle = new string(new char[64]);
+                ofn.nMaxFileTitle = ofn.lpstrFileTitle.Length;
+                ofn.lpstrTitle = "Cover auswählen";
+                ofn.Flags = 0x00080000 | 0x00001000 | 0x00000800 | 0x00000008; // Explorer-Style, FileMustExist, PathMustExist
+
+                if (GetOpenFileName(ref ofn))
+                {
+                    FileName = ofn.lpstrFile;
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Helper to forcefully refresh the image on the specific card currently being edited.
+        /// This makes the change visible immediately without restart.
+        /// </summary>
+        private void RefreshCardImageVisuals(string newImagePath)
+        {
+            if (_currentEditingCardEntry == null || _currentEditingCardEntry.Card == null) return;
+
+            // Find the Image controls inside the specific card's UI tree
+            if (_currentEditingCardEntry.Card.Child is Grid grid)
+            {
+                var loadedImage = grid.Children.OfType<Image>().FirstOrDefault(i => i.Name == "LoadedImage");
+
+                // Find the icon (which is usually the other image in the grid)
+                var iconImage = grid.Children.OfType<Image>().FirstOrDefault(i => i.Source != loadedImage?.Source);
+
+                if (loadedImage != null)
+                {
+                    // We call our robust loading method. 
+                    // Since it opens the file as a stream, it reads the NEW content immediately.
+                    // We pass 'null' as titleOverride to keep the existing title.
+                    _ = LoadImageToUiAsync(_currentEditingCardEntry.Card, loadedImage, iconImage, null, newImagePath, null);
+                }
+            }
+        }
+
+        private void CloseImageSelectorButton_Click(object sender, RoutedEventArgs e)
+        {
+            ImageSelectionOverlay.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.Cards; // Return focus to cards
+            _currentEditingCardEntry = null;
+            UpdateVisualFocus(); // Refresh highlights
+        }
+
+        #endregion
         #region methodes for code
 
         public static void SendOverlayNotification(string message)
@@ -4804,7 +5711,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private async Task RefreshCardsUIAsync()
         {
-            // Fetch the latest process list in a background thread.
+            if (!IsWindowInForeground()) return;
+
             var processDataList = await Task.Run(() =>
             {
                 var dataList = new List<ProcessData>();
@@ -4812,24 +5720,25 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 EnumWindows((hWnd, lParam) =>
                 {
-                    // This is the same reliable process-finding logic as before.
                     if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
                         return true;
+
                     int textLen = GetWindowTextLength(hWnd);
                     if (textLen == 0) return true;
-                    var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
-                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
-                    if (IsCloaked(hWnd)) return true;
 
                     var titleBuilder = new StringBuilder(textLen + 1);
                     GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
                     string windowTitle = titleBuilder.ToString();
 
-                    if (string.IsNullOrWhiteSpace(windowTitle) ||
-                        _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                    // --- NEUES LOGGING HIER ---
+                    // Wir loggen JEDES sichtbare Fenster, um zu sehen, warum Spiele ignoriert werden
+                    if (windowTitle.ToLower().Contains("space") || windowTitle.ToLower().Contains("dead"))
                     {
-                        return true;
+                        LogImageMapping($"[DETEKTOR] Potenzielles Spiel gefunden: '{windowTitle}'");
                     }
+
+                    if (_excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                        return true;
 
                     Process proc = null;
                     string exePath = null;
@@ -4840,10 +5749,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         {
                             proc = Process.GetProcessById((int)pid);
                             if (proc.Id == Process.GetCurrentProcess().Id) return true;
+
+                            // Prüfen, ob der Prozessname auf der schwarzen Liste steht
+                            if (_excludedProcessNames.Any(name => proc.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                if (windowTitle.ToLower().Contains("space"))
+                                    LogImageMapping($"[DETEKTOR] ABGEWIESEN: '{windowTitle}' wegen Prozessname '{proc.ProcessName}'");
+                                return true;
+                            }
+
                             exePath = proc.MainModule?.FileName;
                         }
                     }
-                    catch { /* Ignore */ }
+                    catch { }
 
                     if (!seenHwnds.Add(hWnd)) return true;
 
@@ -4861,7 +5779,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return dataList;
             });
 
-            // Now, update the UI with this fresh data.
             UpdateUiFromData(processDataList);
         }
 
@@ -5067,72 +5984,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             return cardBorder;
         }
 
-        
+
 
         private void StartAutoTaskRefresh()
         {
             if (_taskRefreshTimer != null) return;
+            // Intervall auf 2 Sekunden hochsetzen – das stoppt das Ruckeln sofort
             _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
-                // This timer now ONLY gathers data in the background. It does not touch the UI.
-                _latestProcessData = await Task.Run(() =>
-                {
-                    var dataList = new List<ProcessData>();
-                    var seenHwnds = new HashSet<IntPtr>();
-
-                    EnumWindows((hWnd, lParam) =>
-                    {
-                        // This entire EnumWindows logic remains unchanged.
-                        if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
-                            return true;
-                        int textLen = GetWindowTextLength(hWnd);
-                        if (textLen == 0) return true;
-                        var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
-                        if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
-                        if (IsCloaked(hWnd)) return true;
-
-                        var titleBuilder = new StringBuilder(textLen + 1);
-                        GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
-                        string windowTitle = titleBuilder.ToString();
-
-                        if (string.IsNullOrWhiteSpace(windowTitle) ||
-                            _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            return true;
-                        }
-
-                        Process proc = null;
-                        string exePath = null;
-                        try
-                        {
-                            GetWindowThreadProcessId(hWnd, out uint pid);
-                            if (pid != 0)
-                            {
-                                proc = Process.GetProcessById((int)pid);
-                                if (proc.Id == Process.GetCurrentProcess().Id) return true;
-                                exePath = proc.MainModule?.FileName;
-                            }
-                        }
-                        catch { /* Ignore processes we can't access */ }
-
-                        if (!seenHwnds.Add(hWnd)) return true;
-
-                        dataList.Add(new ProcessData
-                        {
-                            ProductName = windowTitle,
-                            Hwnd = hWnd,
-                            Proc = proc,
-                            ExePath = exePath
-                        });
-
-                        return true;
-                    }, IntPtr.Zero);
-
-                    return dataList;
-                });
-
-                // The call to UpdateUiFromData(processDataList) has been REMOVED from the timer.
+                await RefreshAppListAsync();
             };
             _taskRefreshTimer.Start();
         }
@@ -5475,140 +6336,278 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Logger.Log($"[DEBUG] SteamGridDB: FATAL ERROR in LoadFromSteamGridDbAsync: {ex.Message}");
             }
         }
-        private async void LoadCardImageAsync(
-            Border card,                // The main card
-            Image loadedImageControl,   // The (still invisible) image to fade in
-            Image defaultIconControl,   // The (visible) default icon
-            TextBlock titleControl,     // The title field
-            string gameName,
-            string exePath)
+
+        private string NormalizeForMatch(string text)
         {
-            Logger.Log($"[DEBUG] LoadCardImageAsync started.\n    Game: {gameName}\n    Path: {(string.IsNullOrEmpty(exePath) ? "NONE (e.g., Anti-Cheat)" : exePath)}");
+            if (string.IsNullOrEmpty(text)) return "";
+            // Nur Buchstaben und Zahlen behalten, alles klein machen
+            return new string(text.Where(c => char.IsLetterOrDigit(c)).ToArray()).ToLowerInvariant();
+        }
 
-            // 1. Safety Check (Non-game keywords)
-            if (_nonGameKeywords.Any(keyword => gameName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
-            {
-                Logger.Log($"[DEBUG] LoadCardImageAsync: Game '{gameName}' was classified as 'Non-Game' and skipped.");
-                return;
-            }
-
-            string localImagePath = null;
-            string appId = null;
-
-            // 2. Check if we have a valid path
+        // In deine Helper-Region einfügen/ersetzen
+        private string GetExeBasedCacheKey(string exePath, Process proc)
+        {
+            // 1. Prio: Dateiname der Exe (z.B. "deadspace3")
             if (!string.IsNullOrEmpty(exePath))
             {
-                Logger.Log("[DEBUG] exePath is valid. Attempting Prio 1-3 (Local Folder + AppID from Path)...");
-                localImagePath = await FindLocalSteamImageAsync(exePath);
-            }
-            else
-            {
-                // This is the Anti-Cheat case (exePath is null)
-                Logger.Log("[DEBUG] exePath is null. Skipping Prio 1-3. Attempting Prio 4 (Find AppID by Name)...");
-                appId = await FindAppIdFromGameNameLocally(gameName);
-
-                if (!string.IsNullOrEmpty(appId))
-                {
-                    string steamInstallPath = GetSteamInstallPath();
-                    if (!string.IsNullOrEmpty(steamInstallPath))
-                    {
-                        string appCacheDirectory = Path.Combine(steamInstallPath, "appcache", "librarycache", appId);
-                        Logger.Log($"[DEBUG] Prio 4: Found AppID '{appId}'. Checking cache path: {appCacheDirectory}");
-
-                        localImagePath = await SearchCacheFolderForImageAsync(appCacheDirectory);
-                    }
-                }
+                return Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant().Trim();
             }
 
-            Logger.Log($"[DEBUG] LoadCardImageAsync: Local search finished. Found path: {(string.IsNullOrEmpty(localImagePath) ? "NONE" : localImagePath)}");
-
-            // 5. Load local image IF ONE WAS FOUND (from either Prio 1-3 or Prio 4)
-            if (!string.IsNullOrEmpty(localImagePath))
+            // 2. Prio: Prozessname
+            if (proc != null)
             {
-                card.DispatcherQueue.TryEnqueue(async () =>
+                try { return proc.ProcessName.ToLowerInvariant().Trim(); } catch { }
+            }
+
+            return "unknown_app";
+        }
+        // Hilfsmethode: Macht jeden String zum validen Dateinamen
+        private string CleanFilename(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "unknown";
+            foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+            return name.Trim();
+        }
+
+        // Die Fallback-Suche (Steam lokal -> Online) ausgelagert zur Übersicht
+        private async void PerformFallbackSearch(
+            Border card, Image img, Image icon, TextBlock txt,
+            string gameName, string exePath, string savePath)
+        {
+            // 1. Steam Lokal
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                string localPath = await FindLocalSteamImageAsync(exePath);
+                if (!string.IsNullOrEmpty(localPath))
                 {
                     try
                     {
-                        var bitmap = new BitmapImage();
-                        var fileBytes = await File.ReadAllBytesAsync(localImagePath);
-                        using (var ms = new MemoryStream(fileBytes))
-                        {
-                            await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
-                        }
-
-                        // ### START OF FLICKER FIX ###
-                        // Set the source for the (still invisible) image
-                        loadedImageControl.Source = bitmap;
-
-                        // Start the cross-fade animation
-                        AnimateCrossFade(loadedImageControl, defaultIconControl);
-                        // ### END OF FLICKER FIX ###
-
-                        Logger.Log($"[DEBUG] LoadCardImageAsync: Local image for '{gameName}' loaded successfully and fade-in started.");
+                        File.Copy(localPath, savePath, true);
+                        await LoadImageToUiAsync(card, img, icon, txt, savePath, null);
+                        return;
                     }
-                    catch (Exception ex)
-                    {
-                        Logger.Log($"[DEBUG] LoadCardImageAsync: ERROR loading local image '{localImagePath}': {ex.Message}\n    Attempting fallback to SteamGridDB...");
-                        if (_steamGridHelper.IsApiKeySet)
-                        {
-                            // Pass the controls to the fallback
-                            await LoadFromSteamGridDbAsync(card, loadedImageControl, defaultIconControl, titleControl, gameName, exePath);
-                        }
-                    }
-                });
-                return; // IMPORTANT: Exit here
+                    catch { }
+                }
             }
 
-            // 6. Fallback: SteamGridDB
-            if (_steamGridHelper.IsApiKeySet)
+            // 2. Online (SteamGridDB)
+            if (_steamGridHelper != null && _steamGridHelper.IsApiKeySet)
             {
-                Logger.Log("[DEBUG] LoadCardImageAsync: No local image found. Starting SteamGridDB search (using game name)...");
-                await LoadFromSteamGridDbAsync(card, loadedImageControl, defaultIconControl, titleControl, gameName, exePath);
-            }
-            else
-            {
-                Logger.Log("[DEBUG] LoadCardImageAsync: No local image found. SteamGridDB is disabled. Using default icon.");
+                // Schönen Namen suchen
+                string searchName = GetSmartSearchName(gameName, exePath);
+
+                // Downloaden
+                await DownloadFromSteamGridDbAndCacheAsync(card, img, icon, txt, searchName, savePath);
             }
         }
+        private void LoadCardImageAsync(Border card, Image loadedImageControl, Image defaultIconControl, TextBlock titleControl, string gameName, string exePath, Process proc)
+        {
+            if (!Directory.Exists(_imageCachePath)) Directory.CreateDirectory(_imageCachePath);
+
+            Task.Run(async () =>
+            {
+                // 1. Stabilen Namen generieren (z.B. "devenv", "deadspace3")
+                string stableKey = GetStableCacheKey(gameName, exePath, proc);
+
+                // 2. PRÜFUNG: Haben wir das Bild schon? (RAM Cache = 0ms)
+                string imagePathToLoad = FindCachedImageFile(stableKey);
+
+                if (imagePathToLoad != null)
+                {
+                    // JA -> Sofort laden
+                    await LoadImageToUiAsync(card, loadedImageControl, defaultIconControl, titleControl, imagePathToLoad, null);
+                }
+                else
+                {
+                    // NEIN -> Kein Bild im Cache.
+
+                    // WICHTIG: Ist es ein Spiel?
+                    if (IsLikelyGame(proc))
+                    {
+                        // Ja -> Suche online (SteamGridDB)
+                        string searchName = GetSmartSearchName(gameName, exePath);
+                        string savePath = Path.Combine(_imageCachePath, $"{stableKey}.jpg");
+
+                        card.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            PerformFallbackSearch(card, loadedImageControl, defaultIconControl, titleControl, searchName, exePath, savePath);
+                        });
+                    }
+                    else
+                    {
+                        // Nein (Visual Studio, Opera, Snipping Tool)
+                        // -> Wir machen NICHTS. Das Fenster behält sein Standard-Icon.
+                        // -> Performance bleibt perfekt.
+                        // -> Du kannst jetzt "Start" drücken und manuell ein Bild setzen.
+                    }
+                }
+            });
+        }
+        private async Task DownloadFromSteamGridDbAndCacheAsync(
+            Border card,
+            Image loadedImageControl,
+            Image defaultIconControl,
+            TextBlock titleControl,
+            string searchName,
+            string targetCachePath)
+        {
+            try
+            {
+                // Suche und Download im Hintergrund ausführen!
+                await Task.Run(async () =>
+                {
+                    var searchResult = await _steamGridHelper.SearchForGameIdAsync(searchName);
+                    if (searchResult == null) return;
+
+                    double similarity = CalculateSimilarity(searchName, searchResult.name);
+                    if (similarity < 0.4) return;
+
+                    var imageUrl = await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
+                    if (string.IsNullOrEmpty(imageUrl)) return;
+
+                    using (var client = new HttpClient())
+                    {
+                        var data = await client.GetByteArrayAsync(imageUrl);
+                        await File.WriteAllBytesAsync(targetCachePath, data);
+                    }
+
+                    // Zurück zum UI Thread nur zum Anzeigen
+                    card.DispatcherQueue.TryEnqueue(async () =>
+                    {
+                        await LoadImageToUiAsync(card, loadedImageControl, defaultIconControl, titleControl, targetCachePath, searchResult.name);
+                    });
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Download] Error: {ex.Message}");
+            }
+        }
+
+        // --- HELPER METHODEN ---
+
+        /// <summary>
+        /// Generiert den Dateinamen für den Cache.
+        /// Priorität: 1. Prozessname (Stabil!), 2. Exe-Name, 3. Bereinigter Titel
+        /// </summary>
+        private string GetStableCacheKey(string windowTitle, string exePath, Process proc)
+        {
+            // 1. Höchste Priorität: Der Name der EXE-Datei (z.B. "deadspace3")
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                return Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant().Trim();
+            }
+
+            // 2. Zweite Priorität: Der interne Prozessname
+            if (proc != null)
+            {
+                try { return proc.ProcessName.ToLowerInvariant().Trim(); } catch { }
+            }
+
+            // 3. Letzter Ausweg: Der bereinigte Fenstertitel
+            return CleanFilename(windowTitle).ToLowerInvariant().Trim();
+        }
+
+        // Ermittelt einen "schönen" Namen für die Suche und Anzeige (z.B. "Google Chrome" statt "chrome")
+        private string GetSmartSearchName(string gameName, string exePath)
+        {
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                try
+                {
+                    var info = FileVersionInfo.GetVersionInfo(exePath);
+                    if (!string.IsNullOrWhiteSpace(info.FileDescription)) return info.FileDescription;
+                    if (!string.IsNullOrWhiteSpace(info.ProductName)) return info.ProductName;
+                }
+                catch { }
+                return Path.GetFileNameWithoutExtension(exePath);
+            }
+            return CleanGameNameForSearch(gameName);
+        }
+
+
+
+        private string GetCacheFilePathFromKey(string key)
+        {
+            foreach (char c in Path.GetInvalidFileNameChars()) key = key.Replace(c, '_');
+            if (key.Length > 50) key = key.Substring(0, 50);
+            return Path.Combine(_imageCachePath, $"{key}.jpg");
+        }
+
         private void UpdateUiFromData(List<ProcessData> processDataList)
         {
             if (processDataList == null) return;
 
-            var currentProductNames = new HashSet<string>(_cardCache.Select(c => c.ProductName));
-            var newDataProductNames = new HashSet<string>(processDataList.Select(pd => pd.ProductName));
+            // Wir erstellen ein HashSet der NEUEN Handles für schnellen Abgleich
+            var scannedHwnds = processDataList.Select(p => p.Hwnd).ToHashSet();
 
-            // Remove old cards that are no longer in the new list
-            var cardsToRemove = _cardCache.Where(c => !newDataProductNames.Contains(c.ProductName)).ToList();
-            foreach (var entry in cardsToRemove)
-            {
-                ProgramCardPanel.Children.Remove(entry.Card);
-                _cardCache.Remove(entry);
-            }
+            // Wir erstellen ein HashSet der BEREITS ANGEZEIGTEN Handles
+            var currentUiHwnds = _cardCache.Select(c => c.Hwnd).ToHashSet();
 
-            // Add new cards that are not yet in the cache
-            foreach (var data in processDataList)
+            bool uiChanged = false;
+
+            // ---------------------------------------------------------
+            // 1. LÖSCHEN (Nur Karten entfernen, die im neuen Scan FEHLEN)
+            // ---------------------------------------------------------
+            for (int i = _cardCache.Count - 1; i >= 0; i--)
             {
-                if (!currentProductNames.Contains(data.ProductName))
+                var entry = _cardCache[i];
+
+                if (!scannedHwnds.Contains(entry.Hwnd))
                 {
-                    // The card is created instantly
-                    var border = CreateProgramCard(data.ProductName, data.ExePath, data.Proc, data.Hwnd);
+                    // Fenster ist weg -> Karte entfernen
+                    ProgramCardPanel.Children.Remove(entry.Card);
+                    _cardCache.RemoveAt(i);
+                    uiChanged = true;
 
-                    // CORRECTED: Create the cache entry with all required properties
-                    var entry = new ProgramCardEntry
-                    {
-                        ProductName = data.ProductName,
-                        ExePath = data.ExePath,
-                        Hwnd = data.Hwnd,
-                        Proc = data.Proc,
-                        Card = border
-                    };
-                    _cardCache.Add(entry);
-                    ProgramCardPanel.Children.Add(border);
+                    // Index-Schutz: Wenn links von uns gelöscht wird, rutschen wir nach links
+                    if (_selectedCardIndex > i) _selectedCardIndex--;
                 }
             }
 
-            bool hasCards = _cardCache.Any(); // Prüft, ob Karten im Cache sind
-            NoCardsMessage.Visibility = hasCards ? Visibility.Collapsed : Visibility.Visible;
+            // ---------------------------------------------------------
+            // 2. HINZUFÜGEN (Nur was wir NOCH NICHT haben)
+            // ---------------------------------------------------------
+            foreach (var data in processDataList)
+            {
+                // DER FIX: Wenn wir das Fenster schon anzeigen -> ÜBERSPRINGEN (Fass es nicht an!)
+                // Das verhindert das Neuladen und Controller-Springen.
+                if (currentUiHwnds.Contains(data.Hwnd)) continue;
+
+                // Wenn wir hier sind, ist es ein NEUES Fenster. Erstelle Karte.
+                var border = CreateProgramCard(data.ProductName, data.ExePath, data.Proc, data.Hwnd);
+                var entry = new ProgramCardEntry
+                {
+                    ProductName = data.ProductName,
+                    ExePath = data.ExePath,
+                    Hwnd = data.Hwnd,
+                    Proc = data.Proc,
+                    Card = border
+                };
+
+                _cardCache.Add(entry);
+                ProgramCardPanel.Children.Add(border);
+                uiChanged = true;
+            }
+
+            // ---------------------------------------------------------
+            // 3. UI STATUS
+            // ---------------------------------------------------------
+            if (uiChanged)
+            {
+                // Index im gültigen Bereich halten
+                if (_cardCache.Count > 0)
+                {
+                    if (_selectedCardIndex >= _cardCache.Count) _selectedCardIndex = _cardCache.Count - 1;
+                    if (_selectedCardIndex < 0) _selectedCardIndex = 0;
+                }
+                else
+                {
+                    _selectedCardIndex = 0;
+                }
+
+                NoCardsMessage.Visibility = _cardCache.Any() ? Visibility.Collapsed : Visibility.Visible;
+            }
         }
 
 
@@ -5740,6 +6739,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Settings",
     "Task-Manager",
     "Task Manager",
+    "NAHIMIC",
+    "WINDOWS-WIDGET",
+    "MSN",
+
     
     // Specific Apps to always ignore
             "Steam",
@@ -5754,11 +6757,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 };
 
         private static readonly string[] _excludedProcessNames = new[]
-        {
-            "steam", "steamwebhelper", "EADesktop", "epicgameslauncher",
-            "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game",
-            "GeForceNOW" 
-        };
+       {
+    "steamwebhelper", "EADesktop", "epicgameslauncher",
+    "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game",
+    "GeForceNOW", "InputApp", "InputHost", "TextInputHost", "ShellExperienceHost",
+    "StartMenuExperienceHost", "SearchHost", "XblGameSave", "ApplicationFrameHost",
+    "SystemSettings", "LockApp", "SmartScreen", "RuntimeBroker", "taskhostw",
+    "devenv", "explorer", "searchapp", "widgets"
+};
 
         [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d")]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -5943,14 +6949,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
 
+        /// <summary>
+        /// Creates a single, clickable launcher card based on the provided data.
+        /// Now handles a custom image for the Main Launcher card with a "LAUNCHER" label.
+        /// </summary>
         private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
         {
             var contentGrid = new Grid();
 
-            // 1. POSTER HINTERGRUND
             var loadedImage = new Image
             {
                 Name = "LoadedImage",
+                // UniformToFill ensures the image covers the whole card without distortion.
                 Stretch = Stretch.UniformToFill,
                 Opacity = 0.0,
                 RenderTransform = new CompositeTransform()
@@ -5961,11 +6971,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 Name = "GlassBase",
                 CornerRadius = new CornerRadius(10),
-                // Ein sehr feiner, fast weißer Rand für die Lichtbrechung an den Kanten
                 BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
                 BorderThickness = new Thickness(1.0),
-                // --- DER TRICK FÜR CLEAR LOOK ---
-                // Sehr niedriger Alpha-Wert (20-30 statt 100), damit es klarer wirkt
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255))
             };
 
@@ -5974,7 +6981,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 VerticalAlignment = VerticalAlignment.Top,
                 Height = 55,
-                // Dunkel, aber transparent für den Kontrast
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(130, 20, 20, 20)),
                 CornerRadius = new CornerRadius(10, 10, 0, 0),
                 Child = new TextBlock
@@ -6036,9 +7042,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             };
 
             // --- EFFEKTE AKTIVIEREN ---
-            // Der Blur-Effekt (Verschwommenheit) bleibt, aber durch das hellere Overlay wirkt es klarer
             cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
-            LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath);
+
+            // FIX: Hier übergeben wir jetzt 'proc' als letzten Parameter!
+            LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath, proc);
 
             return cardBorder;
         }
@@ -7065,50 +8072,34 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             // --- 1. GLOBAL SHORTCUTS ---
                             HandleShortcuts(btns, i);
 
-                            // --- 2. MOUSE MODE TOGGLE (Fixed) ---
-                            // Prüfen auf DPad Runter UND Rechten Stick Reindrücken (R3)
+                            // --- 2. MOUSE MODE TOGGLE ---
                             bool comboPressed = (btns & GamepadButtonFlags.DPadDown) != 0 &&
                                                 (btns & GamepadButtonFlags.RightThumb) != 0;
 
                             if (comboPressed)
                             {
-                                // Timer starten, falls noch nicht läuft
                                 if (_mouseModeTimer[i] == DateTime.MinValue)
                                 {
                                     _mouseModeTimer[i] = DateTime.Now;
                                     _mouseModeTriggered[i] = false;
-                                    Debug.WriteLine($"[Xbox {i}] Maus-Kombi erkannt, Timer startet...");
                                 }
-                                // Prüfen ob 2 Sekunden vorbei sind UND noch nicht ausgelöst wurde
                                 else if (!_mouseModeTriggered[i] && (DateTime.Now - _mouseModeTimer[i]).TotalSeconds >= 2.0)
                                 {
-                                    // Umschalten
                                     _isMouseModeActive = !_isMouseModeActive;
-
-                                    // Feedback
-                                    if (!_isMouseModeActive)
-                                    {
-                                        ParkMouseCursor();
-                                        SendOverlayNotification("Mouse Mode: OFF");
-                                    }
+                                    if (!_isMouseModeActive) ParkMouseCursor();
                                     else
                                     {
                                         while (ShowCursor(true) < 0) ;
                                         _isCursorVisible = true;
                                         SetCursorPos(GetScreenWidth() / 2, GetScreenHeight() / 2);
-                                        SendOverlayNotification("Mouse Mode: ON");
                                     }
-
                                     _ = TriggerVibration(i, 0.5f, 300);
-                                    Debug.WriteLine($"[Xbox {i}] Maus-Modus umgeschaltet auf: {_isMouseModeActive}");
-
-                                    // Markieren als erledigt, damit es nicht flackert solange man hält
+                                    SendOverlayNotification(_isMouseModeActive ? "Mouse Mode: ON" : "Mouse Mode: OFF");
                                     _mouseModeTriggered[i] = true;
                                 }
                             }
                             else
                             {
-                                // Tasten losgelassen -> Reset
                                 _mouseModeTimer[i] = DateTime.MinValue;
                                 _mouseModeTriggered[i] = false;
                             }
@@ -7125,7 +8116,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             // --- 4. INPUT BRANCHING ---
                             if (_isMouseModeActive)
                             {
-                                // Ensure cursor is visible in mouse mode
                                 if (!_isCursorVisible)
                                 {
                                     while (ShowCursor(true) < 0) ;
@@ -7135,8 +8125,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             }
                             else
                             {
-                                // --- PARK MOUSE ---
-                                // If any input happens, park the mouse
                                 if (btns != GamepadButtonFlags.None || xDir != 0 || yDir != 0)
                                 {
                                     ParkMouseCursor();
@@ -7144,75 +8132,36 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                                 if (IsWindowInForeground())
                                 {
-                                    if (_currentFocusArea == FocusArea.AppLauncher)
+                                    // HIER IST DIE ÄNDERUNG: Wir leiten ALLES an HandleGamepadInput weiter
+                                    // Das inkludiert jetzt auch das ImageSelection Menü
+
+                                    // Nur neue Button-Presses senden (One-Shot)
+                                    var newPresses = btns & ~_lastButtonStates[i];
+
+                                    if (newPresses != GamepadButtonFlags.None)
                                     {
-                                        // 1. Handle Buttons (Immediate)
-                                        var newPresses = btns & ~_lastButtonStates[i];
+                                        DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, i));
+                                    }
 
-                                        if (newPresses != GamepadButtonFlags.None)
+                                    // Stick-Navigation (mit Drosselung)
+                                    bool isStickMoving = (xDir != 0 || yDir != 0);
+                                    if (isStickMoving)
+                                    {
+                                        if (DateTime.Now > _nextAllowedInputTime[i])
                                         {
-                                            DispatcherQueue.TryEnqueue(() =>
-                                            {
-                                                // A - Launch App
-                                                if ((newPresses & GamepadButtonFlags.A) != 0)
-                                                {
-                                                    int selectedIndex = AppGridView.SelectedIndex;
-                                                    if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count && AppGridView.Items[selectedIndex] is AppInfo app)
-                                                    {
-                                                        LaunchApp(app);
-                                                        PlayActivationSound();
-                                                    }
-                                                }
-                                                // B - Close Launcher
-                                                else if ((newPresses & GamepadButtonFlags.B) != 0)
-                                                {
-                                                    ToggleAppLauncher_Click(null, null);
-                                                    PlaydeactivationSound();
-                                                }
+                                            DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, i));
 
-                                                // DPad Navigation
-                                                int dpadX = 0; int dpadY = 0;
-                                                if ((newPresses & GamepadButtonFlags.DPadUp) != 0) dpadY = 1;
-                                                else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) dpadY = -1;
-                                                else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) dpadX = -1;
-                                                else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) dpadX = 1;
-
-                                                if (dpadX != 0 || dpadY != 0)
-                                                {
-                                                    HandleAppLauncherNavigation(dpadX, dpadY);
-                                                }
-                                            });
+                                            _nextAllowedInputTime[i] = _isStickCentered[i] ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
+                                            _isStickCentered[i] = false;
                                         }
-
-                                        // 2. Handle Stick (Throttled for smooth scrolling)
-                                        bool isStickMoving = (xDir != 0 || yDir != 0);
-                                        if (isStickMoving)
-                                        {
-                                            // Check throttle timer specific to this controller index
-                                            if (DateTime.Now > _nextAllowedInputTime[i])
-                                            {
-                                                DispatcherQueue.TryEnqueue(() => HandleAppLauncherNavigation(xDir, yDir));
-
-                                                // Throttling logic: Slower first step, faster subsequent steps
-                                                _nextAllowedInputTime[i] = _isStickCentered[i] ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
-                                                _isStickCentered[i] = false;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            // Reset throttle when stick is released
-                                            _nextAllowedInputTime[i] = DateTime.MinValue;
-                                            _isStickCentered[i] = true;
-                                        }
-
-                                        // Update state
-                                        _lastButtonStates[i] = btns;
                                     }
                                     else
                                     {
-                                        // Standard Logic for all other areas (Cards, TopButtons, etc.)
-                                        ProcessUINavigation(btns, xDir, yDir, i);
+                                        _nextAllowedInputTime[i] = DateTime.MinValue;
+                                        _isStickCentered[i] = true;
                                     }
+
+                                    _lastButtonStates[i] = btns;
                                 }
                             }
                         }
@@ -7255,8 +8204,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             while (!_isExiting)
             {
+                // Verbindung (wie gehabt, nur kürzer gefasst für Übersicht)
                 if (_edgeStream == null)
                 {
+                    /* Dein bestehender Verbindungscode hier... oder wir lassen ihn laufen, falls er schon geht */
+                    // Um sicherzugehen, hier der komplette Verbindungsblock:
                     try
                     {
                         var loader = DeviceList.Local;
@@ -7266,7 +8218,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             _edgeStream = tempStream;
                             _edgeStream.ReadTimeout = 1;
                             _edgeDevice = edgeDev;
-                            Debug.WriteLine("[Edge] Verbunden für Parallel-Betrieb.");
+                            Debug.WriteLine("[Edge] Verbunden.");
                         }
                     }
                     catch { _edgeStream = null; }
@@ -7283,54 +8235,48 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         if (reportId != 0x31 && reportId != 0x01) { Thread.Yield(); continue; }
 
                         GamepadButtonFlags edgeButtons = GamepadButtonFlags.None;
-
-                        // 1. Stick Werte (LX/LY)
-                        float lx = (_edgeInputBuffer[start + 0] - 128) / 128f;
-                        float ly = (_edgeInputBuffer[start + 1] - 128) / 128f;
-                        int xDir = lx < -0.3f ? -1 : (lx > 0.3f ? 1 : 0);
-                        int yDir = ly < -0.3f ? 1 : (ly > 0.3f ? -1 : 0);
-
-                        // 2. Button Offsets
                         int btnOffset = (reportId == 0x31) ? 7 : 4;
+
+                        // --- Parsing (Identisch zum Standard, plus Paddles) ---
+                        // D-Pad
                         byte b1 = _edgeInputBuffer[start + btnOffset];
-                        byte b2 = _edgeInputBuffer[start + btnOffset + 1];
-
-                        // D-Pad parsen
                         byte dpadVal = (byte)(b1 & 0x0F);
-                        if (dpadVal <= 7)
-                        {
-                            if (dpadVal == 0 || dpadVal == 1 || dpadVal == 7) edgeButtons |= GamepadButtonFlags.DPadUp;
-                            if (dpadVal == 3 || dpadVal == 4 || dpadVal == 5) edgeButtons |= GamepadButtonFlags.DPadDown;
-                            if (dpadVal == 5 || dpadVal == 6 || dpadVal == 7) edgeButtons |= GamepadButtonFlags.DPadLeft;
-                            if (dpadVal == 1 || dpadVal == 2 || dpadVal == 3) edgeButtons |= GamepadButtonFlags.DPadRight;
-                        }
+                        if (dpadVal == 0 || dpadVal == 1 || dpadVal == 7) edgeButtons |= GamepadButtonFlags.DPadUp;
+                        if (dpadVal == 1 || dpadVal == 2 || dpadVal == 3) edgeButtons |= GamepadButtonFlags.DPadRight;
+                        if (dpadVal == 3 || dpadVal == 4 || dpadVal == 5) edgeButtons |= GamepadButtonFlags.DPadDown;
+                        if (dpadVal == 5 || dpadVal == 6 || dpadVal == 7) edgeButtons |= GamepadButtonFlags.DPadLeft;
 
-                        // Buttons parsen
+                        // Buttons
                         if ((b1 & 0x10) != 0) edgeButtons |= GamepadButtonFlags.X;
                         if ((b1 & 0x20) != 0) edgeButtons |= GamepadButtonFlags.A;
                         if ((b1 & 0x40) != 0) edgeButtons |= GamepadButtonFlags.B;
                         if ((b1 & 0x80) != 0) edgeButtons |= GamepadButtonFlags.Y;
+
+                        byte b2 = _edgeInputBuffer[start + btnOffset + 1];
                         if ((b2 & 0x01) != 0) edgeButtons |= GamepadButtonFlags.LeftShoulder;
                         if ((b2 & 0x02) != 0) edgeButtons |= GamepadButtonFlags.RightShoulder;
                         if ((b2 & 0x10) != 0) edgeButtons |= GamepadButtonFlags.Back;
-                        if ((b2 & 0x20) != 0) edgeButtons |= GamepadButtonFlags.Start;
+                        if ((b2 & 0x20) != 0) edgeButtons |= GamepadButtonFlags.Start; // WICHTIG für Menü!
                         if ((b2 & 0x40) != 0) edgeButtons |= GamepadButtonFlags.LeftThumb;
                         if ((b2 & 0x80) != 0) edgeButtons |= GamepadButtonFlags.RightThumb;
 
                         // Paddles (Rücktasten)
                         byte bEdge = _edgeInputBuffer[start + btnOffset + 4];
-                        if ((bEdge & 0x04) != 0) edgeButtons |= GamepadButtonFlags.A; // Paddle L = A
-                        if ((bEdge & 0x08) != 0) edgeButtons |= GamepadButtonFlags.B; // Paddle R = B
+                        if ((bEdge & 0x04) != 0) edgeButtons |= GamepadButtonFlags.A;
+                        if ((bEdge & 0x08) != 0) edgeButtons |= GamepadButtonFlags.B;
 
-                        // --- Ausführung ---
+                        // Sticks
+                        float lx = (_edgeInputBuffer[start + 0] - 128) / 128f;
+                        float ly = (_edgeInputBuffer[start + 1] - 128) / 128f;
+                        int xDir = lx < -0.3f ? -1 : (lx > 0.3f ? 1 : 0);
+                        int yDir = ly < -0.3f ? 1 : (ly > 0.3f ? -1 : 0);
+
+                        // --- Verarbeitung ---
                         HandleUniversalToggle(edgeButtons);
                         HandleEdgeShortcuts(edgeButtons);
 
                         if (_isMouseModeActive)
                         {
-                            // WICHTIG: Nutzt jetzt INDEX 5!
-                            // Dadurch speichert HandleMouseControl den "Gedrückt"-Status in einem eigenen Slot.
-                            // Das erlaubt Drag & Drop (Gedrückthalten).
                             HandleMouseControl(new State
                             {
                                 Gamepad = new Gamepad
@@ -7339,13 +8285,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                     LeftThumbX = (short)(lx * 32767),
                                     LeftThumbY = (short)(-ly * 32767)
                                 }
-                            }, 5);
+                            }, 5); // Index 5 für Edge Maus
                         }
                         else if (IsWindowInForeground())
                         {
-                            ProcessEdgeSmoothNavigation(edgeButtons, xDir, yDir);
+                            DispatcherQueue.TryEnqueue(() => ProcessEdgeSmoothNavigation(edgeButtons, xDir, yDir));
                         }
-
                         Thread.Yield();
                     }
                     else { Thread.Sleep(1); }
@@ -7353,16 +8298,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 catch { _edgeStream?.Dispose(); _edgeStream = null; }
             }
         }
+
+        // --- Die vereinfachte Methode für Edge ---
         private void ProcessEdgeSmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
         {
-            // Nutzt _lastEdgeButtonState statt _lastPs5ButtonState
+            // 1. Buttons (One-Shot)
             var newPresses = buttons & ~_lastEdgeButtonState;
             if (newPresses != GamepadButtonFlags.None)
             {
-                DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, 4));
+                // ALLES an HandleGamepadInput weiterleiten (Controller Index 4 für PS/Edge UI Logik)
+                HandleGamepadInput(newPresses, false, false, false, false, 4);
             }
 
-            // Stick Smooth Logik mit Edge-eigenen Timern
+            // 2. Stick Navigation
             if (xDir == 0 && yDir == 0)
             {
                 _edgeNextAllowedInputTime = DateTime.MinValue;
@@ -7372,7 +8320,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 if (DateTime.Now > _edgeNextAllowedInputTime)
                 {
-                    DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4));
+                    HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4);
 
                     if (_edgeStickCentered)
                     {
@@ -7387,6 +8335,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             _lastEdgeButtonState = buttons;
         }
+        
         private void HandleEdgeShortcuts(GamepadButtonFlags currentButtons)
         {
             // Wir nutzen Index 6 für den Edge Controller, um Konflikte mit Xbox (0-3),
@@ -7451,385 +8400,161 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion dualsense edge
 
         #region standard ps controller dualsense
+        // Füge diese Variable oben in deine Klasse zu den anderen Variablen hinzu:
+        private DateTime _lastPs5StickDispatch = DateTime.MinValue;
+        private GamepadButtonFlags _bgLastPs5Buttons = GamepadButtonFlags.None; // Eigener Speicher für den BG-Thread
+
         private async Task PlayStationInputLoop()
-
         {
-
-            // Absolutes Maximum an Priorität für diesen Thread
-
             Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
-
-
             while (!_isExiting)
-
             {
-
-                // --- AUTO-SUCHE FÜR ALLE PS5 MODELLE (Standard & Edge) ---
-
+                // Verbindung herstellen (Original Logik)
                 if (_ps5Stream == null)
-
                 {
-
                     try
-
                     {
-
                         var loader = DeviceList.Local;
+                        var ps5Dev = loader.GetHidDevices(0x054C).FirstOrDefault(d => d.ProductID == 0x0CE6 || d.ProductID == 0x0DF2);
 
-                        // Hole ALLE Sony HID Geräte
-
-                        var allSonyDevices = loader.GetHidDevices(0x054C).ToList();
-
-
-
-                        foreach (var dev in allSonyDevices)
-
+                        if (ps5Dev != null && ps5Dev.TryOpen(out var tempStream))
                         {
-
-                            // Prüfe ob es ein Standard (0x0CE6) oder Edge (0x0DF2) ist
-
-                            if (dev.ProductID == 0x0CE6 || dev.ProductID == 0x0DF2)
-
-                            {
-
-                                if (dev.TryOpen(out var tempStream))
-
-                                {
-
-                                    _ps5Stream = tempStream;
-
-                                    _ps5Stream.ReadTimeout = 1;
-
-                                    _ps5Device = dev;
-
-                                    Debug.WriteLine($"[PS5] Erfolgreich verbunden mit: {dev.ProductName} (ID: {dev.ProductID:X})");
-
-                                    break;
-
-                                }
-
-                            }
-
+                            _ps5Stream = tempStream;
+                            _ps5Stream.ReadTimeout = 50;
+                            _ps5Device = ps5Dev;
+                            Debug.WriteLine($"[PS5] Verbunden: {ps5Dev.ProductName}");
                         }
-
                     }
-
-                    catch (Exception ex)
-
-                    {
-
-                        Debug.WriteLine("[PS5] Scan Fehler: " + ex.Message);
-
-                        _ps5Stream = null;
-
-                    }
-
-
+                    catch { _ps5Stream = null; }
 
                     if (_ps5Stream == null)
-
                     {
-
-                        Thread.Sleep(1000);
-
+                        await Task.Delay(1000);
                         continue;
-
                     }
-
                 }
 
-
-
-                // --- INPUT VERARBEITUNG ---
-
+                // Daten lesen
                 try
-
                 {
-
                     int bytesRead = _ps5Stream.Read(_hidInputBuffer);
-
                     if (bytesRead > 0)
-
                     {
-
-                        // --- UNIVERSAL REPORT PARSER (Wichtig für Edge & Bluetooth) ---
-
                         byte reportId = _hidInputBuffer[0];
+                        int startIdx = (reportId == 0x01) ? 1 : (reportId == 0x31 ? 2 : -1);
 
-                        int start = 0;
+                        if (startIdx == -1) { Thread.Yield(); continue; }
 
+                        // --- Buttons Parsen ---
+                        GamepadButtonFlags psBtn = GamepadButtonFlags.None;
+                        int btnOffset = (reportId == 0x31) ? 7 : 4;
+                        byte b1 = _hidInputBuffer[startIdx + btnOffset];
+                        byte dpad = (byte)(b1 & 0x0F);
 
+                        if (dpad == 0 || dpad == 1 || dpad == 7) psBtn |= GamepadButtonFlags.DPadUp;
+                        if (dpad == 1 || dpad == 2 || dpad == 3) psBtn |= GamepadButtonFlags.DPadRight;
+                        if (dpad == 3 || dpad == 4 || dpad == 5) psBtn |= GamepadButtonFlags.DPadDown;
+                        if (dpad == 5 || dpad == 6 || dpad == 7) psBtn |= GamepadButtonFlags.DPadLeft;
 
-                        if (reportId == 0x31)
+                        if ((b1 & 0x10) != 0) psBtn |= GamepadButtonFlags.X;
+                        if ((b1 & 0x20) != 0) psBtn |= GamepadButtonFlags.A;
+                        if ((b1 & 0x40) != 0) psBtn |= GamepadButtonFlags.B;
+                        if ((b1 & 0x80) != 0) psBtn |= GamepadButtonFlags.Y;
 
-                        {
+                        byte b2 = _hidInputBuffer[startIdx + btnOffset + 1];
+                        if ((b2 & 0x01) != 0) psBtn |= GamepadButtonFlags.LeftShoulder;
+                        if ((b2 & 0x02) != 0) psBtn |= GamepadButtonFlags.RightShoulder;
+                        if ((b2 & 0x10) != 0) psBtn |= GamepadButtonFlags.Back;
+                        if ((b2 & 0x20) != 0) psBtn |= GamepadButtonFlags.Start;
+                        if ((b2 & 0x40) != 0) psBtn |= GamepadButtonFlags.LeftThumb;
+                        if ((b2 & 0x80) != 0) psBtn |= GamepadButtonFlags.RightThumb;
 
-                            start = 2; // Bluetooth / Extended Mode (DualSense & Edge)
-
-                        }
-
-                        else if (reportId == 0x01)
-
-                        {
-
-                            start = 1; // USB / Simple Mode
-
-                        }
-
-                        else
-
-                        {
-
-                            Thread.Yield();
-
-                            continue;
-
-                        }
-
-
-
-                        GamepadButtonFlags ps5Buttons = GamepadButtonFlags.None;
-
-
-
-                        // 1. Sticks
-
-                        float lx = (_hidInputBuffer[start + 0] - 128) / 128f;
-
-                        float ly = (_hidInputBuffer[start + 1] - 128) / 128f;
-
+                        // --- Sticks ---
+                        float lx = (_hidInputBuffer[startIdx + 0] - 128) / 128f;
+                        float ly = (_hidInputBuffer[startIdx + 1] - 128) / 128f;
                         int xDir = lx < -0.3f ? -1 : (lx > 0.3f ? 1 : 0);
-
                         int yDir = ly < -0.3f ? 1 : (ly > 0.3f ? -1 : 0);
 
-
-
-                        // 2. D-PAD (Hat-Switch)
-
-                        int btnOffset = (reportId == 0x31) ? 7 : 4;
-
-                        byte b1 = _hidInputBuffer[start + btnOffset];
-
-                        byte dpadVal = (byte)(b1 & 0x0F);
-
-                        if (dpadVal <= 7)
-
-                        {
-
-                            if (dpadVal == 0 || dpadVal == 1 || dpadVal == 7) ps5Buttons |= GamepadButtonFlags.DPadUp;
-
-                            if (dpadVal == 3 || dpadVal == 4 || dpadVal == 5) ps5Buttons |= GamepadButtonFlags.DPadDown;
-
-                            if (dpadVal == 5 || dpadVal == 6 || dpadVal == 7) ps5Buttons |= GamepadButtonFlags.DPadLeft;
-
-                            if (dpadVal == 1 || dpadVal == 2 || dpadVal == 3) ps5Buttons |= GamepadButtonFlags.DPadRight;
-
-                        }
-
-
-
-                        // 3. Buttons
-
-                        byte b2 = _hidInputBuffer[start + btnOffset + 1];
-
-                        if ((b1 & 0x10) != 0) ps5Buttons |= GamepadButtonFlags.X; // Quadrat
-
-                        if ((b1 & 0x20) != 0) ps5Buttons |= GamepadButtonFlags.A; // Kreuz
-
-                        if ((b1 & 0x40) != 0) ps5Buttons |= GamepadButtonFlags.B; // Kreis
-
-                        if ((b1 & 0x80) != 0) ps5Buttons |= GamepadButtonFlags.Y; // Dreieck
-
-
-
-                        if ((b2 & 0x01) != 0) ps5Buttons |= GamepadButtonFlags.LeftShoulder;
-
-                        if ((b2 & 0x02) != 0) ps5Buttons |= GamepadButtonFlags.RightShoulder;
-
-                        if ((b2 & 0x10) != 0) ps5Buttons |= GamepadButtonFlags.Back;   // Share/Create
-
-                        if ((b2 & 0x20) != 0) ps5Buttons |= GamepadButtonFlags.Start;  // Options
-
-                        if ((b2 & 0x40) != 0) ps5Buttons |= GamepadButtonFlags.LeftThumb;
-
-                        if ((b2 & 0x80) != 0) ps5Buttons |= GamepadButtonFlags.RightThumb;
-
-
-
-                        // --- EXECUTION ---
-
-                        HandleUniversalToggle(ps5Buttons);
-
-                        HandleShortcuts(ps5Buttons, 4);
-
-
+                        // --- Original Verarbeitung ---
+                        HandleUniversalToggle(psBtn);
+                        HandleShortcuts(psBtn, 4);
 
                         if (_isMouseModeActive)
-
                         {
-
+                            // Maus-Modus direkt aufrufen (kein UI Thread nötig -> schnell)
                             HandleMouseControl(new State
-
                             {
-
                                 Gamepad = new Gamepad
-
                                 {
-
-                                    Buttons = (SharpDX.XInput.GamepadButtonFlags)ps5Buttons,
-
+                                    Buttons = (SharpDX.XInput.GamepadButtonFlags)psBtn,
                                     LeftThumbX = (short)(lx * 32767),
-
                                     LeftThumbY = (short)(-ly * 32767)
-
                                 }
-
                             }, 4);
-
                         }
-
                         else if (IsWindowInForeground())
-
                         {
-
-                            ProcessPs5SmoothNavigation(ps5Buttons, xDir, yDir);
-
+                            // UI Navigation
+                            DispatcherQueue.TryEnqueue(() => ProcessPs5SmoothNavigation(psBtn, xDir, yDir));
                         }
 
-
-
+                        // Originales Yield für maximale Frequenz
                         Thread.Yield();
-
                     }
-
                     else
-
                     {
-
                         Thread.Sleep(1);
-
                     }
-
                 }
-
                 catch
-
                 {
-
                     _ps5Stream?.Dispose();
-
                     _ps5Stream = null;
-
                 }
-
             }
-
         }
 
         private void ProcessPs5SmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
         {
-            // 1. MAUS-PARK LOGIK
-            // Wenn wir nicht im Mausmodus sind, schieben wir die Maus aktiv weg, 
-            // sobald eine Eingabe am Controller erfolgt.
-            if (!_isMouseModeActive)
+            // Originale Logik: Maus parken bei Eingabe
+            if (!_isMouseModeActive && (buttons != GamepadButtonFlags.None || xDir != 0 || yDir != 0))
             {
-                if (buttons != GamepadButtonFlags.None || xDir != 0 || yDir != 0)
-                {
-                    ParkMouseCursor();
-                }
-            }
-            else
-            {
-                // Falls wir im Maus-Modus sind, stellen wir sicher, dass der Cursor sichtbar ist
-                if (!_isCursorVisible)
-                {
-                    while (ShowCursor(true) < 0) ;
-                    _isCursorVisible = true;
-                }
+                ParkMouseCursor();
             }
 
-            // 2. BUTTON-DRÜCKE VERARBEITEN
-            // Wir berechnen, welche Buttons in diesem Frame NEU gedrückt wurden
+            // Buttons (One-Shot)
             var newPresses = buttons & ~_lastPs5ButtonState;
-
-            // --- UI-Sichere Verarbeitung via Dispatcher ---
-            DispatcherQueue.TryEnqueue(() =>
+            if (newPresses != GamepadButtonFlags.None)
             {
-                // A. Spezialfall: App-Launcher (Vollbild-Raster)
-                if (_currentFocusArea == FocusArea.AppLauncher)
-                {
-                    // X-Taste (intern als A gemappt) -> App starten
-                    if ((newPresses & GamepadButtonFlags.A) != 0)
-                    {
-                        int selectedIndex = AppGridView.SelectedIndex;
-                        if (selectedIndex >= 0 && selectedIndex < AppGridView.Items.Count && AppGridView.Items[selectedIndex] is AppInfo app)
-                        {
-                            LaunchApp(app);
-                            PlayActivationSound();
-                        }
-                    }
-                    // Kreis-Taste (intern als B gemappt) -> Launcher schließen
-                    else if ((newPresses & GamepadButtonFlags.B) != 0)
-                    {
-                        ToggleAppLauncher_Click(null, null);
-                        PlaydeactivationSound();
-                    }
+                // Hier rufen wir das neue zentrale HandleGamepadInput auf, 
+                // das jetzt das Menü kennt. Da es im Dispatcher läuft, ist es sicher.
+                HandleGamepadInput(newPresses, false, false, false, false, 4);
+            }
 
-                    // Steuerkreuz (D-Pad) Navigation innerhalb des Launchers
-                    int dpadX = 0; int dpadY = 0;
-                    if ((newPresses & GamepadButtonFlags.DPadUp) != 0) dpadY = 1;
-                    else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) dpadY = -1;
-                    else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) dpadX = -1;
-                    else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) dpadX = 1;
-
-                    if (dpadX != 0 || dpadY != 0)
-                    {
-                        HandleAppLauncherNavigation(dpadX, dpadY);
-                    }
-                }
-                // B. Normaler Modus (Haupt-UI)
-                else if (newPresses != GamepadButtonFlags.None)
-                {
-                    // Übergabe an die zentrale Eingabelogik (Controller Index 4 für PS5)
-                    HandleGamepadInput(newPresses, false, false, false, false, 4);
-                }
-            });
-
-            // 3. STICK-NAVIGATION (SMOOTH SCROLLING)
+            // Stick Navigation (Originale Logik mit deinen Timern)
             if (xDir != 0 || yDir != 0)
             {
-                // Prüfen, ob die Zeit für den nächsten Navigationsschritt erreicht ist
                 if (DateTime.Now > _ps5NextAllowedInputTime)
                 {
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (_currentFocusArea == FocusArea.AppLauncher)
-                        {
-                            HandleAppLauncherNavigation(xDir, yDir);
-                        }
-                        else
-                        {
-                            // Übergabe der Stick-Richtungen an die Eingabelogik
-                            HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4);
-                        }
-                    });
+                    HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, 4);
 
-                    // Timing-Logik: Der erste Schritt dauert länger (400ms), danach schnelleres Scrollen (150ms)
                     _ps5NextAllowedInputTime = _ps5StickCentered ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
                     _ps5StickCentered = false;
                 }
             }
             else
             {
-                // Stick ist wieder in der Mitte
                 _ps5NextAllowedInputTime = DateTime.MinValue;
                 _ps5StickCentered = true;
             }
 
-            // Aktuellen Button-Zustand für den nächsten Frame speichern
             _lastPs5ButtonState = buttons;
         }
+
+        
+
+        
 
         // Hilfsmethode für das Raster-Scrolling im App-Launcher
         private void HandleAppLauncherNavigation(int xDir, int yDir)
@@ -8246,6 +8971,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Verarbeitet Gamepad-Eingaben für die UI-Navigation und Shortcuts.
         /// </summary>
+        /// <summary>
+        /// Die zentrale Methode zur Verarbeitung der Gamepad-Eingaben für die UI-Navigation.
+        /// Beinhaltet die Steuerung für alle Bereiche inkl. Cards, Launcher, Audio und das neue Bild-Menü.
+        /// </summary>
         private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
             // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
@@ -8287,7 +9016,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if ((newPresses & GamepadButtonFlags.X) != 0)
                     {
-                        // NEU: Öffnet das integrierte Audio-Menü
+                        // Öffnet das integrierte Audio-Menü
                         OpenAudioFlyout();
                         PlayActivationSound();
                     }
@@ -8334,6 +9063,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         TriggerCardAction(_selectedCardIndex, false);
                         PlaydeactivationSound();
                     }
+                    // --- NEU: START-TASTE FÜR BILD-MENÜ ---
+                    else if ((newPresses & GamepadButtonFlags.Start) != 0)
+                    {
+                        // Prüfen ob SteamGridDB Key da ist (optional, wir erlauben auch nur Lokale Datei)
+                        string apiKey = AppSettings.Load<string>("steamgriddb_api_key");
+
+                        // Wir erlauben das Öffnen immer, damit man auch lokale Bilder setzen kann
+                        if (_cardCache.Count > _selectedCardIndex)
+                        {
+                            var entry = _cardCache[_selectedCardIndex];
+                            OpenImageSelectionForCard(entry);
+                            PlayActivationSound();
+                        }
+                    }
                     break;
 
                 // --- 3. Launcher (Mini-Launcher links) ---
@@ -8379,24 +9122,70 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // --- 4. AudioMenu (Audio-Geräte Flyout) ---
                 case FocusArea.AudioMenu:
-                    if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioDeviceButtons.Any())
+                    // --- TAB SWITCHING (RB/LB) ---
+                    if ((newPresses & GamepadButtonFlags.RightShoulder) != 0 && !_isAudioMixerMode)
                     {
-                        _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
-                        navigated = true;
+                        ToggleAudioTab(true); // Switch to Mixer
+                        PlayNavigationSound();
                     }
-                    else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioDeviceButtons.Any())
+                    else if ((newPresses & GamepadButtonFlags.LeftShoulder) != 0 && _isAudioMixerMode)
                     {
-                        _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex - 1 + _audioDeviceButtons.Count) % _audioDeviceButtons.Count;
-                        navigated = true;
+                        ToggleAudioTab(false); // Switch to Devices
+                        PlayNavigationSound();
                     }
-                    else if ((newPresses & GamepadButtonFlags.A) != 0 || (newPresses & GamepadButtonFlags.X) != 0)
+
+                    // --- NAVIGATION ---
+                    if (!_isAudioMixerMode)
                     {
-                        if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                        // === DEVICES MODE ===
+                        if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioDeviceButtons.Any())
                         {
-                            SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                            _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
+                            UpdateAudioVisualFocus(); // Use local optimized focus update
+                            PlayNavigationSound();
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioDeviceButtons.Any())
+                        {
+                            _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex - 1 + _audioDeviceButtons.Count) % _audioDeviceButtons.Count;
+                            UpdateAudioVisualFocus();
+                            PlayNavigationSound();
+                        }
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                            {
+                                SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                            }
                         }
                     }
-                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    else
+                    {
+                        // === MIXER MODE ===
+                        if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioMixerRows.Any())
+                        {
+                            _selectedMixerIndex = (_selectedMixerIndex + 1) % _audioMixerRows.Count;
+                            UpdateAudioVisualFocus();
+                            PlayNavigationSound();
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioMixerRows.Any())
+                        {
+                            _selectedMixerIndex = (_selectedMixerIndex - 1 + _audioMixerRows.Count) % _audioMixerRows.Count;
+                            UpdateAudioVisualFocus();
+                            PlayNavigationSound();
+                        }
+                        // VOLUME ADJUSTMENT (Left/Right)
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                        {
+                            AdjustSessionVolume(_selectedMixerIndex, -0.05f); // -5%
+                        }
+                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
+                        {
+                            AdjustSessionVolume(_selectedMixerIndex, 0.05f); // +5%
+                        }
+                    }
+
+                    // CLOSE
+                    if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
                         CloseAudioFlyout();
                         PlaydeactivationSound();
@@ -8436,14 +9225,98 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     break;
 
                 // --- 6. AppLauncher (Fullscreen Grid) ---
+                // --- 6. AppLauncher (Fullscreen Grid) ---
                 case FocusArea.AppLauncher:
+                    // B = Schließen (wie bisher)
                     if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
                         ToggleAppLauncher_Click(null, null);
                         PlaydeactivationSound();
                     }
-                    // Navigation innerhalb der GridView wird meist durch Windows-Focus-System 
-                    // oder spezifische Index-Berechnungen (siehe dein früherer Code) gehandhabt.
+                    // A = App starten (NEU)
+                    else if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        if (AppGridView.SelectedItem is AppInfo selectedApp)
+                        {
+                            LaunchApp(selectedApp);
+                        }
+                    }
+                    // Navigation (D-Pad & Stick) (NEU)
+                    else
+                    {
+                        int xDir = 0;
+                        int yDir = 0;
+
+                        // D-Pad Erfassung
+                        if ((newPresses & GamepadButtonFlags.DPadUp) != 0) yDir = 1;
+                        else if ((newPresses & GamepadButtonFlags.DPadDown) != 0) yDir = -1;
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0) xDir = -1;
+                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0) xDir = 1;
+
+                        // Stick Erfassung (wird von der Input-Loop übergeben)
+                        if (xDir == 0 && yDir == 0)
+                        {
+                            if (stickMovedUp) yDir = 1;
+                            else if (stickMovedDown) yDir = -1;
+                            else if (stickMovedLeft) xDir = -1;
+                            else if (stickMovedRight) xDir = 1;
+                        }
+
+                        // Wenn eine Bewegung erkannt wurde, an die Hilfsmethode leiten
+                        if (xDir != 0 || yDir != 0)
+                        {
+                            HandleAppLauncherNavigation(xDir, yDir);
+                        }
+                    }
+                    break;
+
+                // --- 7. ImageSelection (Bildauswahl Overlay) ---
+                case FocusArea.ImageSelection:
+                    // Prüfen ob wir überhaupt Ergebnisse haben
+                    if (ImageResultsGrid.Items.Count > 0)
+                    {
+                        // Spalten berechnen (Standardmäßig ca. 5 im GridView, kann variieren)
+                        int columns = 5;
+
+                        if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
+                        {
+                            _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + 1);
+                        }
+                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                        {
+                            _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - 1);
+                        }
+                        else if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
+                        {
+                            _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + columns);
+                        }
+                        else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
+                        {
+                            _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - columns);
+                        }
+
+                        // A = Bild auswählen & laden
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            if (_selectedImageGridIndex >= 0 && _selectedImageGridIndex < _currentImageSearchResults.Count)
+                            {
+                                string url = _currentImageSearchResults[_selectedImageGridIndex];
+                                DownloadAndApplyImage(url);
+                                PlayActivationSound();
+                            }
+                        }
+
+                        // Visuelles Feedback (Scrollen und Selektieren)
+                        ImageResultsGrid.SelectedIndex = _selectedImageGridIndex;
+                        ImageResultsGrid.ScrollIntoView(ImageResultsGrid.SelectedItem);
+                    }
+
+                    // B = Abbrechen / Schließen
+                    if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        CloseImageSelectorButton_Click(null, null);
+                        PlaydeactivationSound();
+                    }
                     break;
             }
 
@@ -8487,11 +9360,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Updates the UI performantly by only changing the old and new focused elements.
         /// </summary>
 
-
-        /// <summary>
-        /// Aktualisiert die visuelle Darstellung des Fokus basierend auf der aktuellen FocusArea.
-        /// Enthält Bounce-Animationen für das Infopanel und Scale-Effekte für Buttons.
-        /// </summary>
         private void UpdateVisualFocus(bool isInitial = false)
         {
             UpdateLayoutForFocus();
@@ -8591,33 +9459,35 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 border.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
             }
 
-            // Banner (A/B Buttons) suchen
+            // Banner (A/B Buttons) suchen für Karten
             FrameworkElement banner = null;
             if (border.Child is Grid g)
             {
                 banner = g.Children.OfType<FrameworkElement>().FirstOrDefault(x => x.Name == "ButtonBanner");
             }
 
-            // Zeitwerte: Extrem kurz für den Controller
             var duration = TimeSpan.FromMilliseconds(120);
             var sb = new Storyboard();
 
-            // 1. SKALIERUNG & POSITION (Karten-Body)
-            var animX = new DoubleAnimation { To = isSelected ? 1.08 : 1.0, Duration = duration };
-            var animY = new DoubleAnimation { To = isSelected ? 1.08 : 1.0, Duration = duration };
-            var animTrans = new DoubleAnimation { To = isSelected ? -10 : 0, Duration = duration };
+            // WICHTIG: Hier von 1.08 auf 1.02 reduziert -> Verhindert Abschneiden!
+            double scaleFactor = 1.02;
+
+            // 1. SKALIERUNG
+            var animX = new DoubleAnimation { To = isSelected ? scaleFactor : 1.0, Duration = duration };
+            var animY = new DoubleAnimation { To = isSelected ? scaleFactor : 1.0, Duration = duration };
+            // TranslateY leicht reduzieren für Mixer, da die Zeilen flacher sind
+            var animTrans = new DoubleAnimation { To = isSelected ? -2 : 0, Duration = duration };
 
             Storyboard.SetTarget(animX, transform); Storyboard.SetTargetProperty(animX, "ScaleX");
             Storyboard.SetTarget(animY, transform); Storyboard.SetTargetProperty(animY, "ScaleY");
             Storyboard.SetTarget(animTrans, transform); Storyboard.SetTargetProperty(animTrans, "TranslateY");
             sb.Children.Add(animX); sb.Children.Add(animY); sb.Children.Add(animTrans);
 
-            // 2. BANNER-LOGIK (Der Fix gegen das Zucken)
+            // 2. BANNER-LOGIK (Nur für Main Cards relevant)
             if (banner != null)
             {
                 if (isSelected)
                 {
-                    // Wenn ausgewählt: Sanft einblenden
                     var animOp = new DoubleAnimation { To = 1.0, Duration = duration };
                     Storyboard.SetTarget(animOp, banner);
                     Storyboard.SetTargetProperty(animOp, "Opacity");
@@ -8625,7 +9495,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 else
                 {
-                    // Wenn NICHT ausgewählt: SOFORT ausblenden (verhindert das Nach-Zucken)
                     banner.Opacity = 0;
                 }
             }
@@ -8762,11 +9631,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Sucht nach allen laufenden Anwendungen und aktualisiert die UI-Karten.
         /// </summary>
+        // Variable to prevent multiple scans running at once
+        private bool _isScanning = false;
+
         private async Task RefreshAppListAsync()
         {
-            // Die Suche nur durchführen, wenn das Fenster im Vordergrund ist
-            if (!IsWindowInForeground()) return;
-
+            // Wir scannen IMMER, damit die Liste aktuell bleibt, auch während des Spielens.
             var processDataList = await Task.Run(() =>
             {
                 var dataList = new List<ProcessData>();
@@ -8774,58 +9644,54 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 EnumWindows((hWnd, lParam) =>
                 {
-                    if (!IsWindowVisible(hWnd) || GetWindow(hWnd, (uint)GetWindowCmd.GW_OWNER) != IntPtr.Zero)
-                        return true;
+                    // 1. Basis-Checks: Ist das Fenster überhaupt da?
+                    if (!IsWindowVisible(hWnd)) return true;
+                    if (IsCloaked(hWnd)) return true; // Versteckte Metro-Apps ignorieren
 
-                    int textLen = GetWindowTextLength(hWnd);
-                    if (textLen == 0)
-                        return true;
-
+                    // 2. Tool-Windows (Popups, Overlays) ignorieren
                     var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
-                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW))
-                        return true;
+                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
 
-                    if (IsCloaked(hWnd))
-                        return true;
+                    // 3. Hat das Fenster einen Titel? (Leere Fenster sind oft Geister)
+                    int textLen = GetWindowTextLength(hWnd);
+                    if (textLen <= 0) return true;
 
                     var titleBuilder = new StringBuilder(textLen + 1);
                     GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
                     string windowTitle = titleBuilder.ToString();
 
-                    if (string.IsNullOrWhiteSpace(windowTitle) ||
-                        _excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return true;
-                    }
+                    // 4. Titel-Blacklist prüfen
+                    if (_excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase))) return true;
 
                     Process proc = null;
                     string exePath = null;
+                    string exeName = "";
+
                     try
                     {
                         GetWindowThreadProcessId(hWnd, out uint pid);
-                        if (pid != 0)
-                        {
-                            proc = Process.GetProcessById((int)pid);
-                            if (proc.Id == Process.GetCurrentProcess().Id) return true;
-                            exePath = proc.MainModule?.FileName;
-                        }
+                        // System-Prozesse ignorieren
+                        if (pid == 0 || pid == 4 || pid == Process.GetCurrentProcess().Id) return true;
+
+                        proc = Process.GetProcessById((int)pid);
+                        exePath = proc.MainModule?.FileName;
+
+                        if (!string.IsNullOrEmpty(exePath))
+                            exeName = Path.GetFileNameWithoutExtension(exePath).ToLowerInvariant().Trim();
                     }
                     catch
                     {
-                        proc = null;
-                        exePath = null;
+                        // Wenn wir keinen Zugriff haben (Admin-Prozess), nehmen wir das Fenster trotzdem mit,
+                        // falls es einen gültigen Titel hat. Aber ohne EXE-Infos.
                     }
+
+                    // 5. Prozess-Blacklist prüfen (Hier fliegen InputHost etc. raus)
+                    if (!string.IsNullOrEmpty(exeName) && _excludedProcessNames.Contains(exeName)) return true;
 
                     if (!seenHwnds.Add(hWnd)) return true;
 
-                    dataList.Add(new ProcessData
-                    {
-                        ProductName = windowTitle,
-                        Hwnd = hWnd,
-                        Proc = proc,
-                        ExePath = exePath
-                    });
-
+                    // TREFFER: Hinzufügen
+                    dataList.Add(new ProcessData { ProductName = windowTitle, Hwnd = hWnd, Proc = proc, ExePath = exePath });
                     return true;
                 }, IntPtr.Zero);
 
