@@ -111,47 +111,99 @@
             <Grid x:Name="AudioOverlay" Visibility="Collapsed" Canvas.ZIndex="2000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                 <Grid.ChildrenTransitions>
                     <TransitionCollection>
-                        <EntranceThemeTransition FromVerticalOffset="30" />
+                        <EntranceThemeTransition FromVerticalOffset="40" />
+                        <ContentThemeTransition/>
                     </TransitionCollection>
                 </Grid.ChildrenTransitions>
 
                 <Grid Tapped="AudioOverlay_Tapped">
                     <Grid.Background>
-                        <AcrylicBrush TintColor="Black" TintOpacity="0.7" FallbackColor="#111111" />
+                        <AcrylicBrush TintColor="#050505" TintOpacity="0.85" FallbackColor="#CC000000" />
                     </Grid.Background>
                 </Grid>
 
-                <Border Width="480" VerticalAlignment="Center" HorizontalAlignment="Center" 
-                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                        CornerRadius="20" BorderBrush="#44FFFFFF" BorderThickness="1">
-                    <StackPanel Margin="24">
-                        <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,0,0,20">
-                            <FontIcon Glyph="&#xE93E;" Foreground="{ThemeResource SystemAccentColor}" FontSize="28"/>
-                            <StackPanel>
-                                <TextBlock Text="Audio Output" FontSize="22" FontWeight="Bold" Foreground="White"/>
-                                <TextBlock Text="Choose playback device" FontSize="12" Foreground="Gray"/>
-                            </StackPanel>
-                        </StackPanel>
+                <Border Width="650" VerticalAlignment="Center" HorizontalAlignment="Center" 
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    CornerRadius="24" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    Padding="0">
+                    <Border.Shadow>
+                        <ThemeShadow/>
+                    </Border.Shadow>
 
-                        <Rectangle Height="1" Fill="#22FFFFFF" Margin="0,0,0,16"/>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
 
-                        <ScrollViewer MaxHeight="350" VerticalScrollBarVisibility="Hidden">
-                            <StackPanel x:Name="SimpleAudioList" Spacing="8"/>
-                        </ScrollViewer>
+                        <Grid Grid.Row="0" Margin="30,25,30,15">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
 
-                        <Border Background="#11FFFFFF" CornerRadius="10" Margin="0,20,0,0" Padding="12,6">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="24">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Ellipse Width="12" Height="12" Fill="#FFA5D952"/>
-                                    <TextBlock Text="Select" Foreground="White" FontSize="13" VerticalAlignment="Center"/>
+                            <Border x:Name="TabHeaderDevices" Grid.Column="0" CornerRadius="12" Padding="0,10" Background="#22FFFFFF">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+                                    <FontIcon Glyph="&#xE7F5;" FontSize="18"/>
+                                    <TextBlock Text="Output Devices" FontWeight="Bold" FontSize="16"/>
                                 </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Ellipse Width="12" Height="12" Fill="#FFDB4E4E"/>
-                                    <TextBlock Text="Back" Foreground="White" FontSize="13" VerticalAlignment="Center"/>
+                            </Border>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Opacity="0.6" Margin="20,0">
+                                <Border CornerRadius="6" BorderBrush="#88FFFFFF" BorderThickness="1.5" Padding="6,2">
+                                    <TextBlock Text="LB" FontSize="11" FontWeight="Bold"/>
+                                </Border>
+                                <FontIcon Glyph="&#xE76B;" FontSize="12"/>
+                                <Border CornerRadius="6" BorderBrush="#88FFFFFF" BorderThickness="1.5" Padding="6,2">
+                                    <TextBlock Text="RB" FontSize="11" FontWeight="Bold"/>
+                                </Border>
+                            </StackPanel>
+
+                            <Border x:Name="TabHeaderMixer" Grid.Column="2" CornerRadius="12" Padding="0,10" Background="Transparent" Opacity="0.5">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+                                    <FontIcon Glyph="&#xE995;" FontSize="18"/>
+                                    <TextBlock Text="App Mixer" FontWeight="Bold" FontSize="16"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Rectangle Grid.Row="1" Height="1" Fill="#1AFFFFFF" Margin="30,0"/>
+
+                        <Grid Grid.Row="2" Margin="20,15">
+                            <ScrollViewer x:Name="AudioDevicesScrollViewer" MaxHeight="500" VerticalScrollBarVisibility="Hidden" HorizontalScrollMode="Disabled">
+                                <StackPanel x:Name="SimpleAudioList" Spacing="10"/>
+                            </ScrollViewer>
+
+                            <ScrollViewer x:Name="AudioMixerScrollViewer" MaxHeight="500" VerticalScrollBarVisibility="Hidden" HorizontalScrollMode="Disabled" Visibility="Collapsed">
+                                <StackPanel x:Name="MixerListStackPanel" Spacing="10"/>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <Border Grid.Row="3" Background="#0FFFFFFF" CornerRadius="0,0,24,24" Padding="0,12">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="30">
+
+                                <StackPanel x:Name="LegendDevices" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Ellipse Width="16" Height="16" Fill="#FFA5D952"/>
+                                    <TextBlock Text="Select" Foreground="#EEFFFFFF" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <StackPanel x:Name="LegendMixer" Orientation="Horizontal" Spacing="30" Visibility="Collapsed" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE76B;" FontSize="14" Opacity="0.8"/>
+                                        <TextBlock Text="Adjust Volume" Foreground="#EEFFFFFF" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Ellipse Width="16" Height="16" Fill="#FFDB4E4E"/>
+                                    <TextBlock Text="Close" Foreground="#EEFFFFFF" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
-                    </StackPanel>
+                    </Grid>
                 </Border>
             </Grid>
 
@@ -267,5 +319,60 @@
         </Border>
 
         <MediaPlayerElement x:Name="StartupVideoPlayer" AreTransportControlsEnabled="False" Stretch="Uniform" Background="Black"/>
+        <Grid x:Name="ImageSelectionOverlay" Visibility="Collapsed" Background="#D0000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Canvas.ZIndex="500">
+            <Border Width="1000" Height="700" CornerRadius="12" Background="#FF1E1E1E" BorderBrush="#33FFFFFF" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid Padding="25">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Spacing="15">
+                        <TextBlock Text="CHANGE ARTWORK" FontSize="28" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Select a new cover for this game" FontSize="14" Foreground="#AAAAAA" HorizontalAlignment="Center"/>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="ImageSearchBox" PlaceholderText="Search Game..." Height="40" CornerRadius="5" FontSize="16"/>
+                            <Button x:Name="ImageSearchButton" Content="Search" Grid.Column="1" Margin="10,0,0,0" Height="40" Width="100" Click="ImageSearchButton_Click" Style="{StaticResource AccentButtonStyle}"/>
+                        </Grid>
+
+                        <ProgressBar x:Name="ImageSearchProgress" IsIndeterminate="true" Visibility="Collapsed" Height="2" Margin="0,10,0,0"/>
+                    </StackPanel>
+
+                    <GridView x:Name="ImageResultsGrid" Grid.Row="1" Margin="0,20,0,20" SelectionMode="Single"  IsItemClickEnabled="True" ItemClick="ImageResultsGrid_ItemClick">
+                        <GridView.ItemTemplate>
+                            <DataTemplate>
+                                <Border Width="160" Height="240" CornerRadius="8" Margin="8" Background="#222">
+                                    <Image Source="{Binding}" Stretch="UniformToFill"/>
+                                </Border>
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                        <GridView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapGrid Orientation="Horizontal" HorizontalAlignment="Center"/>
+                            </ItemsPanelTemplate>
+                        </GridView.ItemsPanel>
+                        <GridView.ItemContainerStyle>
+                            <Style TargetType="GridViewItem">
+                                <Setter Property="Margin" Value="5"/>
+                                <Setter Property="CornerRadius" Value="8"/>
+                            </Style>
+                        </GridView.ItemContainerStyle>
+                    </GridView>
+
+                    <TextBlock x:Name="NoImagesFoundText" Grid.Row="1" Text="No images found." VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="#888" FontSize="16" Visibility="Collapsed"/>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="30">
+                        <Button x:Name="BrowseLocalButton" Content="📂 Browse Local File..." Width="200" Height="45" CornerRadius="8" Click="BrowseLocalButton_Click"/>
+                        <Button x:Name="CloseImageSelectorButton" Content="Cancel" Width="150" Height="45" CornerRadius="8" Click="CloseImageSelectorButton_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
