@@ -42,23 +42,31 @@ namespace GAMINGCONSOLEMODE
 
         private void Onboarding_Loaded(object sender, RoutedEventArgs e)
         {
-            // Referenzen zu den UI Elementen speichern
-            _stepIndicators = new Border[] { Step1Indicator, Step2Indicator, Step3Indicator, Step4Indicator };
-            _stepNumbers = new TextBlock[] { Step1Number, Step2Number, Step3Number, Step4Number };
-            _stepTexts = new TextBlock[] { Step1Text, Step2Text, Step3Text, Step4Text };
-            _stepArrows = new FontIcon[] { Arrow1, Arrow2, Arrow3 };
+            // Referenzen zu den UI Elementen speichern (Jetzt 5 Schritte!)
+            _stepIndicators = new Border[] { Step1Indicator, Step2Indicator, Step3Indicator, Step4Indicator, Step5Indicator };
+            _stepNumbers = new TextBlock[] { Step1Number, Step2Number, Step3Number, Step4Number, Step5Number };
+            _stepTexts = new TextBlock[] { Step1Text, Step2Text, Step3Text, Step4Text, Step5Text };
+            // Pfeile zwischen den Schritten (1->2, 2->3, 3->4, 4->5 = 4 Pfeile)
+            _stepArrows = new FontIcon[] { Arrow1, Arrow2, Arrow3, Arrow4 };
 
             // Initialen Status setzen
             UpdateStepperVisuals(0);
 
             try
             {
-                // Einstellungen laden (vermeidet Absturz, falls Key nicht existiert)
+                // Einstellungen laden
                 AutostartToggle.IsOn = AppSettings.Load<bool>("usewinpartstartapps");
+
+                // API Key laden, falls schon vorhanden
+                string savedKey = AppSettings.Load<string>("steamgriddb_api_key");
+                if (!string.IsNullOrEmpty(savedKey))
+                {
+                    ApiKeyBox.Text = savedKey;
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Fehler beim Laden der Toggle-Einstellungen: {ex.Message}");
+                Debug.WriteLine($"Fehler beim Laden der Einstellungen: {ex.Message}");
             }
 
             _isPageLoaded = true;
@@ -162,7 +170,7 @@ namespace GAMINGCONSOLEMODE
             {
                 if (this.XamlRoot != null && this.XamlRoot.Content is Frame rootFrame)
                 {
-                    rootFrame.Navigate(typeof(launcher)); // Class name case sensitivity check: 'launcher' vs 'Launcher'
+                    rootFrame.Navigate(typeof(launcher));
                 }
                 else
                 {
@@ -194,6 +202,24 @@ namespace GAMINGCONSOLEMODE
                 bool isNowOn = toggleSwitch.IsOn;
                 Debug.WriteLine($"Autostart Management: {(isNowOn ? "ON" : "OFF")}");
                 AppSettings.Save("usewinpartstartapps", isNowOn);
+            }
+        }
+
+        // --- NEU: API Key Logic ---
+
+        private void GetApiKeyButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Link direkt zur API-Key Erstellung bei SteamGridDB
+            WebBrowserLauncher.OpenUrlInBrowser("https://www.steamgriddb.com/profile/preferences/api");
+        }
+
+        private void ApiKeyBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Speichert den Key sofort, wenn der Nutzer ihn eingibt/einfügt
+            if (sender is TextBox tb)
+            {
+                string key = tb.Text.Trim();
+                AppSettings.Save("steamgriddb_api_key", key);
             }
         }
 

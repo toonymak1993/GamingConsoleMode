@@ -903,9 +903,8 @@ namespace gcmloader
             int pWidth = GetSystemMetrics(0); // SM_CXSCREEN
             int pHeight = GetSystemMetrics(1); // SM_CYSCREEN
 
-            // WICHTIG: pHeight - 1 sorgt dafür, dass AMD das Fenster als Desktop-Inhalt sieht.
-            // Das verhindert den schwarzen Bildschirm beim Fokus-Wechsel.
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight - 1, 0x0040); // SWP_SHOWWINDOW
+            // ÄNDERUNG: pHeight statt (pHeight - 1), damit es den Bildschirm komplett abdeckt
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040); // SWP_SHOWWINDOW
 
             if (MainContent != null)
             {
@@ -1107,34 +1106,40 @@ namespace gcmloader
                 PropertyNameCaseInsensitive = true
             };
 
-            // Wir nutzen den Hardcoded Key, um Fehler in den Settings auszuschließen
-            public bool IsApiKeySet => true;
+            // ÄNDERUNG: Dynamische Prüfung statt "true"
+            public bool IsApiKeySet => !string.IsNullOrWhiteSpace(_apiKey);
 
             public SteamGridDBHelper(string apiKeyFromSettings)
             {
-                // Hardcoded steamgriddbkey
-                _apiKey = "fff543e81e7e53d7a8e08935a7349d36".Trim();
+                // ÄNDERUNG: Wir nehmen den Key aus den Settings (oder null)
+                _apiKey = apiKeyFromSettings?.Trim();
 
                 _httpClient.DefaultRequestHeaders.Clear();
-                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+
+                // Nur Authorization-Header setzen, wenn ein Key da ist
+                if (IsApiKeySet)
+                {
+                    _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+                }
+
                 _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
             }
 
             public async Task<List<string>> GetVerticalImagesForGameAsync(int gameId)
             {
                 var urls = new List<string>();
+
+                // ÄNDERUNG: Sofort abbrechen, wenn kein Key gesetzt ist
+                if (!IsApiKeySet) return urls;
+
                 try
                 {
-                    // FEHLERBEHEBUNG:
-                    // Statt "?styles=vertical" nutzen wir "?dimensions=600x900"
-                    // Das ist der korrekte Filter für Steam-Cover.
+                    // "?dimensions=600x900" filtert für korrekte Cover-Größe
                     var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/grids/game/{gameId}?dimensions=600x900");
 
                     if (!response.IsSuccessStatusCode)
                     {
                         Debug.WriteLine($"[SteamGridDB Images] Error {response.StatusCode}");
-                        // Fallback: Versuche es ohne Filter, falls gar nichts geht (dann kommen aber auch breite Bilder)
-                        // response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/grids/game/{gameId}");
                         return urls;
                     }
 
@@ -1159,7 +1164,8 @@ namespace gcmloader
 
             public async Task<SearchResult> SearchForGameIdAsync(string gameName)
             {
-                if (string.IsNullOrWhiteSpace(gameName)) return null;
+                // ÄNDERUNG: Prüfung auf API Key
+                if (!IsApiKeySet || string.IsNullOrWhiteSpace(gameName)) return null;
 
                 try
                 {
@@ -1173,7 +1179,9 @@ namespace gcmloader
                     if (!response.IsSuccessStatusCode)
                     {
                         string errorContent = await response.Content.ReadAsStringAsync();
-                        throw new Exception($"API Error: {response.StatusCode} - {errorContent}");
+                        // Wir werfen hier keinen harten Fehler mehr, sondern loggen nur, um Abstürze zu vermeiden
+                        Debug.WriteLine($"API Error: {response.StatusCode} - {errorContent}");
+                        return null;
                     }
 
                     var json = await response.Content.ReadAsStringAsync();
@@ -1187,7 +1195,7 @@ namespace gcmloader
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[SteamGridDB Search Error] {ex.Message}");
-                    throw;
+                    // throw; // Nicht werfen, damit die UI nicht crasht
                 }
                 return null;
             }
@@ -1195,6 +1203,7 @@ namespace gcmloader
             // Alte Methode (leitet an die neue weiter)
             public async Task<string> GetGridImageUrlAsync(int gameId)
             {
+                if (!IsApiKeySet) return null;
                 try
                 {
                     var list = await GetVerticalImagesForGameAsync(gameId);
@@ -3059,17 +3068,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             if (entry == null) return;
 
-            _currentEditingCardEntry = entry;
-            _currentFocusArea = FocusArea.ImageSelection; // Switch input focus
+            try
+            {
+                _currentEditingCardEntry = entry;
+                _currentFocusArea = FocusArea.ImageSelection;
 
-            // Reset UI state
-            ImageSelectionOverlay.Visibility = Visibility.Visible;
-            ImageSearchBox.Text = entry.ProductName; // Pre-fill game name
-            ImageResultsGrid.ItemsSource = null;
-            NoImagesFoundText.Visibility = Visibility.Collapsed;
+                // UI sichtbar machen
+                ImageSelectionOverlay.Visibility = Visibility.Visible;
 
-            // Start auto-search immediately
-            ImageSearchButton_Click(null, null);
+                // Text setzen
+                ImageSearchBox.Text = entry.ProductName;
+                ImageResultsGrid.ItemsSource = null;
+                NoImagesFoundText.Visibility = Visibility.Collapsed;
+
+                // Kleiner Trick: Wir warten einen Frame, bis die UI gerendert ist,
+                // bevor wir die async Suche starten. Das verhindert Abstürze beim XamlRoot.
+                this.DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (ImageSearchButton != null)
+                    {
+                        ImageSearchButton_Click(null, null);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ArtworkError] Could not open selection: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -3077,6 +3102,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private async void ImageSearchButton_Click(object sender, RoutedEventArgs e)
         {
+            if (this.Content.XamlRoot == null) return;
+
             if (_steamGridHelper == null || !_steamGridHelper.IsApiKeySet)
             {
                 NoImagesFoundText.Text = "Error: API Key is missing in settings.toml";
@@ -6725,7 +6752,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         // Replace your existing _excludedTitles array with this one
         private static readonly string[] _excludedTitles = new[]
-        {
+ {
     // General System Windows
     "Windows® Operating System",
     "System Microsoft® Windows",
@@ -6742,28 +6769,46 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "NAHIMIC",
     "WINDOWS-WIDGET",
     "MSN",
+    "Program Manager",      // WICHTIG: Das ist oft der Desktop selbst
+    "Microsoft Text Input Application", // Touch Keyboard Ghost
 
+    // Overlays & Ghosts
+    "NVIDIA GeForce Overlay",
+    "NVIDIA Overlay",
+    "GeForce Overlay",
+    "NVIDIA Web Helper",
+    "GDI+ Window",          // Typischer Ghost-Titel
+    "Default IME",          // Input Method Editor Ghost
+    "MSCTFIME UI",          // Input Method Editor Ghost
     
     // Specific Apps to always ignore
-            "Steam",
-            "Big-Picture-Modus",
-            "Big Picture Mode",
-            "Playnite",
-            "Realtek Audio Console",
-            "NVIDIA App",
-            "Xbox.Apps.TCUI",
-            "Xbox",
-            "GeForce NOW"
+    "Steam",
+    "Big-Picture-Modus",
+    "Big Picture Mode",
+    "Playnite",
+    "Realtek Audio Console",
+    "NVIDIA App",
+    "AMD Adrenaline",
+    "Xbox.Apps.TCUI",
+    "Xbox",
+    "GeForce NOW"
 };
 
         private static readonly string[] _excludedProcessNames = new[]
-       {
+{
     "steamwebhelper", "EADesktop", "epicgameslauncher",
     "GalaxyClient", "battle.net", "UbisoftConnect", "start_protected_game",
     "GeForceNOW", "InputApp", "InputHost", "TextInputHost", "ShellExperienceHost",
     "StartMenuExperienceHost", "SearchHost", "XblGameSave", "ApplicationFrameHost",
     "SystemSettings", "LockApp", "SmartScreen", "RuntimeBroker", "taskhostw",
-    "devenv", "explorer", "searchapp", "widgets"
+    "devenv", "explorer", "searchapp", "widgets",
+    
+    // NVIDIA / AMD Overlays
+    "nvcontainer",
+    "nvidia share",
+    "nvidia web helper",
+    "amdrsserv",
+    "atiesrxx"
 };
 
         [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d")]
@@ -9066,14 +9111,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     // --- NEU: START-TASTE FÜR BILD-MENÜ ---
                     else if ((newPresses & GamepadButtonFlags.Start) != 0)
                     {
-                        // Prüfen ob SteamGridDB Key da ist (optional, wir erlauben auch nur Lokale Datei)
-                        string apiKey = AppSettings.Load<string>("steamgriddb_api_key");
-
-                        // Wir erlauben das Öffnen immer, damit man auch lokale Bilder setzen kann
-                        if (_cardCache.Count > _selectedCardIndex)
+                        // Sicherheitscheck: Ist überhaupt eine Karte ausgewählt und vorhanden?
+                        if (_cardCache != null && _cardCache.Count > _selectedCardIndex && _selectedCardIndex >= 0)
                         {
                             var entry = _cardCache[_selectedCardIndex];
-                            OpenImageSelectionForCard(entry);
+
+                            // WICHTIG: UI-Aktionen immer auf dem Dispatcher ausführen, um Thread-Fehler zu vermeiden
+                            this.DispatcherQueue.TryEnqueue(() =>
+                            {
+                                OpenImageSelectionForCard(entry);
+                            });
+
                             PlayActivationSound();
                         }
                     }
@@ -9633,6 +9681,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         // Variable to prevent multiple scans running at once
         private bool _isScanning = false;
+        [Flags]
+        internal enum WindowStylesEx : uint
+        {
+            WS_EX_TOOLWINDOW = 0x00000080,
+            WS_EX_APPWINDOW = 0x00040000,
+            WS_EX_NOACTIVATE = 0x08000000, // Wichtig für Overlays
+            WS_EX_TOPMOST = 0x00000008,
+            WS_EX_TRANSPARENT = 0x00000020
+        }
 
         private async Task RefreshAppListAsync()
         {
@@ -9650,9 +9707,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                     // 2. Tool-Windows (Popups, Overlays) ignorieren
                     var style = (WindowStylesEx)GetWindowLong(hWnd, WindowLongFlags.GWL_EXSTYLE);
-                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW)) return true;
+                    // WS_EX_TOOLWINDOW: Werkzeugfenster (nicht in Taskleiste)
+                    // WS_EX_NOACTIVATE: Fenster, die keinen Fokus annehmen (oft Overlays)
+                    if (style.HasFlag(WindowStylesEx.WS_EX_TOOLWINDOW) || style.HasFlag(WindowStylesEx.WS_EX_NOACTIVATE)) return true;
 
-                    // 3. Hat das Fenster einen Titel? (Leere Fenster sind oft Geister)
+                    // 3. --- NEU: GRÖSSEN-CHECK GEGEN GEISTERFENSTER ---
+                    // NVIDIA Overlay und andere "unsichtbare" Fenster sind oft 0x0 oder 1x1 Pixel groß
+                    GetWindowRect(hWnd, out RECT rect);
+                    int width = rect.Right - rect.Left;
+                    int height = rect.Bottom - rect.Top;
+
+                    // Wenn das Fenster kleiner als 10x10 Pixel ist, ist es kein echtes Programmfenster
+                    if (width < 10 || height < 10) return true;
+
+                    // 4. Hat das Fenster einen Titel? (Leere Fenster sind oft Geister)
                     int textLen = GetWindowTextLength(hWnd);
                     if (textLen <= 0) return true;
 
@@ -9660,7 +9728,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     GetWindowText(hWnd, titleBuilder, titleBuilder.Capacity);
                     string windowTitle = titleBuilder.ToString();
 
-                    // 4. Titel-Blacklist prüfen
+                    // 5. Titel-Blacklist prüfen
                     if (_excludedTitles.Any(t => windowTitle.Contains(t, StringComparison.OrdinalIgnoreCase))) return true;
 
                     Process proc = null;
@@ -9685,7 +9753,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         // falls es einen gültigen Titel hat. Aber ohne EXE-Infos.
                     }
 
-                    // 5. Prozess-Blacklist prüfen (Hier fliegen InputHost etc. raus)
+                    // 6. Prozess-Blacklist prüfen (Hier fliegen InputHost etc. raus)
                     if (!string.IsNullOrEmpty(exeName) && _excludedProcessNames.Contains(exeName)) return true;
 
                     if (!seenHwnds.Add(hWnd)) return true;
