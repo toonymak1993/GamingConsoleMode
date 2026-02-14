@@ -5,21 +5,65 @@ using System.IO;
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Data;
 using Tomlyn;
 using Tomlyn.Model;
 
 namespace GAMINGCONSOLEMODE
 {
+    // Hilfsklasse für die Buttons
+    public class ButtonOption
+    {
+        public string Value { get; set; }           // "A", "B", etc.
+        public string XboxIcon { get; set; }        // Pfad zum Bild
+        public string PlayStationIcon { get; set; } // Pfad zum Bild
+
+        // Hilfseigenschaft: Zeige Icons nur, wenn es nicht "None" ist
+        public bool ShowIcons => Value != "None";
+        public bool ShowText => Value == "None";
+    }
+
+    // Converter: Macht UI-Elemente sichtbar oder unsichtbar
+    public class BoolToVisibilityConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language) =>
+            (bool)value ? Visibility.Visible : Visibility.Collapsed;
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+            throw new NotImplementedException();
+    }
+
     public class FunctionViewModel : INotifyPropertyChanged
     {
         public string Name { get; set; }
         public string Description { get; set; }
+
         private bool _isEnabled;
-        public bool IsEnabled { get => _isEnabled; set { _isEnabled = value; OnPropertyChanged(nameof(IsEnabled)); } }
-        public string Key1 { get; set; } = "None";
-        public string Key2 { get; set; } = "None";
+        public bool IsEnabled
+        {
+            get => _isEnabled;
+            set { _isEnabled = value; OnPropertyChanged(nameof(IsEnabled)); }
+        }
+
+        // Gespeicherte Werte (z.B. "A")
+        private string _key1 = "None";
+        public string Key1
+        {
+            get => _key1;
+            set { _key1 = value; OnPropertyChanged(nameof(Key1)); }
+        }
+
+        private string _key2 = "None";
+        public string Key2
+        {
+            get => _key2;
+            set { _key2 = value; OnPropertyChanged(nameof(Key2)); }
+        }
+
         public double HoldTime { get; set; } = 0.0;
-        public List<string> AvailableButtons { get; set; }
+
+        // Liste der Optionen (Bilder + Text)
+        public List<ButtonOption> AvailableButtons { get; set; }
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
@@ -27,22 +71,17 @@ namespace GAMINGCONSOLEMODE
 
     public sealed partial class shortcuts : Page
     {
+        // Die Namen müssen EXAKT so heißen wie deine Bilddateien (ohne .png)
         private readonly string[] gamepadButtons = { "None", "A", "B", "X", "Y", "DPadUp", "DPadDown", "DPadLeft", "DPadRight", "Start", "Back", "LeftThumb", "RightThumb", "LeftShoulder", "RightShoulder" };
         private List<FunctionViewModel> allFunctions;
-
-        // WICHTIG: Verhindert das Speichern während des Ladens
         private bool _isLoading = true;
 
         public shortcuts()
         {
             this.InitializeComponent();
             SetupFunctionCards();
-
-            // Erst wenn alles fertig geladen ist, darf gespeichert werden
             _isLoading = false;
         }
-
-        public static double GetOpacity(bool enabled) => enabled ? 1.0 : 0.4;
 
         private void SetupFunctionCards()
         {
@@ -56,17 +95,24 @@ namespace GAMINGCONSOLEMODE
                 { "xbox keyboard", "Forces the Windows on-screen keyboard to appear for text input using your controller." }
             };
 
+            // Hier bauen wir die Pfade zu den Bildern
+            // Achte darauf, dass deine Ordner genau so heißen: Assets/controllericons/xbox/
+            var buttonOptions = gamepadButtons.Select(btn => new ButtonOption
+            {
+                Value = btn,
+                // Nutze Kleinschreibung für die Ordner, falls sie so heißen
+                XboxIcon = $"ms-appx:///Assets/controllericons/xbox/{btn}.png",
+                PlayStationIcon = $"ms-appx:///Assets/controllericons/playstation/{btn}.png"
+            }).ToList();
+
             allFunctions = functionDetails.Select(kvp => new FunctionViewModel
             {
                 Name = kvp.Key,
                 Description = kvp.Value,
-                AvailableButtons = gamepadButtons.ToList()
+                AvailableButtons = buttonOptions
             }).ToList();
 
-            // 1. Zuerst Einstellungen aus der Datei laden (falls vorhanden)
             LoadShortcutSettings();
-
-            // 2. ERST DANACH an die UI binden
             FunctionsControl.ItemsSource = allFunctions;
         }
 
@@ -86,21 +132,22 @@ namespace GAMINGCONSOLEMODE
                         var card = allFunctions.FirstOrDefault(f => f.Name == funcName);
                         if (card != null)
                         {
-                            // Sicherheits-Check: Nur setzen wenn Key vorhanden
                             if (table.ContainsKey("enabled")) card.IsEnabled = Convert.ToBoolean(table["enabled"]);
-                            card.Key1 = table.ContainsKey("key1") ? table["key1"]?.ToString() : "None";
-                            card.Key2 = table.ContainsKey("key2") ? table["key2"]?.ToString() : "None";
+
+                            // Laden der Keys
+                            if (table.ContainsKey("key1")) card.Key1 = table["key1"]?.ToString();
+                            if (table.ContainsKey("key2")) card.Key2 = table["key2"]?.ToString();
+
                             if (table.ContainsKey("hold_duration")) card.HoldTime = Convert.ToDouble(table["hold_duration"]);
                         }
                     }
                 }
             }
-            catch { /* Datei korrupt oder altes Format? Einfach ignorieren, wird neu erstellt */ }
+            catch { }
         }
 
         private void _saveConfiguration()
         {
-            // Wenn wir noch laden, brechen wir sofort ab!
             if (_isLoading) return;
 
             string settingsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
@@ -111,8 +158,7 @@ namespace GAMINGCONSOLEMODE
             {
                 if (File.Exists(settingsFilePath))
                 {
-                    string content = File.ReadAllText(settingsFilePath);
-                    rootTable = Toml.Parse(content).ToModel();
+                    rootTable = Toml.Parse(File.ReadAllText(settingsFilePath)).ToModel();
                 }
                 else
                 {
@@ -150,7 +196,6 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        // Diese Events feuern beim Laden der UI automatisch
         private void Shortcut_Toggled(object sender, RoutedEventArgs e) => _saveConfiguration();
         private void ControlChanged(object sender, object e) => _saveConfiguration();
     }

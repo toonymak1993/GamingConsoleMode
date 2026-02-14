@@ -1112,7 +1112,7 @@ namespace gcmloader
 
             public SteamGridDBHelper(string apiKeyFromSettings)
             {
-                // Dein Key (Hardcoded zur Sicherheit)
+                // Hardcoded steamgriddbkey
                 _apiKey = "fff543e81e7e53d7a8e08935a7349d36".Trim();
 
                 _httpClient.DefaultRequestHeaders.Clear();
