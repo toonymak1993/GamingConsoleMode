@@ -2200,7 +2200,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Füllt die Liste mit den UI-Elementen aus dem XAML
             LoadDynamicLauncherCards();
             _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
-            _powerMenuItems = new List<Button> { ShutdownMenuItem, RestartMenuItem, SleepMenuItem , LogOffMenuItem };
+            _powerMenuItems = new List<Button> { SleepMenuItem, RestartMenuItem, ShutdownMenuItem, LogOffMenuItem };
             // Catch unhandled exceptions
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Application.Current.UnhandledException += CurrentApp_UnhandledException;
@@ -2741,6 +2741,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AppSettings.Save("enable_startmenu", false);
             }
 
+            DisableLoginOnWakeup();
         }
 
         #region mainwindow design
@@ -5665,7 +5666,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 await Task.Delay(50);
             }
-
+            // --- NEW: Register for Power Mode changes (Wake Up / Sleep) ---
+            Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SetupLogging();
             uac("off");
 
@@ -8069,24 +8071,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private bool _mouseToggleLocked = false; // Verhindert, dass der Maus-Modus "flattert"
         // Updates the UI labels to show Xbox or PlayStation icons/text
         
-        public static class ProcessSuspender
-        {
-            [DllImport("ntdll.dll")]
-            private static extern uint NtSuspendProcess(IntPtr processHandle);
-
-            [DllImport("ntdll.dll")]
-            private static extern uint NtResumeProcess(IntPtr processHandle);
-
-            public static void Suspend(Process process)
-            {
-                try { NtSuspendProcess(process.Handle); } catch { }
-            }
-
-            public static void Resume(Process process)
-            {
-                try { NtResumeProcess(process.Handle); } catch { }
-            }
-        }
+        
         private bool _debugMsgShown = false;
 
 
@@ -9379,29 +9364,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private DateTime[] _lastInputTimePerController = new DateTime[5];
         private int[] _lastStickXDirections = new int[4];
         private int[] _lastStickYDirections = new int[4];
-    
+
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
             if (PowerMenu.Visibility == Visibility.Visible)
             {
                 PowerMenu.Visibility = Visibility.Collapsed;
+                _currentFocusArea = FocusArea.TopButtons;
             }
             else
             {
-                // Positioniere das Menü direkt unter dem Power-Button
-                var transform = ShutdownButton.TransformToVisual(RootGrid);
-                var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
-
-                // Passt die Position an, damit es rechtsbündig mit dem infopanel ist
-                PowerMenu.Margin = new Thickness(
-                    0,
-                    position.Y + ShutdownButton.ActualHeight + 5, // Top
-                    20, // Right (gleicher Abstand wie das infopanel)
-                    0
-                );
-
+                // Menü anzeigen
                 PowerMenu.Visibility = Visibility.Visible;
+
+                // Fokus auf das Sleep-Menü setzen
+                _currentFocusArea = FocusArea.PowerMenu;
+                _selectedPowerMenuItemIndex = 0; // Sleep ist Standard (Index 0)
+
+                UpdateVisualFocus();
             }
+        }
+
+        private void PowerMenu_BackdropTapped(object sender, TappedRoutedEventArgs e)
+        {
+            PowerMenu.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.TopButtons;
+            UpdateVisualFocus();
         }
 
         /// <summary>
@@ -9779,10 +9767,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             if (launch)
             {
+                // --- CINEMATIC MANUAL RESUME LOGIC ---
+                // Check if the target process is actually asleep
+                bool isSuspended = ProcessSuspender.IsProcessSuspended(tag.Process.Id);
+
+                if (isSuspended)
+                {
+                    LogToAppData($"[Manual Resume] Detected suspended state for {tag.Process.ProcessName}. Starting wakeup sequence...");
+
+                    // 1. Notify the user what is happening
+                    SendOverlayNotification($"Waking up: {tag.Process.ProcessName}...");
+
+                    // 2. Visual Delay (1.5 seconds) - Gives the feeling of "booting up"
+                    await Task.Delay(1500);
+
+                    // 3. Execute Resume (Unfreeze)
+                    ToggleGameSuspend(tag.Process, false);
+
+                    // Reset auto-resume flag since we handled it manually here
+                    _suspendedGamePid = 0;
+
+                    // 4. Audio Feedback & Success Message
+                    PlayActivationSound(); // Nice "Ping" sound
+                    SendOverlayNotification("Game Resumed!");
+
+                    // 5. Technical Delay: Give the process 500ms to process the resume signal 
+                    // and repaint its window before we force it to the foreground.
+                    await Task.Delay(500);
+                }
+                // -------------------------------------
+
+                // Standard switching logic (happens instantly if not suspended)
                 MakeSelfNonTopmost();
                 TaskManagerBringWindowToForeground(tag.Hwnd);
             }
-            else // B-Button zum Schließen
+            else // B-Button to Close (Logic remains identical)
             {
                 try
                 {
@@ -9801,7 +9820,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     PostMessage(tag.Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 }
 
-                // Warte kurz und aktualisiere dann die Liste
                 await Task.Delay(500);
                 await RefreshAppListAsync();
             }
@@ -10106,14 +10124,79 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Process.Start("shutdown", "/s /t 0");
         }
 
-        private void SleepMenuItem_Click(object sender, RoutedEventArgs e)
+        private async void SleepMenuItem_Click(object sender, RoutedEventArgs e)
         {
+            // Logging start
+            LogToAppData("========================================");
+            LogToAppData("=== Sleep Sequence Initiated (Cinematic) ===");
+
+            // 1. Clean up UI immediately
             PowerMenu.Visibility = Visibility.Collapsed;
             _currentFocusArea = FocusArea.TopButtons;
             UpdateVisualFocus();
-            // Die beiden anderen Parameter sind Standard und sollten auf false bleiben.
-            SetSuspendState(true, false, false);
+
+            // 2. Find Game
+            var gameProc = FindActiveGameProcess();
+
+            if (gameProc != null)
+            {
+                // Store PID for resume
+                _suspendedGamePid = gameProc.Id;
+
+                // --- STEP 1: NOTIFY SUSPEND ---
+                string gameName = gameProc.ProcessName;
+                SendOverlayNotification($"Suspending: {gameName}...");
+                LogToAppData($"[Sleep] User notified. Suspending {gameName}...");
+
+                // Freeze the game
+                ToggleGameSuspend(gameProc, true);
+
+                // --- WAIT: Visual pause to let the user read "Suspending..." ---
+                // and to give the system time to calm down the process (CPU -> 0%)
+                await Task.Delay(2500); // 2.5 Sekunden warten
+            }
+            else
+            {
+                // Fallback message if no game is running
+                SendOverlayNotification("Preparing Sleep Mode...");
+                LogToAppData("[Sleep] No game found. Skipping suspend.");
+                await Task.Delay(1500);
+            }
+
+            // 3. Play Sound (Sound effect right before the final message)
             PlaydeactivationSound();
+
+            // --- STEP 2: NOTIFY SLEEP ---
+            SendOverlayNotification("Entering Sleep Mode...");
+            LogToAppData("[Sleep] Displaying 'Entering Sleep Mode' notification.");
+
+            // --- WAIT: Let the user see the final message before black screen ---
+            await Task.Delay(1500); // 1.5 Sekunden warten
+
+            // 4. Execute System Sleep
+            LogToAppData("[Sleep] Sending S3 Suspend command now.");
+
+            // false = Sleep (S3), false = no force, false = wake allowed
+            bool success = SetSuspendState(false, false, false);
+
+            if (!success)
+            {
+                string err = "[Sleep] Error: SetSuspendState failed. Check Admin/Hibernate.";
+                Debug.WriteLine(err);
+                LogToAppData(err);
+
+                // SAFETY: If sleep fails, wake the game up so the user isn't stuck
+                if (gameProc != null)
+                {
+                    SendOverlayNotification("Sleep failed! Resuming Game...");
+                    ToggleGameSuspend(gameProc, false); // Resume
+                    _suspendedGamePid = 0;
+                }
+            }
+            else
+            {
+                LogToAppData("[Sleep] Good night. System sleep command sent.");
+            }
         }
 
         private async void LogOffMenuItem_Click(object sender, RoutedEventArgs e)
@@ -10239,6 +10322,388 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
         #endregion methodes
+        #region aftersleepwindow
+        // --- DISABLE LOGIN ON WAKEUP ---
+
+        public static void DisableLoginOnWakeup()
+        {
+            try
+            {
+                // Die GUID für "Kennwort bei Reaktivierung anfordern"
+                // (Das ist eine Standard-Windows-GUID, die sich nicht ändert)
+                string lockGuid = "0e796bdb-100d-47d6-a2d5-f7d2daa51f51";
+
+                // 1. Einstellung für Netzbetrieb (AC) auf 0 (Deaktiviert) setzen
+                RunPowerCfg($"/setacvalueindex SCHEME_CURRENT SUB_NONE {lockGuid} 0");
+
+                // 2. Einstellung für Akkubetrieb (DC) auf 0 (Deaktiviert) setzen
+                RunPowerCfg($"/setdcvalueindex SCHEME_CURRENT SUB_NONE {lockGuid} 0");
+
+                // 3. Änderungen sofort anwenden
+                RunPowerCfg("/SetActive SCHEME_CURRENT");
+
+                Debug.WriteLine("[System] Login on Wakeup has been disabled.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[System] Failed to disable login on wake: {ex.Message}");
+            }
+
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51", true))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue("ACSettingIndex", 0, RegistryValueKind.DWord);
+                        key.SetValue("DCSettingIndex", 0, RegistryValueKind.DWord);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Hilfsmethode, um powercfg.exe unsichtbar auszuführen
+        private static void RunPowerCfg(string arguments)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powercfg",
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true
+            };
+
+            using var p = Process.Start(psi);
+            p.WaitForExit();
+        }
+        #endregion aftersleepwindow
+        #region sleep game
+        // Checks if a process is suspended (Logic ported from Nyrna's C++ code)
+
+
+
+        // Powerful Process Suspender that mimics Nyrna's logic (Recursive Tree Suspension)
+        public static class ProcessSuspender
+        {
+            [DllImport("ntdll.dll")]
+            private static extern uint NtSuspendProcess(IntPtr processHandle);
+
+            [DllImport("ntdll.dll")]
+            private static extern uint NtResumeProcess(IntPtr processHandle);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool CloseHandle(IntPtr hObject);
+
+            [DllImport("kernel32.dll")]
+            private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+            [DllImport("kernel32.dll")]
+            private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+            [DllImport("kernel32.dll")]
+            private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+            private const uint TH32CS_SNAPPROCESS = 0x00000002;
+            private const uint PROCESS_SUSPEND_RESUME = 0x0800;
+
+            [StructLayout(LayoutKind.Sequential)]
+            private struct PROCESSENTRY32
+            {
+                public uint dwSize;
+                public uint cntUsage;
+                public uint th32ProcessID;
+                public IntPtr th32DefaultHeapID;
+                public uint th32ModuleID;
+                public uint cntThreads;
+                public uint th32ParentProcessID;
+                public int pcPriClassBase;
+                public uint dwFlags;
+                [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+                public string szExeFile;
+            }
+
+            // --- PUBLIC METHODS ---
+
+            // Friert den Prozess UND alle Kinder ein (wie Nyrna)
+            public static void SuspendRecursive(int pid)
+            {
+                // 1. Erst den Papa einfrieren
+                SuspendSingleProcess(pid);
+
+                // 2. Kinder suchen und auch einfrieren
+                var children = GetChildProcesses(pid);
+                foreach (var childPid in children)
+                {
+                    SuspendRecursive(childPid);
+                }
+            }
+
+            public static bool IsProcessSuspended(int pid)
+            {
+                try
+                {
+                    var process = Process.GetProcessById(pid);
+                    if (process == null || process.HasExited) return false;
+
+                    process.Refresh(); // Important to get current thread state
+
+                    // Iterate threads to see if any are in 'Suspended' wait state
+                    foreach (ProcessThread thread in process.Threads)
+                    {
+                        if (thread.ThreadState == System.Diagnostics.ThreadState.Wait &&
+                            thread.WaitReason == System.Diagnostics.ThreadWaitReason.Suspended)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
+                return false;
+            }
+
+
+            // Taut den Prozess UND alle Kinder wieder auf
+            public static void ResumeRecursive(int pid)
+            {
+                // 1. Papa aufwecken
+                ResumeSingleProcess(pid);
+
+                // 2. Kinder aufwecken
+                var children = GetChildProcesses(pid);
+                foreach (var childPid in children)
+                {
+                    ResumeRecursive(childPid);
+                }
+            }
+
+            // --- INTERNE HELFER ---
+
+            private static void SuspendSingleProcess(int pid)
+            {
+                IntPtr handle = IntPtr.Zero;
+                try
+                {
+                    handle = OpenProcess(PROCESS_SUSPEND_RESUME, false, pid);
+                    if (handle != IntPtr.Zero)
+                    {
+                        NtSuspendProcess(handle);
+                        Debug.WriteLine($"[ProcessSuspender] Suspended PID: {pid}");
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (handle != IntPtr.Zero) CloseHandle(handle);
+                }
+            }
+
+            private static void ResumeSingleProcess(int pid)
+            {
+                IntPtr handle = IntPtr.Zero;
+                try
+                {
+                    handle = OpenProcess(PROCESS_SUSPEND_RESUME, false, pid);
+                    if (handle != IntPtr.Zero)
+                    {
+                        NtResumeProcess(handle);
+                        Debug.WriteLine($"[ProcessSuspender] Resumed PID: {pid}");
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (handle != IntPtr.Zero) CloseHandle(handle);
+                }
+            }
+
+            private static List<int> GetChildProcesses(int parentPid)
+            {
+                var children = new List<int>();
+                IntPtr snapshot = IntPtr.Zero;
+
+                try
+                {
+                    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                    if (snapshot != IntPtr.Zero)
+                    {
+                        PROCESSENTRY32 procEntry = new PROCESSENTRY32();
+                        procEntry.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+
+                        if (Process32First(snapshot, ref procEntry))
+                        {
+                            do
+                            {
+                                if (procEntry.th32ParentProcessID == parentPid)
+                                {
+                                    children.Add((int)procEntry.th32ProcessID);
+                                }
+                            }
+                            while (Process32Next(snapshot, ref procEntry));
+                        }
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (snapshot != IntPtr.Zero) CloseHandle(snapshot);
+                }
+
+                return children;
+            }
+        }
+
+
+        private int _suspendedGamePid = 0;
+
+        // Event Handler: Triggered when Windows wakes up or goes to sleep
+        private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+        {
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume)
+            {
+                LogToAppData("[System] System is waking up (Resume event).");
+
+                // Haben wir ein Spiel eingefroren?
+                if (_suspendedGamePid != 0)
+                {
+                    try
+                    {
+                        // Versuche, den Prozess zu finden
+                        var proc = Process.GetProcessById(_suspendedGamePid);
+
+                        // Doppelte Sicherheit: Existiert er noch und läuft er?
+                        if (proc != null && !proc.HasExited)
+                        {
+                            LogToAppData($"[Auto-Resume] Process found ({proc.ProcessName}). Resuming now...");
+                            SendOverlayNotification($"Resuming: {proc.ProcessName}");
+
+                            // WICHTIG: false = RESUME (Unfreeze)
+                            ToggleGameSuspend(proc, false);
+
+                            // Reset
+                            _suspendedGamePid = 0;
+                        }
+                        else
+                        {
+                            LogToAppData("[Auto-Resume] Game process has exited during sleep.");
+                            _suspendedGamePid = 0;
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                        // Process.GetProcessById wirft ArgumentException, wenn PID nicht existiert
+                        LogToAppData("[Auto-Resume] Process ID not found (Game closed?).");
+                        _suspendedGamePid = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogToAppData($"[Auto-Resume] Unexpected error: {ex.Message}");
+                        _suspendedGamePid = 0;
+                    }
+                }
+            }
+        }
+
+        // Writes logs to a text file in AppData for debugging
+        private void LogToAppData(string message)
+        {
+            try
+            {
+                // Path: %AppData%\gcmsettings\logs\sleep_debug.txt
+                string logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "logs");
+
+                if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
+
+                string logFile = Path.Combine(logDir, "sleep_debug.txt");
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+                File.AppendAllText(logFile, $"[{timestamp}] {message}{Environment.NewLine}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[LogToAppData Error] {ex.Message}");
+            }
+        }
+
+
+        // Attempts to identify the currently active game process from our UI list
+        private Process FindActiveGameProcess()
+        {
+            if (_cardCache == null || _cardCache.Count == 0) return null;
+
+            // 1. Search for a "real" game based on your IsLikelyGame logic
+            foreach (var entry in _cardCache)
+            {
+                if (entry.Proc != null && !entry.Proc.HasExited)
+                {
+                    if (IsLikelyGame(entry.Proc))
+                    {
+                        string msg = $"[Sleep] Detected game: {entry.Proc.ProcessName}";
+                        Debug.WriteLine(msg);
+                        LogToAppData(msg);
+                        return entry.Proc;
+                    }
+                }
+            }
+
+            // 2. Fallback: If no obvious game is found, check if there is a single main window open
+            var candidates = _cardCache.Where(c =>
+                c.Proc.ProcessName.ToLower() != "explorer" &&
+                c.Proc.Id != Process.GetCurrentProcess().Id
+            ).ToList();
+
+            if (candidates.Count == 1)
+            {
+                string msg = $"[Sleep] Fallback target found: {candidates[0].Proc.ProcessName}";
+                Debug.WriteLine(msg);
+                LogToAppData(msg);
+                return candidates[0].Proc;
+            }
+
+            LogToAppData("[Sleep] No active game process found in the list.");
+            return null;
+        }
+
+      
+        // Updated: Uses RECURSIVE suspension (Nyrna style)
+        private void ToggleGameSuspend(Process gameProc, bool suspend)
+        {
+            if (gameProc == null) return;
+
+            try
+            {
+                string action = suspend ? "Suspending (Recursive)" : "Resuming (Recursive)";
+                LogToAppData($"[Sleep] {action} process tree for: {gameProc.ProcessName} (PID: {gameProc.Id})");
+
+                if (suspend)
+                {
+                    // Recursively freeze parent + children
+                    ProcessSuspender.SuspendRecursive(gameProc.Id);
+                }
+                else
+                {
+                    // Recursively unfreeze parent + children
+                    ProcessSuspender.ResumeRecursive(gameProc.Id);
+                }
+
+                Debug.WriteLine($"[Sleep] Successfully executed {action} on {gameProc.ProcessName}");
+            }
+            catch (Exception ex)
+            {
+                LogToAppData($"[Sleep] Critical Error during {suspend}: {ex.Message}");
+            }
+        }
+
+        #endregion sleep game
 
         private void LauncherTileRow_Loaded(object sender, RoutedEventArgs e)
         {
@@ -10435,42 +10900,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         // AKTUALISIERT: Diese Methode versteckt jetzt ALLES
         // This method now intelligently hides components based on settings
-        public static void HideTaskbar()
+        // AKTUALISIERT: Versteckt NUR die Taskleiste, lässt aber Startmenü/Suche/Lautstärke in Ruhe
+        public static void HideTaskbar()
         {
             // Load the settings
             bool enableTaskbar = false;
-            bool enableStartMenu = false; // Diese Logik lassen wir drin, nutzen sie aber nur für die Taskbar
 
             try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
 
-            // --- 1. Taskbar Hiding (DAS BLEIBT) ---
-            if (!enableTaskbar)
-            {
-                // Main Taskbar
-                HideWindowByClass("Shell_TrayWnd");
+            // Wenn die Taskleiste aktiviert sein soll, machen wir hier gar nichts
+            if (enableTaskbar) return;
 
-                // Taskbar on secondary monitors
-                HideWindowByClass("Shell_SecondaryTrayWnd");
-            }
+            // --- 1. Taskbar Hiding 
+            // Main Taskbar
+            HideWindowByClass("Shell_TrayWnd");
 
-           
+            // Taskbar on secondary monitors (Der Balken auf anderen Monitoren)
+            HideWindowByClass("Shell_SecondaryTrayWnd");
+
+
             /*
-            if (!enableStartMenu)
-            {
-                // 3. The Start menu (Class in Win 11)
-                HideWindowByClass("StartMenu.Internal.Flyout");
-
-                // 4. The Start menu (Fallback via window title, e.g., Win 10)
-                HideWindowByTitle("Start");
-            }
-            */
-
-            // --- 3. Other Shell Elements (Suchen, Kalender etc. - BLEIBT) ---
             HideWindowByTitle("Search");
             HideWindowByTitle("Suche");
-            HideWindowByClass("Windows.UI.Core.CoreWindow");
-            HideWindowByClass("ControlCenter.Internal.Flyout");
-            HideWindowByClass("NativeHWNDHost");
+            HideWindowByClass("Windows.UI.Core.CoreWindow"); // startmenu
+            HideWindowByClass("ControlCenter.Internal.Flyout"); // Info-Center
+            HideWindowByClass("NativeHWNDHost"); // Oft Widgets oder Suche
+            */
         }
 
         public static void ShowTaskbar()
@@ -10631,4 +11086,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         public string FilePath { get; set; }
         public BitmapImage Icon { get; set; }
     }
+
+   
+
 }
