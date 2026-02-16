@@ -64,6 +64,24 @@ namespace gcmloader
     public sealed partial class MainWindow : Window
     {
         #region needed
+        private void BoostProcessPriority()
+        {
+            try
+            {
+                using (Process p = Process.GetCurrentProcess())
+                {
+                    // "High" ist sicher und reicht meistens aus. 
+                    // "RealTime" wäre gefährlich (kann Maus/Tastatur blockieren).
+                    p.PriorityClass = ProcessPriorityClass.High;
+                }
+                Debug.WriteLine("[Performance] Process priority set to HIGH.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Performance] Failed to boost priority: {ex.Message}");
+            }
+        }
+
         #region cardimagecontrol
         private ProgramCardEntry _currentEditingCardEntry = null; // Stores the card we are currently editing
         private List<string> _currentImageSearchResults = new List<string>();
@@ -71,7 +89,50 @@ namespace gcmloader
         #endregion
 
         #region soundcontrol
+        // Liest Systemlautstärke und setzt den Slider (ohne Loop)
+        // Liest Systemlautstärke und setzt den Slider (ohne Loop)
+        private void UpdateMasterVolumeUI()
+        {
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                int volume = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
 
+                // Event kurz abbestellen, damit wir keine Endlosschleife erzeugen
+                MasterVolumeSlider.ValueChanged -= MasterVolumeSlider_ValueChanged;
+                MasterVolumeSlider.Value = volume;
+                MasterVolumeSlider.ValueChanged += MasterVolumeSlider_ValueChanged;
+
+                MasterVolumeText.Text = $"{volume}%";
+                UpdateVolumeIcon(volume);
+            }
+            catch { }
+        }
+
+        // Wird aufgerufen, wenn der Slider bewegt wird
+        private void MasterVolumeSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            try
+            {
+                int newVolume = (int)e.NewValue;
+                MasterVolumeText.Text = $"{newVolume}%";
+                UpdateVolumeIcon(newVolume);
+
+                var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                device.AudioEndpointVolume.MasterVolumeLevelScalar = newVolume / 100.0f;
+            }
+            catch { }
+        }
+
+        private void UpdateVolumeIcon(int volume)
+        {
+            if (volume == 0) MasterVolumeIcon.Glyph = "\uE74F"; // Mute
+            else if (volume < 33) MasterVolumeIcon.Glyph = "\uE993"; // Low
+            else if (volume < 66) MasterVolumeIcon.Glyph = "\uE994"; // Mid
+            else MasterVolumeIcon.Glyph = "\uE995"; // High
+        }
         #region AudioMixerLogic
 
         // --- Audio Mixer Variables ---
@@ -387,104 +448,52 @@ namespace gcmloader
         // Fokus Visualisierung für Audio Menü (MIT AUTO-SCROLLING)
         private void UpdateAudioVisualFocus()
         {
-            // 1. Reset aller Hintergründe & Skalierungen
+            // 1. Reset aller Listen-Elemente
             foreach (var btn in _audioDeviceButtons)
             {
                 AnimateScale(btn, false);
-                btn.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255));
+                btn.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             }
             foreach (var row in _audioMixerRows)
             {
                 AnimateScale(row, false);
-                row.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255));
+                row.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             }
 
-            if (_isAudioMixerMode)
+            // 2. Reset Master Slider
+            MasterVolumeContainer.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            MasterVolumeContainer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(10, 255, 255, 255)); // Standard dunkel
+
+            // 3. Highlight Logik
+            if (_isMasterVolumeFocused)
             {
-                // --- MIXER MODUS ---
-                if (_audioMixerRows.Count > _selectedMixerIndex && _selectedMixerIndex >= 0)
-                {
-                    var active = _audioMixerRows[_selectedMixerIndex];
-
-                    // Highlight setzen
-                    active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
-                    AnimateScale(active, true);
-
-                    // --- AUTO-SCROLLING LOGIK ---
-                    try
-                    {
-                        // Prüfen, ob das Element und der ScrollViewer bereit sind
-                        if (AudioMixerScrollViewer != null && active.ActualHeight > 0)
-                        {
-                            // Position des Elements relativ zum ScrollViewer ermitteln
-                            var transform = active.TransformToVisual(AudioMixerScrollViewer);
-                            var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
-
-                            // Aktuelle Scroll-Position und Viewport-Höhe
-                            double currentScroll = AudioMixerScrollViewer.VerticalOffset;
-                            double viewportHeight = AudioMixerScrollViewer.ViewportHeight;
-                            double itemTop = position.Y; // Relativ zum sichtbaren Bereich
-                            double itemBottom = itemTop + active.ActualHeight;
-
-                            // 1. Wenn Element OBERHALB des Sichtbereichs ist -> Hochscrollen
-                            if (itemTop < 10) // 10px Puffer
-                            {
-                                // Wir wollen, dass das Element oben bündig ist (minus etwas Puffer)
-                                double newOffset = currentScroll + itemTop - 10;
-                                AudioMixerScrollViewer.ChangeView(null, newOffset, null, true); // true = Animation aus für knackiges Feedback
-                            }
-                            // 2. Wenn Element UNTERHALB des Sichtbereichs ist -> Runterscrollen
-                            else if (itemBottom > viewportHeight - 10)
-                            {
-                                // Wir wollen, dass das Element unten bündig ist
-                                double newOffset = currentScroll + (itemBottom - viewportHeight) + 10;
-                                AudioMixerScrollViewer.ChangeView(null, newOffset, null, true);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[AudioScroll Error]: {ex.Message}");
-                    }
-                }
+                // --- MASTER SLIDER FOKUS ---
+                // Hellerer Hintergrund + Akzent-Rahmen
+                MasterVolumeContainer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 255, 255, 255));
+                MasterVolumeContainer.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
             }
             else
             {
-                // --- OUTPUT DEVICES MODUS ---
-                if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex && _selectedAudioDeviceIndex >= 0)
+                // --- LISTEN FOKUS (Wie bisher) ---
+                if (_isAudioMixerMode)
                 {
-                    var active = _audioDeviceButtons[_selectedAudioDeviceIndex];
-
-                    // Highlight
-                    active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
-                    AnimateScale(active, true);
-
-                    // --- AUTO-SCROLLING LOGIK (Auch für die Geräteliste) ---
-                    try
+                    if (_audioMixerRows.Count > _selectedMixerIndex && _selectedMixerIndex >= 0)
                     {
-                        if (AudioDevicesScrollViewer != null && active.ActualHeight > 0)
-                        {
-                            var transform = active.TransformToVisual(AudioDevicesScrollViewer);
-                            var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
-
-                            double currentScroll = AudioDevicesScrollViewer.VerticalOffset;
-                            double viewportHeight = AudioDevicesScrollViewer.ViewportHeight;
-                            double itemTop = position.Y;
-                            double itemBottom = itemTop + active.ActualHeight;
-
-                            if (itemTop < 10)
-                            {
-                                double newOffset = currentScroll + itemTop - 10;
-                                AudioDevicesScrollViewer.ChangeView(null, newOffset, null, true);
-                            }
-                            else if (itemBottom > viewportHeight - 10)
-                            {
-                                double newOffset = currentScroll + (itemBottom - viewportHeight) + 10;
-                                AudioDevicesScrollViewer.ChangeView(null, newOffset, null, true);
-                            }
-                        }
+                        var active = _audioMixerRows[_selectedMixerIndex];
+                        active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                        AnimateScale(active, true);
+                        // Auto-Scroll Logic hier einfügen wenn nötig...
                     }
-                    catch { /* Ignorieren bei Layout-Problemen */ }
+                }
+                else
+                {
+                    if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex && _selectedAudioDeviceIndex >= 0)
+                    {
+                        var active = _audioDeviceButtons[_selectedAudioDeviceIndex];
+                        active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                        AnimateScale(active, true);
+                        // Auto-Scroll Logic hier einfügen wenn nötig...
+                    }
                 }
             }
         }
@@ -504,6 +513,8 @@ namespace gcmloader
                 // (If ToggleAudioTab doesn't exist yet, include it from the other section)
                 ToggleAudioTab(false);
 
+                _isMasterVolumeFocused = false; 
+                UpdateMasterVolumeUI(); 
                 // 2. Clear lists
                 SimpleAudioList.Children.Clear();
                 _audioDeviceButtons.Clear();
@@ -5669,6 +5680,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // --- NEW: Register for Power Mode changes (Wake Up / Sleep) ---
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SetupLogging();
+            BoostProcessPriority();
             uac("off");
 
             // ===================================
@@ -7730,6 +7742,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion performance overlay shortcut AHK
         #region audio management
+
+        private bool _isMasterVolumeFocused = false;
+
         public static void SwitchToNextAudioDevice()
         {
             try
@@ -9155,73 +9170,143 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // --- 4. AudioMenu (Audio-Geräte Flyout) ---
                 case FocusArea.AudioMenu:
-                    // --- TAB SWITCHING (RB/LB) ---
-                    if ((newPresses & GamepadButtonFlags.RightShoulder) != 0 && !_isAudioMixerMode)
+
+                    // --- Y TASTE (Manueller Toggle, falls man feststeckt) ---
+                    if ((newPresses & GamepadButtonFlags.Y) != 0)
                     {
-                        ToggleAudioTab(true); // Switch to Mixer
+                        _isMasterVolumeFocused = !_isMasterVolumeFocused;
+                        UpdateAudioVisualFocus();
                         PlayNavigationSound();
-                    }
-                    else if ((newPresses & GamepadButtonFlags.LeftShoulder) != 0 && _isAudioMixerMode)
-                    {
-                        ToggleAudioTab(false); // Switch to Devices
-                        PlayNavigationSound();
+                        return;
                     }
 
-                    // --- NAVIGATION ---
-                    if (!_isAudioMixerMode)
+                    // =========================================================
+                    // MODUS 1: SLIDER HAT FOKUS (Master Volume)
+                    // =========================================================
+                    if (_isMasterVolumeFocused)
                     {
-                        // === DEVICES MODE ===
-                        if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioDeviceButtons.Any())
+                        // LINKS / RECHTS -> Lautstärke ändern
+                        if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight))
                         {
-                            _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
-                            UpdateAudioVisualFocus(); // Use local optimized focus update
-                            PlayNavigationSound();
+                            if (MasterVolumeSlider.Value < 100) MasterVolumeSlider.Value += 5;
                         }
-                        else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioDeviceButtons.Any())
+                        else if (((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft))
                         {
-                            _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex - 1 + _audioDeviceButtons.Count) % _audioDeviceButtons.Count;
+                            if (MasterVolumeSlider.Value > 0) MasterVolumeSlider.Value -= 5;
+                        }
+
+                        // RUNTER -> Zurück zur Liste springen (Intuitiver Wechsel)
+                        // Wir prüfen DPadDown ODER StickDown
+                        else if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
+                        {
+                            _isMasterVolumeFocused = false;
+
+                            // Optional: Auswahl auf das erste Element zurücksetzen, damit es sauber aussieht
+                            if (!_isAudioMixerMode) _selectedAudioDeviceIndex = 0;
+                            else _selectedMixerIndex = 0;
+
                             UpdateAudioVisualFocus();
                             PlayNavigationSound();
                         }
-                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+
+                        // B = Menü schließen (Auch vom Slider aus möglich)
+                        else if ((newPresses & GamepadButtonFlags.B) != 0)
                         {
-                            if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
-                            {
-                                SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
-                            }
+                            CloseAudioFlyout();
+                            PlaydeactivationSound();
                         }
                     }
+                    // =========================================================
+                    // MODUS 2: LISTE HAT FOKUS (Output Devices / Mixer)
+                    // =========================================================
                     else
                     {
-                        // === MIXER MODE ===
-                        if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioMixerRows.Any())
+                        // TAB WECHSEL (RB/LB)
+                        if ((newPresses & GamepadButtonFlags.RightShoulder) != 0 && !_isAudioMixerMode)
                         {
-                            _selectedMixerIndex = (_selectedMixerIndex + 1) % _audioMixerRows.Count;
-                            UpdateAudioVisualFocus();
+                            ToggleAudioTab(true);
                             PlayNavigationSound();
                         }
-                        else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioMixerRows.Any())
+                        else if ((newPresses & GamepadButtonFlags.LeftShoulder) != 0 && _isAudioMixerMode)
                         {
-                            _selectedMixerIndex = (_selectedMixerIndex - 1 + _audioMixerRows.Count) % _audioMixerRows.Count;
-                            UpdateAudioVisualFocus();
+                            ToggleAudioTab(false);
                             PlayNavigationSound();
                         }
-                        // VOLUME ADJUSTMENT (Left/Right)
-                        else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
-                        {
-                            AdjustSessionVolume(_selectedMixerIndex, -0.05f); // -5%
-                        }
-                        else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
-                        {
-                            AdjustSessionVolume(_selectedMixerIndex, 0.05f); // +5%
-                        }
-                    }
 
-                    // CLOSE
-                    if ((newPresses & GamepadButtonFlags.B) != 0)
-                    {
-                        CloseAudioFlyout();
-                        PlaydeactivationSound();
+                        // --- DEVICES LISTE ---
+                        if (!_isAudioMixerMode)
+                        {
+                            // RUNTER
+                            if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioDeviceButtons.Any())
+                            {
+                                // Normales Navigieren nach unten
+                                _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
+                                UpdateAudioVisualFocus();
+                                PlayNavigationSound();
+                            }
+                            // HOCH
+                            else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioDeviceButtons.Any())
+                            {
+                                // Wenn wir auf dem ERSTEN Element sind und HOCH drücken -> Ab zum Slider
+                                if (_selectedAudioDeviceIndex == 0)
+                                {
+                                    _isMasterVolumeFocused = true;
+                                    UpdateAudioVisualFocus();
+                                }
+                                else
+                                {
+                                    // Sonst normal nach oben
+                                    _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex - 1 + _audioDeviceButtons.Count) % _audioDeviceButtons.Count;
+                                    UpdateAudioVisualFocus();
+                                }
+                                PlayNavigationSound();
+                            }
+                            // A (Auswählen)
+                            else if ((newPresses & GamepadButtonFlags.A) != 0)
+                            {
+                                if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                                    SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                            }
+                        }
+                        // --- MIXER LISTE ---
+                        else
+                        {
+                            // RUNTER
+                            if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _audioMixerRows.Any())
+                            {
+                                _selectedMixerIndex = (_selectedMixerIndex + 1) % _audioMixerRows.Count;
+                                UpdateAudioVisualFocus();
+                                PlayNavigationSound();
+                            }
+                            // HOCH
+                            else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _audioMixerRows.Any())
+                            {
+                                // Wenn wir ganz oben sind -> Ab zum Slider
+                                if (_selectedMixerIndex == 0)
+                                {
+                                    _isMasterVolumeFocused = true;
+                                    UpdateAudioVisualFocus();
+                                }
+                                else
+                                {
+                                    _selectedMixerIndex = (_selectedMixerIndex - 1 + _audioMixerRows.Count) % _audioMixerRows.Count;
+                                    UpdateAudioVisualFocus();
+                                }
+                                PlayNavigationSound();
+                            }
+                            // Lautstärke ändern (Links/Rechts auf App)
+                            else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                                AdjustSessionVolume(_selectedMixerIndex, -0.05f);
+                            else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
+                                AdjustSessionVolume(_selectedMixerIndex, 0.05f);
+                        }
+
+                        // B = Schließen
+                        if ((newPresses & GamepadButtonFlags.B) != 0)
+                        {
+                            CloseAudioFlyout();
+                            PlaydeactivationSound();
+                        }
                     }
                     break;
 
@@ -10452,13 +10537,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     var process = Process.GetProcessById(pid);
                     if (process == null || process.HasExited) return false;
 
-                    process.Refresh(); // Important to get current thread state
+                    process.Refresh();
 
-                    // Iterate threads to see if any are in 'Suspended' wait state
-                    foreach (ProcessThread thread in process.Threads)
+                    if (process.Threads.Count > 0)
                     {
-                        if (thread.ThreadState == System.Diagnostics.ThreadState.Wait &&
-                            thread.WaitReason == System.Diagnostics.ThreadWaitReason.Suspended)
+                        // Wir nehmen Thread[0] als Indikator für den Hauptprozess
+                        var mainThread = process.Threads[0];
+                        if (mainThread.ThreadState == System.Diagnostics.ThreadState.Wait &&
+                            mainThread.WaitReason == System.Diagnostics.ThreadWaitReason.Suspended)
                         {
                             return true;
                         }
