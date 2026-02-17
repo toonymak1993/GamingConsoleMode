@@ -21,6 +21,7 @@ using System.Collections.ObjectModel;
 using System.Data;
 using HidSharp;
 using Windows.UI;
+using Windows.Gaming.Input;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -83,6 +84,10 @@ namespace gcmloader
         }
 
         #region cardimagecontrol
+
+
+
+
         private ProgramCardEntry _currentEditingCardEntry = null; // Stores the card we are currently editing
         private List<string> _currentImageSearchResults = new List<string>();
         private int _selectedImageGridIndex = 0;
@@ -629,9 +634,8 @@ namespace gcmloader
 
         #endregion psdualsense
         #region controllerbattery icon
-
-
-
+        private const int WM_APPCOMMAND = 0x0319;
+        private const int APPCOMMAND_BROWSER_HOME = 7;
         // Updates the controller battery status and UI icon
         // Updates the controller battery status with icon and custom text
         private void UpdateControllerBatteryStatus()
@@ -1690,45 +1694,35 @@ namespace gcmloader
         {
             if (_isStartupGracePeriod) return;
 
-            IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             IntPtr foregroundHwnd = GetForegroundWindow();
+            IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
-            // KORREKTUR: Direkter Zugriff auf die Eigenschaft MediaPlayer
-            var player = BackgroundVideoPlayer.MediaPlayer;
+            bool hasFocus = (foregroundHwnd == selfHwnd);
 
-            if (foregroundHwnd == selfHwnd)
+            // Nur umschalten, wenn sich der Status geändert hat! 
+            // Dauerndes Setzen von Visibility/Play/Pause verursacht Ruckler.
+            if (hasFocus != _lastFocusState)
             {
-                // GCM hat den Fokus
-                if (_isOverlayActive)
+                _lastFocusState = hasFocus;
+                var player = BackgroundVideoPlayer.MediaPlayer;
+
+                if (hasFocus)
                 {
-                    _isOverlayActive = false;
+                    player?.Play();
+                    BackgroundVideoPlayer.Visibility = Visibility.Visible;
                     AnimateOverlayOpacity(FocusLossOverlay, 0.0, true);
                 }
-
-                // Video weiterspielen
-                if (player != null && player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
+                else
                 {
-                    player.Play();
-                }
-            }
-            else
-            {
-                // Spiel oder andere App hat den Fokus
-                if (!_isOverlayActive)
-                {
-                    _isOverlayActive = true;
-                    FocusLossOverlay.Opacity = 0;
+                    player?.Pause();
+                    BackgroundVideoPlayer.Visibility = Visibility.Collapsed; // Sofort weg für GPU-Freigabe
                     FocusLossOverlay.Visibility = Visibility.Visible;
                     AnimateOverlayOpacity(FocusLossOverlay, 1.0);
                 }
-
-                // KORREKTUR: Video pausieren um GPU/CPU für das Spiel freizugeben
-                if (player != null && player.PlaybackSession.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Playing)
-                {
-                    player.Pause();
-                }
             }
         }
+        private bool _lastFocusState = true;
+
         private DispatcherTimer _focusCheckTimer;
         private DispatcherTimer _minimizeGracePeriodTimer;
         private bool _isOverlayActive = false;
@@ -1882,6 +1876,7 @@ namespace gcmloader
         // Diese Variable speichert den Xbox-Prozess, damit wir ihn später überwachen können.
         private static Process monitoredXboxProcess = null;
         private int _selectedCardIndex = 0;
+        private int _selectedGameOptionIndex = 0;
         private int _selectedButtonIndex = 0;
         private DispatcherTimer _taskRefreshTimer;
         private HashSet<GamepadButtonFlags> _pressedButtons = new();
@@ -1891,7 +1886,7 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu, ImageSelection }
+        private enum FocusArea { Launcher, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu, ImageSelection, GameOptions }
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
@@ -1962,6 +1957,8 @@ namespace gcmloader
             }
         }
         #endregion discord
+    
+        private const int ASFW_ANY = -1; // Code für "Jeder darf nach vorne"
 
         [DllImport("user32.dll")]
         private static extern bool BringWindowToTop(IntPtr hWnd);
@@ -2018,7 +2015,7 @@ namespace gcmloader
 
 
         [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
         [DllImport("user32.dll")]
         private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
@@ -3076,38 +3073,104 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Opens the overlay to change the artwork for a specific card.
         /// Triggers an automatic search using the game's name.
         /// </summary>
-        private void OpenImageSelectionForCard(ProgramCardEntry entry)
+        private void OpenGameOptions(ProgramCardEntry entry)
         {
             if (entry == null) return;
 
-            try
+            _currentEditingCardEntry = entry;
+            _currentFocusArea = FocusArea.GameOptions;
+
+            // UI Reset
+            GameOptionsOverlay.Visibility = Visibility.Visible;
+            GameOptionsMainPanel.Visibility = Visibility.Visible;
+            ArtworkSearchPanel.Visibility = Visibility.Collapsed;
+
+            // Fenstergröße anpassen (Hauptmenü ist klein, Suche ist groß)
+            GameOptionsMenuBorder.Width = 500;
+            GameOptionsMenuBorder.Height = double.NaN; // Auto-Height
+
+            // Titel setzen
+            GameOptionsSubtitle.Text = $"Selected: {entry.ProductName}";
+
+            // Suspend-Status prüfen und Button anpassen
+            bool isSuspended = ProcessSuspender.IsProcessSuspended(entry.Proc.Id);
+            if (isSuspended)
             {
-                _currentEditingCardEntry = entry;
-                _currentFocusArea = FocusArea.ImageSelection;
-
-                // UI sichtbar machen
-                ImageSelectionOverlay.Visibility = Visibility.Visible;
-
-                // Text setzen
-                ImageSearchBox.Text = entry.ProductName;
-                ImageResultsGrid.ItemsSource = null;
-                NoImagesFoundText.Visibility = Visibility.Collapsed;
-
-                // Kleiner Trick: Wir warten einen Frame, bis die UI gerendert ist,
-                // bevor wir die async Suche starten. Das verhindert Abstürze beim XamlRoot.
-                this.DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (ImageSearchButton != null)
-                    {
-                        ImageSearchButton_Click(null, null);
-                    }
-                });
+                TxtSuspendTitle.Text = "Resume Game";
+                TxtSuspendDesc.Text = "Continue playing where you left off";
+                IconSuspend.Glyph = "\uE768"; // Play Icon
             }
-            catch (Exception ex)
+            else
             {
-                Debug.WriteLine($"[ArtworkError] Could not open selection: {ex.Message}");
+                TxtSuspendTitle.Text = "Suspend Game";
+                TxtSuspendDesc.Text = "Freezes the game to save resources";
+                IconSuspend.Glyph = "\uE769"; // Pause Icon
             }
+
+            // Fokus auf ersten Button
+            BtnSuspendGame.Focus(FocusState.Programmatic);
+            UpdateVisualFocus();
         }
+
+        private void BtnSuspendGame_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentEditingCardEntry == null) return;
+
+            // Logik abrufen: Schläft er schon?
+            bool isSuspended = ProcessSuspender.IsProcessSuspended(_currentEditingCardEntry.Proc.Id);
+
+            // Aktion ausführen (Gegenteil vom aktuellen Status)
+            // true = freeze, false = resume
+            ToggleGameSuspend(_currentEditingCardEntry.Proc, !isSuspended);
+
+            // Visuelles Feedback
+            if (!isSuspended) SendOverlayNotification("Game Suspended ❄");
+            else SendOverlayNotification("Game Resumed ▶");
+
+            // Menü schließen
+            CloseGameOptions();
+        }
+
+        private void BtnChangeArtwork_Click(object sender, RoutedEventArgs e)
+        {
+            // Wechsel zur Artwork-Seite
+            GameOptionsMainPanel.Visibility = Visibility.Collapsed;
+            ArtworkSearchPanel.Visibility = Visibility.Visible;
+
+            // Fenster vergrößern für die Bilder
+            GameOptionsMenuBorder.Width = 1000;
+            GameOptionsMenuBorder.Height = 700;
+
+            // Suche starten
+            ImageSearchBox.Text = _currentEditingCardEntry.ProductName;
+            ImageSearchButton_Click(null, null);
+        }
+
+        private void BtnBackToOptions_Click(object sender, RoutedEventArgs e)
+        {
+            // Zurück zum Hauptmenü
+            ArtworkSearchPanel.Visibility = Visibility.Collapsed;
+            GameOptionsMainPanel.Visibility = Visibility.Visible;
+
+            GameOptionsMenuBorder.Width = 500;
+            GameOptionsMenuBorder.Height = double.NaN;
+
+            BtnChangeArtwork.Focus(FocusState.Programmatic);
+        }
+
+        private void CloseGameOptions()
+        {
+            GameOptionsOverlay.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.Cards;
+            _currentEditingCardEntry = null;
+            UpdateVisualFocus();
+        }
+
+        private void GameOptionsOverlay_BackdropTapped(object sender, TappedRoutedEventArgs e)
+        {
+            CloseGameOptions();
+        }
+
 
         /// <summary>
         /// Handles the search button click. Fetches vertical covers from SteamGridDB.
@@ -3389,7 +3452,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void CloseImageSelectorButton_Click(object sender, RoutedEventArgs e)
         {
-            ImageSelectionOverlay.Visibility = Visibility.Collapsed;
+            GameOptionsOverlay.Visibility = Visibility.Collapsed;
             _currentFocusArea = FocusArea.Cards; // Return focus to cards
             _currentEditingCardEntry = null;
             UpdateVisualFocus(); // Refresh highlights
@@ -3939,36 +4002,27 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 StopLiveWallpaper();
 
-                var player = new Windows.Media.Playback.MediaPlayer
-                {
-                    Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute)),
-                    IsLoopingEnabled = true,
-                    IsMuted = true,
-                    AudioCategory = Windows.Media.Playback.MediaPlayerAudioCategory.Other
-                };
+                var player = new Windows.Media.Playback.MediaPlayer();
 
-                // Falls das Video korrupt ist, fangen wir den Fehler ab
-                player.MediaFailed += (s, e) =>
-                {
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        Debug.WriteLine("[LiveWallpaper] Media Failed! Wechsel zu Fallback-Bild.");
-                        // Falls das Video scheitert, versuchen wir das normale Windows-Bild zu laden
-                        SetBackgroundImage(0, 0);
-                    });
-                };
+                // OPTIMIERUNG 1: Video-Eigenschaften für Performance setzen
+                player.IsVideoFrameServerEnabled = false; // Wir brauchen keinen Zugriff auf einzelne Frames
+                player.AudioCategory = MediaPlayerAudioCategory.Other;
+
+                // OPTIMIERUNG 2: Hardware-Dekodierung bevorzugen
+                // Das entlastet die CPU, auf der auch dein Fenster-Scanner läuft
+                player.Source = MediaSource.CreateFromUri(new Uri(videoPath, UriKind.Absolute));
+
+                player.IsLoopingEnabled = true;
+                player.IsMuted = true;
 
                 BackgroundVideoPlayer.SetMediaPlayer(player);
-                BackgroundVideoPlayer.Visibility = Visibility.Visible;
-                BackgroundImage.Visibility = Visibility.Collapsed;
+
+                // WICHTIG: Den Player-Typ auf 'Hardware' zwingen (über das UI Element)
+                BackgroundVideoPlayer.Opacity = 1.0;
 
                 player.Play();
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[LiveWallpaper Error] {ex.Message}");
-                StopLiveWallpaper();
-            }
+            catch (Exception ex) { Debug.WriteLine($"[Wallpaper] Error: {ex.Message}"); }
         }
 
         private void StopLiveWallpaper()
@@ -4301,7 +4355,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private void BackToWindows()
         {
             TaskbarManager.RestoreOriginalState();
-
+            TaskbarVisibility.ShowTaskbar();
             MakeSelfNonTopmost();
             TaskManagerReEnableServices();
             Console.WriteLine("Exit-Button geklickt. Stelle den Desktop wieder her und beende die App...");
@@ -6027,14 +6081,21 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
 
+        private bool _isRefreshRunning = false;
+
         private void StartAutoTaskRefresh()
         {
             if (_taskRefreshTimer != null) return;
-            // Intervall auf 2 Sekunden hochsetzen – das stoppt das Ruckeln sofort
-            _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+
+            // Intervall auf 3 Sekunden hochsetzen, wenn wir nicht im Fokus sind
+            _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
+                if (_isRefreshRunning || !IsWindowInForeground()) return; // Scanne nur, wenn GCM offen ist!
+
+                _isRefreshRunning = true;
                 await RefreshAppListAsync();
+                _isRefreshRunning = false;
             };
             _taskRefreshTimer.Start();
         }
@@ -7007,7 +7068,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 };
 
 
-
+        private Dictionary<string, BitmapImage> _iconCache = new Dictionary<string, BitmapImage>();
         /// <summary>
         /// Creates a single, clickable launcher card based on the provided data.
         /// Now handles a custom image for the Main Launcher card with a "LAUNCHER" label.
@@ -7452,6 +7513,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             PostMessage(hWnd, WM_KEYUP, (IntPtr)VK_ESCAPE, IntPtr.Zero);
         }
         private Process _suspendedGameProcess = null;
+
+       
         public void BringTaskManagerToFrontAndFocus()
         {
             this.DispatcherQueue.TryEnqueue(async () =>
@@ -7463,11 +7526,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // 1. Batterie-Status sofort aktualisieren
                 UpdateControllerBatteryStatus();
 
-                // 2. GCM präventiv nach vorne bringen
-                BringToFrontAndFocus(selfHwnd);
+                ForceGcmToFront();
 
                 // ERSTER SOFORT-RESET: Versucht die Skalierung direkt beim Fokus-Erhalt zu korrigieren
                 ForceDpiRedraw();
+
+
 
                 try
                 {
@@ -7584,8 +7648,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private BitmapImage GetAppIconAsBitmapImage(string exePath)
         {
-            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-                return null;
+            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath)) return null;
+
+            // Cache-Check: Haben wir das Icon für diese EXE schonmal geladen?
+            if (_iconCache.TryGetValue(exePath, out var cachedIcon)) return cachedIcon;
 
             try
             {
@@ -7599,14 +7665,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                         var bmpImage = new BitmapImage();
                         bmpImage.SetSource(ms.AsRandomAccessStream());
+
+                        // Im Cache speichern
+                        _iconCache[exePath] = bmpImage;
                         return bmpImage;
                     }
                 }
             }
-            catch
-            {
-                return null;
-            }
+            catch { return null; }
         }
 
 
@@ -8095,29 +8161,81 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private Controller[] _xboxControllers = new Controller[4];
         private DateTime _comboStartTime = DateTime.MinValue;
         private bool _comboIsActive = false;
+        // --- XINPUT SECRET GUIDE BUTTON ACCESS ---
+
+        [StructLayout(LayoutKind.Explicit)]
+        struct XInputGamepadSecret
+        {
+            [FieldOffset(0)] public ushort wButtons; // Hier versteckt sich der Guide Button (0x0400)
+            [FieldOffset(2)] public byte bLeftTrigger;
+            [FieldOffset(3)] public byte bRightTrigger;
+            [FieldOffset(4)] public short sThumbLX;
+            [FieldOffset(6)] public short sThumbLY;
+            [FieldOffset(8)] public short sThumbRX;
+            [FieldOffset(10)] public short sThumbRY;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        struct XInputStateSecret
+        {
+            [FieldOffset(0)] public uint dwPacketNumber;
+            [FieldOffset(4)] public XInputGamepadSecret Gamepad;
+        }
+
+        // EntryPoint #100 ist der undokumentierte Zugang zum Guide-Button in xinput1_4.dll
+        [DllImport("xinput1_4.dll", EntryPoint = "#100")]
+        private static extern int XInputGetStateSecret(int dwUserIndex, out XInputStateSecret pState);
+
+        private const int XINPUT_GUIDE_BUTTON = 0x0400; // Das Bit für die Xbox-Taste
+
+
+
 
         private async Task XboxInputLoop()
         {
             Thread.CurrentThread.Priority = ThreadPriority.Highest;
             const int menuDeadzone = 18000;
 
+            // Konstante für den Guide Button Code
+            const int GUIDE_BIT = 0x0400;
+
             while (!_isExiting)
             {
                 for (int i = 0; i < 4; i++)
                 {
+                    // 1. Controller Initialisieren
                     if (_xboxControllers[i] == null) _xboxControllers[i] = new Controller((UserIndex)i);
+
                     if (_xboxControllers[i].IsConnected)
                     {
                         try
                         {
+                            // A. Standard Tasten lesen (A, B, X, Y...)
                             var state = _xboxControllers[i].GetState();
                             var gp = state.Gamepad;
                             GamepadButtonFlags btns = (GamepadButtonFlags)gp.Buttons;
 
-                            // --- 1. GLOBAL SHORTCUTS ---
+                            // B. Guide Button lesen (Secret Methode) und reinmischen
+                            XInputStateSecret stateSecret;
+                            if (XInputGetStateSecret(i, out stateSecret) == 0)
+                            {
+                                bool isGuideDown = (stateSecret.Gamepad.wButtons & GUIDE_BIT) != 0;
+
+                                if (isGuideDown)
+                                {
+                                    // Wir fügen den Guide-Button zur normalen Tastenliste hinzu!
+                                    // Damit denkt dein Programm, "Guide" sei ein ganz normaler Knopf.
+                                    btns |= (GamepadButtonFlags)GUIDE_BIT;
+                                }
+                            }
+
+                            // C. Shortcuts verarbeiten (Jetzt inkl. Guide Button!)
                             HandleShortcuts(btns, i);
 
-                            // --- 2. MOUSE MODE TOGGLE ---
+
+                            // --- Ab hier dein normaler UI/Maus Code (unverändert) ---
+
+                            // Maus Modus Toggle (Start + Back)
                             bool comboPressed = (btns & GamepadButtonFlags.DPadDown) != 0 &&
                                                 (btns & GamepadButtonFlags.RightThumb) != 0;
 
@@ -8149,7 +8267,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                 _mouseModeTriggered[i] = false;
                             }
 
-                            // --- 3. DIRECTION CALCULATION ---
+                            // Sticks
                             int xDir = 0;
                             if (gp.LeftThumbX < -menuDeadzone) xDir = -1;
                             else if (gp.LeftThumbX > menuDeadzone) xDir = 1;
@@ -8158,7 +8276,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             if (gp.LeftThumbY < -menuDeadzone) yDir = -1;
                             else if (gp.LeftThumbY > menuDeadzone) yDir = 1;
 
-                            // --- 4. INPUT BRANCHING ---
                             if (_isMouseModeActive)
                             {
                                 if (!_isCursorVisible)
@@ -8177,25 +8294,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                                 if (IsWindowInForeground())
                                 {
-                                    // HIER IST DIE ÄNDERUNG: Wir leiten ALLES an HandleGamepadInput weiter
-                                    // Das inkludiert jetzt auch das ImageSelection Menü
-
-                                    // Nur neue Button-Presses senden (One-Shot)
                                     var newPresses = btns & ~_lastButtonStates[i];
-
                                     if (newPresses != GamepadButtonFlags.None)
                                     {
                                         DispatcherQueue.TryEnqueue(() => HandleGamepadInput(newPresses, false, false, false, false, i));
                                     }
 
-                                    // Stick-Navigation (mit Drosselung)
                                     bool isStickMoving = (xDir != 0 || yDir != 0);
                                     if (isStickMoving)
                                     {
                                         if (DateTime.Now > _nextAllowedInputTime[i])
                                         {
                                             DispatcherQueue.TryEnqueue(() => HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, i));
-
                                             _nextAllowedInputTime[i] = _isStickCentered[i] ? DateTime.Now.AddMilliseconds(400) : DateTime.Now.AddMilliseconds(150);
                                             _isStickCentered[i] = false;
                                         }
@@ -8205,7 +8315,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                                         _nextAllowedInputTime[i] = DateTime.MinValue;
                                         _isStickCentered[i] = true;
                                     }
-
                                     _lastButtonStates[i] = btns;
                                 }
                             }
@@ -8213,7 +8322,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         catch { _xboxControllers[i] = null; }
                     }
                 }
-                Thread.Sleep(10);
+
+                Thread.Sleep(8);
             }
         }
 
@@ -8324,7 +8434,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         {
                             HandleMouseControl(new State
                             {
-                                Gamepad = new Gamepad
+                                Gamepad = new SharpDX.XInput.Gamepad
                                 {
                                     Buttons = (SharpDX.XInput.GamepadButtonFlags)edgeButtons,
                                     LeftThumbX = (short)(lx * 32767),
@@ -8530,7 +8640,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             // Maus-Modus direkt aufrufen (kein UI Thread nötig -> schnell)
                             HandleMouseControl(new State
                             {
-                                Gamepad = new Gamepad
+                                Gamepad = new SharpDX.XInput.Gamepad
                                 {
                                     Buttons = (SharpDX.XInput.GamepadButtonFlags)psBtn,
                                     LeftThumbX = (short)(lx * 32767),
@@ -8718,7 +8828,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ["DPadLeft"] = GamepadButtonFlags.DPadLeft,
             ["DPadRight"] = GamepadButtonFlags.DPadRight,
             ["LeftShoulder"] = GamepadButtonFlags.LeftShoulder,
-            ["RightShoulder"] = GamepadButtonFlags.RightShoulder
+            ["RightShoulder"] = GamepadButtonFlags.RightShoulder,
+            ["LeftThumb"] = GamepadButtonFlags.LeftThumb,  // Hattest du vergessen, sicherheitshalber dazu
+            ["RightThumb"] = GamepadButtonFlags.RightThumb, // Hattest du vergessen, sicherheitshalber dazu
+
+            // --- NEU: Der Guide Button ---
+            // 0x0400 ist der interne Hex-Code für die Xbox-Taste
+            ["Guide"] = (GamepadButtonFlags)0x0400,
+            ["Xbox"] = (GamepadButtonFlags)0x0400
         };
 
         private bool IsButtonPressed(GamepadButtonFlags state, string key)
@@ -8758,6 +8875,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // Logging darf niemals crashen
             }
         }
+
+
 
         private void LoadShortcutsFromSettings()
         {
@@ -9009,17 +9128,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Process.Start("shutdown", "/r /t 0");
         }
 
-        /// <summary>
+
         /// Die zentrale Methode zur Verarbeitung der Gamepad-Eingaben für die UI-Navigation.
-        /// Beinhaltet jetzt die Steuerung für das Audio-Flyout (X-Taste in TopButtons).
-        /// </summary>
-        /// <summary>
-        /// Verarbeitet Gamepad-Eingaben für die UI-Navigation und Shortcuts.
-        /// </summary>
-        /// <summary>
-        /// Die zentrale Methode zur Verarbeitung der Gamepad-Eingaben für die UI-Navigation.
-        /// Beinhaltet die Steuerung für alle Bereiche inkl. Cards, Launcher, Audio und das neue Bild-Menü.
-        /// </summary>
+
         private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
             // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
@@ -9054,6 +9165,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
                         navigated = true;
                     }
+
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
                         ClickSelectedTopButton();
@@ -9108,19 +9220,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         TriggerCardAction(_selectedCardIndex, false);
                         PlaydeactivationSound();
                     }
-                    // --- NEU: START-TASTE FÜR BILD-MENÜ ---
+                    // --- START TASTE (GAME OPTIONS) ---
                     else if ((newPresses & GamepadButtonFlags.Start) != 0)
                     {
-                        // Sicherheitscheck: Ist überhaupt eine Karte ausgewählt und vorhanden?
                         if (_cardCache != null && _cardCache.Count > _selectedCardIndex && _selectedCardIndex >= 0)
                         {
                             var entry = _cardCache[_selectedCardIndex];
 
-                            // WICHTIG: UI-Aktionen immer auf dem Dispatcher ausführen, um Thread-Fehler zu vermeiden
-                            this.DispatcherQueue.TryEnqueue(() =>
-                            {
-                                OpenImageSelectionForCard(entry);
-                            });
+                            // NEU: Öffne das Options-Menü statt direkt die Bildsuche
+                            DispatcherQueue.TryEnqueue(() => OpenGameOptions(entry));
 
                             PlayActivationSound();
                         }
@@ -9436,6 +9544,99 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         PlaydeactivationSound();
                     }
                     break;
+                case FocusArea.GameOptions:
+
+                    // --- SZENARIO A: WIR SIND IN DER BILDERSUCHE ---
+                    if (ArtworkSearchPanel.Visibility == Visibility.Visible)
+                    {
+                        // B = Zurück zum Hauptmenü
+                        if ((newPresses & GamepadButtonFlags.B) != 0)
+                        {
+                            BtnBackToOptions_Click(null, null);
+                            PlaydeactivationSound();
+                            return;
+                        }
+
+                        // Navigation im Bilder-Raster (Grid)
+                        if (ImageResultsGrid.Items.Count > 0)
+                        {
+                            int columns = 5; // Ungefähre Spaltenzahl
+
+                            if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
+                            {
+                                _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + 1);
+                                navigated = true;
+                            }
+                            else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                            {
+                                _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - 1);
+                                navigated = true;
+                            }
+                            else if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
+                            {
+                                _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + columns);
+                                navigated = true;
+                            }
+                            else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
+                            {
+                                _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - columns);
+                                navigated = true;
+                            }
+
+                            // A = Bild auswählen & laden
+                            else if ((newPresses & GamepadButtonFlags.A) != 0)
+                            {
+                                if (_selectedImageGridIndex >= 0 && _selectedImageGridIndex < _currentImageSearchResults.Count)
+                                {
+                                    string url = _currentImageSearchResults[_selectedImageGridIndex];
+                                    DownloadAndApplyImage(url);
+                                    PlayActivationSound();
+                                }
+                            }
+
+                            if (navigated)
+                            {
+                                ImageResultsGrid.SelectedIndex = _selectedImageGridIndex;
+                                ImageResultsGrid.ScrollIntoView(ImageResultsGrid.SelectedItem);
+                                PlayNavigationSound();
+                                // Hier returnen wir, damit wir unten nicht UpdateVisualFocus für das Hauptmenü aufrufen
+                                return;
+                            }
+                        }
+                    }
+
+                    // --- SZENARIO B: WIR SIND IM HAUPTMENÜ (Suspend / Artwork) ---
+                    else
+                    {
+                        // B = Menü ganz schließen
+                        if ((newPresses & GamepadButtonFlags.B) != 0)
+                        {
+                            CloseGameOptions();
+                            PlaydeactivationSound();
+                        }
+                        // HOCH / RUNTER = Auswahl wechseln
+                        else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp))
+                        {
+                            _selectedGameOptionIndex = 0; // Hoch -> Suspend Button
+                            UpdateGameOptionsFocus();
+                            PlayNavigationSound();
+                        }
+                        else if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown))
+                        {
+                            _selectedGameOptionIndex = 1; // Runter -> Artwork Button
+                            UpdateGameOptionsFocus();
+                            PlayNavigationSound();
+                        }
+                        // A = Button klicken
+                        else if ((newPresses & GamepadButtonFlags.A) != 0)
+                        {
+                            if (_selectedGameOptionIndex == 0) BtnSuspendGame_Click(null, null);
+                            else BtnChangeArtwork_Click(null, null);
+
+                            PlayActivationSound();
+                        }
+                    }
+                    break;
             }
 
             if (navigated)
@@ -9449,6 +9650,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private DateTime[] _lastInputTimePerController = new DateTime[5];
         private int[] _lastStickXDirections = new int[4];
         private int[] _lastStickYDirections = new int[4];
+
+
+        private Windows.Gaming.Input.Gamepad _rawXboxGamepad = null;
+        private bool _lastGuideButtonPressed = false;
 
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
@@ -9480,7 +9685,31 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Updates the UI performantly by only changing the old and new focused elements.
         /// </summary>
+        private void UpdateGameOptionsFocus()
+        {
+            // 1. Reset Styles (Standard Background)
+            BtnSuspendGame.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(51, 255, 255, 255)); // #33FFFFFF
+            BtnSuspendGame.BorderThickness = new Thickness(1);
 
+            BtnChangeArtwork.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(51, 255, 255, 255));
+            BtnChangeArtwork.BorderThickness = new Thickness(1);
+
+            // 2. Highlight Selection (Akzentfarbe)
+            var accentBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
+
+            if (_selectedGameOptionIndex == 0)
+            {
+                BtnSuspendGame.BorderBrush = accentBrush;
+                BtnSuspendGame.BorderThickness = new Thickness(2);
+                BtnSuspendGame.Focus(FocusState.Programmatic);
+            }
+            else
+            {
+                BtnChangeArtwork.BorderBrush = accentBrush;
+                BtnChangeArtwork.BorderThickness = new Thickness(2);
+                BtnChangeArtwork.Focus(FocusState.Programmatic);
+            }
+        }
         private void UpdateVisualFocus(bool isInitial = false)
         {
             UpdateLayoutForFocus();
@@ -9964,6 +10193,74 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine($"BringToFrontAndFocus failed: {ex.Message}");
             }
         }
+        public void ForceGcmToFront()
+        {
+            this.DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    IntPtr gcmHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    IntPtr currentForegroundHwnd = GetForegroundWindow();
+                    uint currentThreadId = GetWindowThreadProcessId(currentForegroundHwnd, out _);
+                    uint thisThreadId = GetCurrentThreadId();
+
+                    // 1. Erlaubnis & Thread-Link
+                    AllowSetForegroundWindow(ASFW_ANY);
+                    if (currentThreadId != thisThreadId)
+                    {
+                        AttachThreadInput(thisThreadId, currentThreadId, true);
+                    }
+
+                    // 2. Fenster zeigen
+                    ShowWindow(gcmHwnd, SW_RESTORE);
+                    SetWindowPos(gcmHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+                    // 3. API Fokus
+                    SetForegroundWindow(gcmHwnd);
+                    SetActiveWindow(gcmHwnd);
+
+                    // --- 4. DER PHYSIKALISCHE "JAB" (DEINE IDEE) ---
+                    // Wir klicken ganz unten links, um Windows zu zwingen, den Input-Fokus umzuschalten.
+                    int screenHeight = GetScreenHeight();
+                    int clickX = 0;
+                    int clickY = screenHeight - 5; // 5 Pixel Puffer nach oben
+
+                    // Maus kurz dorthin bewegen
+                    SetCursorPos(clickX, clickY);
+
+                    // Klick simulieren (Runter und direkt wieder hoch)
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                    await Task.Delay(10); // Winzige Pause für die Klick-Registrierung
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+
+                    // 5. Input wieder lösen
+                    if (currentThreadId != thisThreadId)
+                    {
+                        AttachThreadInput(thisThreadId, currentThreadId, false);
+                    }
+
+                    // 6. XAML-Fokus sicherstellen
+                    if (this.Content is UIElement root)
+                    {
+                        root.Focus(FocusState.Programmatic);
+                    }
+
+                    // 7. TopMost nach kurzem Delay lösen
+                    await Task.Delay(100);
+                    SetWindowPos(gcmHwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+                    // Cursor wieder verstecken/parken (damit er nicht unten links nervt)
+                    ParkMouseCursor();
+
+                    Debug.WriteLine("[Focus] Physical Jab executed at bottom-left.");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Focus Error] {ex.Message}");
+                }
+            });
+        }
+
 
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")] private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

@@ -408,58 +408,119 @@
         </Grid>
 
         <MediaPlayerElement x:Name="StartupVideoPlayer" AreTransportControlsEnabled="False" Stretch="Uniform" Background="Black"/>
-        <Grid x:Name="ImageSelectionOverlay" Visibility="Collapsed" Background="#D0000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Canvas.ZIndex="500">
-            <Border Width="1000" Height="700" CornerRadius="12" Background="#FF1E1E1E" BorderBrush="#33FFFFFF" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Grid Padding="25">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
+        <Grid x:Name="GameOptionsOverlay" Visibility="Collapsed" Canvas.ZIndex="500" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <Grid.ChildrenTransitions>
+                <TransitionCollection>
+                    <EntranceThemeTransition FromVerticalOffset="40" />
+                    <ContentThemeTransition/>
+                </TransitionCollection>
+            </Grid.ChildrenTransitions>
 
-                    <StackPanel Grid.Row="0" Spacing="15">
-                        <TextBlock Text="CHANGE ARTWORK" FontSize="28" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Select a new cover for this game" FontSize="14" Foreground="#AAAAAA" HorizontalAlignment="Center"/>
+            <Grid Tapped="GameOptionsOverlay_BackdropTapped">
+                <Grid.Background>
+                    <AcrylicBrush TintColor="#050505" TintOpacity="0.85" FallbackColor="#CC000000" />
+                </Grid.Background>
+            </Grid>
 
-                        <Grid Margin="0,10,0,0">
+            <Border x:Name="GameOptionsMenuBorder" Width="500" VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    CornerRadius="16" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    Padding="0">
+                <Border.Shadow>
+                    <ThemeShadow/>
+                </Border.Shadow>
+
+                <Grid>
+                    <StackPanel x:Name="GameOptionsMainPanel" Spacing="0">
+                        <Border Background="#10FFFFFF" CornerRadius="16,16,0,0" Padding="20">
+                            <StackPanel>
+                                <TextBlock x:Name="GameOptionsTitle" Text="GAME OPTIONS" FontWeight="Bold" FontSize="18" Foreground="White" HorizontalAlignment="Center"/>
+                                <TextBlock x:Name="GameOptionsSubtitle" Text="Selected: ELEX 2" FontSize="14" Opacity="0.7" Foreground="White" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Spacing="10" Padding="30">
+
+                            <Button x:Name="BtnSuspendGame" Click="BtnSuspendGame_Click"
+                                    HorizontalAlignment="Stretch" Height="70" CornerRadius="8"
+                                    BorderThickness="1" BorderBrush="#33FFFFFF" Background="#20FFFFFF"
+                                    Padding="15,0">
+                                <Grid HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon x:Name="IconSuspend" Glyph="&#xE769;" FontSize="24" VerticalAlignment="Center" Foreground="#A5D952"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="20,0,0,0">
+                                        <TextBlock x:Name="TxtSuspendTitle" Text="Suspend Game" FontSize="16" FontWeight="SemiBold" Foreground="White"/>
+                                        <TextBlock x:Name="TxtSuspendDesc" Text="Freezes the game to save resources" FontSize="12" Opacity="0.7" Foreground="White"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+
+                            <Button x:Name="BtnChangeArtwork" Click="BtnChangeArtwork_Click"
+                                    HorizontalAlignment="Stretch" Height="70" CornerRadius="8"
+                                    BorderThickness="1" BorderBrush="#33FFFFFF" Background="#10FFFFFF"
+                                    Padding="15,0">
+                                <Grid HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="&#xE7B5;" FontSize="24" VerticalAlignment="Center" Foreground="White"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="20,0,0,0">
+                                        <TextBlock Text="Change Artwork" FontSize="16" FontWeight="SemiBold" Foreground="White"/>
+                                        <TextBlock Text="Search SteamGridDB for new covers" FontSize="12" Opacity="0.7" Foreground="White"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+
+                        </StackPanel>
+
+                        <Border BorderBrush="#15FFFFFF" BorderThickness="0,1,0,0" Padding="15">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+                                <Ellipse Width="18" Height="18" Fill="#FFDB4E4E"/>
+                                <TextBlock Text="Back / Close" Foreground="#AAFFFFFF" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Grid x:Name="ArtworkSearchPanel" Visibility="Collapsed" Padding="20">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,15">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="ImageSearchBox" PlaceholderText="Search Game..." Height="40" CornerRadius="5" FontSize="16"/>
-                            <Button x:Name="ImageSearchButton" Content="Search" Grid.Column="1" Margin="10,0,0,0" Height="40" Width="100" Click="ImageSearchButton_Click" Style="{StaticResource AccentButtonStyle}"/>
+                            <Button Click="BtnBackToOptions_Click" Background="Transparent" BorderThickness="0">
+                                <FontIcon Glyph="&#xE72B;" FontSize="18"/>
+                            </Button>
+                            <TextBox x:Name="ImageSearchBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="Search Game..." Height="40" CornerRadius="5" FontSize="16"/>
+                            <Button x:Name="ImageSearchButton" Content="Search" Grid.Column="1" HorizontalAlignment="Right" Margin="0,0,5,0" Height="32" Click="ImageSearchButton_Click" Style="{StaticResource AccentButtonStyle}"/>
                         </Grid>
+                        <ProgressBar x:Name="ImageSearchProgress" Grid.Row="0" VerticalAlignment="Bottom" IsIndeterminate="true" Visibility="Collapsed" Height="2" Margin="0,5,0,0"/>
 
-                        <ProgressBar x:Name="ImageSearchProgress" IsIndeterminate="true" Visibility="Collapsed" Height="2" Margin="0,10,0,0"/>
-                    </StackPanel>
+                        <GridView x:Name="ImageResultsGrid" Grid.Row="1" Margin="0,10" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="ImageResultsGrid_ItemClick">
+                            <GridView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="140" Height="210" CornerRadius="8" Margin="6" Background="#222">
+                                        <Image Source="{Binding}" Stretch="UniformToFill"/>
+                                    </Border>
+                                </DataTemplate>
+                            </GridView.ItemTemplate>
+                        </GridView>
 
-                    <GridView x:Name="ImageResultsGrid" Grid.Row="1" Margin="0,20,0,20" SelectionMode="Single"  IsItemClickEnabled="True" ItemClick="ImageResultsGrid_ItemClick">
-                        <GridView.ItemTemplate>
-                            <DataTemplate>
-                                <Border Width="160" Height="240" CornerRadius="8" Margin="8" Background="#222">
-                                    <Image Source="{Binding}" Stretch="UniformToFill"/>
-                                </Border>
-                            </DataTemplate>
-                        </GridView.ItemTemplate>
-                        <GridView.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapGrid Orientation="Horizontal" HorizontalAlignment="Center"/>
-                            </ItemsPanelTemplate>
-                        </GridView.ItemsPanel>
-                        <GridView.ItemContainerStyle>
-                            <Style TargetType="GridViewItem">
-                                <Setter Property="Margin" Value="5"/>
-                                <Setter Property="CornerRadius" Value="8"/>
-                            </Style>
-                        </GridView.ItemContainerStyle>
-                    </GridView>
+                        <TextBlock x:Name="NoImagesFoundText" Grid.Row="1" Text="No images found." VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="#888" FontSize="16" Visibility="Collapsed"/>
 
-                    <TextBlock x:Name="NoImagesFoundText" Grid.Row="1" Text="No images found." VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="#888" FontSize="16" Visibility="Collapsed"/>
-
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="30">
-                        <Button x:Name="BrowseLocalButton" Content="📂 Browse Local File..." Width="200" Height="45" CornerRadius="8" Click="BrowseLocalButton_Click"/>
-                        <Button x:Name="CloseImageSelectorButton" Content="Cancel" Width="150" Height="45" CornerRadius="8" Click="CloseImageSelectorButton_Click"/>
-                    </StackPanel>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20">
+                            <Button x:Name="BrowseLocalButton" Content="📂 Browse Local..." Width="160" Height="40" CornerRadius="8" Click="BrowseLocalButton_Click"/>
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

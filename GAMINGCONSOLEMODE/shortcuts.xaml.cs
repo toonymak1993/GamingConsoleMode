@@ -72,7 +72,12 @@ namespace GAMINGCONSOLEMODE
     public sealed partial class shortcuts : Page
     {
         // Die Namen müssen EXAKT so heißen wie deine Bilddateien (ohne .png)
-        private readonly string[] gamepadButtons = { "None", "A", "B", "X", "Y", "DPadUp", "DPadDown", "DPadLeft", "DPadRight", "Start", "Back", "LeftThumb", "RightThumb", "LeftShoulder", "RightShoulder" };
+        private readonly string[] gamepadButtons = {
+    "None", "Guide", "A", "B", "X", "Y",
+    "DPadUp", "DPadDown", "DPadLeft", "DPadRight",
+    "Start", "Back", "LeftThumb", "RightThumb",
+    "LeftShoulder", "RightShoulder"
+};
         private List<FunctionViewModel> allFunctions;
         private bool _isLoading = true;
 
@@ -97,12 +102,19 @@ namespace GAMINGCONSOLEMODE
 
             // Hier bauen wir die Pfade zu den Bildern
             // Achte darauf, dass deine Ordner genau so heißen: Assets/controllericons/xbox/
-            var buttonOptions = gamepadButtons.Select(btn => new ButtonOption
+            // Hier bauen wir die Pfade zu den Bildern
+            var buttonOptions = gamepadButtons.Select(btn =>
             {
-                Value = btn,
-                // Nutze Kleinschreibung für die Ordner, falls sie so heißen
-                XboxIcon = $"ms-appx:///Assets/controllericons/xbox/{btn}.png",
-                PlayStationIcon = $"ms-appx:///Assets/controllericons/playstation/{btn}.png"
+                // Dateiname bestimmen: Wenn "Guide", dann nimm "xbox.png", sonst den Button-Namen (z.B. "A.png")
+                string fileName = (btn == "Guide") ? "xbox" : btn;
+
+                return new ButtonOption
+                {
+                    Value = btn,
+                    // Nutze Kleinschreibung für die Ordner, falls sie so heißen
+                    XboxIcon = $"ms-appx:///Assets/controllericons/xbox/{fileName}.png",
+                    PlayStationIcon = $"ms-appx:///Assets/controllericons/playstation/{fileName}.png"
+                };
             }).ToList();
 
             allFunctions = functionDetails.Select(kvp => new FunctionViewModel

@@ -23,6 +23,7 @@
     <Page Remove="functions\ffmpeg\**" />
   </ItemGroup>
   <ItemGroup>
+    <Content Remove="Assets\controllericons\xbox\xbox.png" />
     <Content Remove="Assets\displayfusion.png" />
     <Content Remove="Assets\Download.png" />
     <Content Remove="Assets\GCM_Startup_Video.mp4" />
@@ -131,6 +132,7 @@
     <None Remove="Assets\controllericons\xbox\T_X_Sprite.png" />
     <None Remove="Assets\controllericons\xbox\T_X_X_White.png" />
     <None Remove="Assets\controllericons\xbox\T_X_Y_White.png" />
+    <None Remove="Assets\controllericons\xbox\xbox.png" />
     <None Remove="Assets\displayfusion.png" />
     <None Remove="Assets\Download.png" />
     <None Remove="Assets\GCM_Startup_Video.mp4" />
@@ -200,6 +202,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\controllericons\xbox\xbox.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="Assets\GCM_Startup_Video.mp4">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </EmbeddedResource>
