@@ -1,11 +1,12 @@
-﻿using System;
-using System.Linq;
-using System.Collections.Generic;
-using System.IO;
-using System.ComponentModel;
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -92,12 +93,16 @@ namespace GAMINGCONSOLEMODE
         {
             var functionDetails = new Dictionary<string, string> {
                 { "taskmanager", "Switch to the GCM Taskmanager" },
+                { "shortcut overlay", "Displays all your active shortcuts, be careful with full-screen games." },
+                { "kill process", "Kill current process or window/game" },//new
                 { "switch tab", "Simulates Alt+Tab to cycle through your open windows and applications quickly." },
                 { "audio switch", "Cycles through your available audio output devices (e.g., switching from Speakers to Headset)." },
-                { "performance overlay", "Toggles the GCM performance monitoring tool to view FPS, CPU, and GPU metrics in-game." },
+                { "volume up", "Kill current process or window/game" }, //new
+                { "volume down", "Kill current process or window/game" },//new
+                { "performance overlay", "Toggles the Nvidia Amd performance monitoring tool to view FPS, CPU, and GPU metrics in-game." },
                 { "xbox bar", "Triggers the native Windows Game Bar for social features, recording, and broadcasting." },
-                { "lossless scaling", "Activates the Lossless Scaling tool to improve image quality and frame rates in windowed games." },
-                { "xbox keyboard", "Forces the Windows on-screen keyboard to appear for text input using your controller." }
+                { "xbox keyboard", "Forces the Windows on-screen keyboard to appear for text input using your controller." },
+                { "lossless scaling", "Activates the Lossless Scaling tool to improve image quality and frame rates in windowed games." }
             };
 
             // Hier bauen wir die Pfade zu den Bildern

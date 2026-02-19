@@ -304,18 +304,6 @@ namespace GAMINGCONSOLEMODE
                 Taskbar.IsOn = false;
                 AppSettings.Save("enable_taskbar", false); // Save the default
             }
-
-            try
-            {
-                // Find the toggle in XAML and set its state from the saved setting
-                Startmenu.IsOn = AppSettings.Load<bool>("enable_startmenu");
-            }
-            catch
-            {
-                // If setting doesn't exist, default to false (Disabled)
-                Startmenu.IsOn = false;
-                AppSettings.Save("enable_startmenu", false); // Save the default
-            }
         }
     }
 }

@@ -156,49 +156,6 @@ namespace GAMINGCONSOLEMODE
             }
             #endregion
 
-            #region CSSLoader
-            try
-            {
-                string cssloaderExePath = @"C:\Program Files\CSSLoader Desktop\CSSLoader Desktop.exe";
-                if (File.Exists(cssloaderExePath))
-                {
-                    text_install_state_cssloader.Text = "INSTALLED";
-                    border_install_state_cssloader.Background = new SolidColorBrush(Colors.Green);
-                    use_cssloader.IsEnabled = true;
-
-                    // Toggle UI based on saved setting
-                    bool cssloadertogglestatus = AppSettings.Load<bool>("usecssloader");
-                    if (cssloadertogglestatus)
-                    {
-                        use_cssloader.IsOn = true;
-                        // Dashboard Grid
-                        cssloaderbutton.Tag = "ENABLED";
-                        cssloaderstate_color.Background = new SolidColorBrush(Colors.Green);
-                        cssloaderstate_text.Text = "ENABLED";
-                    }
-                    else
-                    {
-                        use_cssloader.IsOn = false;
-                        // Dashboard Grid
-                        cssloaderstate_color.Background = new SolidColorBrush(Colors.Orange);
-                        cssloaderstate_text.Text = "DISABLED";
-                        cssloaderbutton.Tag = "DISABLED";
-                    }
-                }
-                else
-                {
-                    text_install_state_cssloader.Text = "NOT INSTALLED";
-                    border_install_state_cssloader.Background = new SolidColorBrush(Colors.Brown);
-                    use_cssloader.IsEnabled = false;
-                    use_cssloader.IsOn = false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"CSSLoader UI check failed: {ex.Message}");
-            }
-            #endregion
-
             #region JoyXoff
             string joyxoffExePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Joyxoff", "Joyxoff.exe");
             try
@@ -730,11 +687,7 @@ namespace GAMINGCONSOLEMODE
 
         #region Dashboard Button Click Handlers
 
-        private void cssloader_Click(object sender, RoutedEventArgs e)
-        {
-            Openpanel("cssloader");
-            BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "CSSLoader" };
-        }
+      
 
         private void preloadlist_Click(object sender, RoutedEventArgs e)
         {
@@ -1236,6 +1189,210 @@ namespace GAMINGCONSOLEMODE
 
         #region Feature Handlers: GCM Wallpaper
 
+        #region Feature Handlers: Online Wallpaper Search
+
+        // Data Model
+        public class WallpaperItem
+        {
+            public string ThumbnailUrl { get; set; }
+            public string FullUrl { get; set; }
+            public string Id { get; set; }
+            public string Resolution { get; set; }
+        }
+
+        // State Tracking for Pagination
+        private int _currentPage = 1;
+        private string _currentQuery = "gaming";
+        private string _currentResolution = "";
+
+        // Trigger search on Enter key
+        private void WallpaperSearchBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+        {
+            if (e.Key == Windows.System.VirtualKey.Enter)
+            {
+                BtnSearchWallpaper_Click(sender, new RoutedEventArgs());
+            }
+        }
+
+        // --- SEARCH BUTTON (Reset to Page 1) ---
+        private void BtnSearchWallpaper_Click(object sender, RoutedEventArgs e)
+        {
+            // 1. Get Values
+            string query = WallpaperSearchBox.Text.Trim();
+            if (string.IsNullOrEmpty(query)) query = "gaming";
+            _currentQuery = query;
+
+            _currentResolution = "";
+            if (WallpaperResolutionCombo.SelectedItem is ComboBoxItem resItem && resItem.Tag != null)
+            {
+                _currentResolution = resItem.Tag.ToString();
+            }
+
+            // 2. Reset Page
+            _currentPage = 1;
+
+            // 3. Execute
+            PerformSearch(_currentPage);
+        }
+
+        // --- NEXT / PREV BUTTONS ---
+        private void BtnNextPage_Click(object sender, RoutedEventArgs e)
+        {
+            _currentPage++;
+            PerformSearch(_currentPage);
+        }
+
+        private void BtnPrevPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentPage > 1)
+            {
+                _currentPage--;
+                PerformSearch(_currentPage);
+            }
+        }
+
+        // --- CORE SEARCH LOGIC ---
+        private async void PerformSearch(int page)
+        {
+            WallpaperLoadingBar.Visibility = Visibility.Visible;
+            WallpaperResultsGrid.ItemsSource = null;
+
+            // Update UI Controls
+            TxtPageNumber.Text = $"Page {page}";
+            BtnPrevPage.IsEnabled = page > 1;
+            BtnNextPage.IsEnabled = false; // Disable until load complete
+
+            try
+            {
+                using (HttpClient client = new HttpClient())
+                {
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("GCM-App/1.0");
+
+                    // Build URL
+                    string apiUrl = $"https://wallhaven.cc/api/v1/search?q={Uri.EscapeDataString(_currentQuery)}&purity=100&sorting=relevance&page={page}";
+
+                    if (!string.IsNullOrEmpty(_currentResolution))
+                    {
+                        apiUrl += $"&resolutions={_currentResolution}";
+                    }
+
+                    // Call API
+                    string jsonResponse = await client.GetStringAsync(apiUrl);
+
+                    // Parse
+                    var jsonDoc = JsonDocument.Parse(jsonResponse);
+                    var root = jsonDoc.RootElement;
+                    var dataArray = root.GetProperty("data");
+
+                    List<WallpaperItem> wallpapers = new List<WallpaperItem>();
+
+                    foreach (var item in dataArray.EnumerateArray())
+                    {
+                        try
+                        {
+                            string fullPath = item.GetProperty("path").GetString();
+                            string thumbPath = item.GetProperty("thumbs").GetProperty("small").GetString();
+                            string id = item.GetProperty("id").GetString();
+                            string res = item.GetProperty("resolution").GetString();
+
+                            wallpapers.Add(new WallpaperItem
+                            {
+                                ThumbnailUrl = thumbPath,
+                                FullUrl = fullPath,
+                                Id = id,
+                                Resolution = res
+                            });
+                        }
+                        catch { /* Skip bad items */ }
+                    }
+
+                    if (wallpapers.Count == 0)
+                    {
+                        Debug.WriteLine("No wallpapers found.");
+                    }
+
+                    WallpaperResultsGrid.ItemsSource = wallpapers;
+
+                    // Enable Next button if we found results (simple logic)
+                    BtnNextPage.IsEnabled = wallpapers.Count > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Wallpaper Search Error: {ex.Message}");
+                ContentDialog errorDialog = new ContentDialog
+                {
+                    Title = "Search Error",
+                    Content = "Could not fetch wallpapers. Please try again.",
+                    CloseButtonText = "OK",
+                    XamlRoot = this.Content.XamlRoot
+                };
+                _ = errorDialog.ShowAsync();
+            }
+            finally
+            {
+                WallpaperLoadingBar.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        // --- DOWNLOAD & APPLY ---
+        private async void WallpaperResultsGrid_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is WallpaperItem selectedWallpaper)
+            {
+                WallpaperLoadingBar.Visibility = Visibility.Visible;
+
+                try
+                {
+                    string gcmFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "wallpapers");
+                    Directory.CreateDirectory(gcmFolder);
+
+                    string extension = Path.GetExtension(selectedWallpaper.FullUrl) ?? ".jpg";
+                    string localPath = Path.Combine(gcmFolder, $"gcm_wp_{selectedWallpaper.Id}{extension}");
+
+                    using (HttpClient client = new HttpClient())
+                    {
+                        byte[] imageBytes = await client.GetByteArrayAsync(selectedWallpaper.FullUrl);
+                        await File.WriteAllBytesAsync(localPath, imageBytes);
+                    }
+
+                    AppSettings.Save("gcmwallpaperpath", localPath);
+                    wallpaper_path.Text = localPath;
+
+                    if (!use_wallpaper.IsOn)
+                    {
+                        use_wallpaper.IsOn = true;
+                    }
+
+                    ContentDialog successDialog = new ContentDialog
+                    {
+                        Title = "Wallpaper Applied",
+                        Content = $"Downloaded page {_currentPage} image.\nResolution: {selectedWallpaper.Resolution}\nSet successfully!",
+                        CloseButtonText = "Awesome!",
+                        XamlRoot = this.Content.XamlRoot
+                    };
+                    await successDialog.ShowAsync();
+                }
+                catch (Exception ex)
+                {
+                    ContentDialog errorDialog = new ContentDialog
+                    {
+                        Title = "Download Failed",
+                        Content = $"Could not download image: {ex.Message}",
+                        CloseButtonText = "OK",
+                        XamlRoot = this.Content.XamlRoot
+                    };
+                    await errorDialog.ShowAsync();
+                }
+                finally
+                {
+                    WallpaperLoadingBar.Visibility = Visibility.Collapsed;
+                }
+            }
+        }
+
+        #endregion
+
         private void wallpaper_path_TextChanged(object sender, TextChangedEventArgs e)
         {
             AppSettings.Save("gcmwallpaperpath", wallpaper_path.Text);
@@ -1256,63 +1413,6 @@ namespace GAMINGCONSOLEMODE
                 border_install_state_wallpaper.Background = new SolidColorBrush(Colors.Brown);
                 wallpaper_path.Text = "";
             }
-        }
-
-        #endregion
-
-        #region Feature Handlers: CSS Loader
-
-        private void button_uninstall_cssloader_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo("ms-settings:appsfeatures") { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Error opening Windows settings: " + ex.Message);
-            }
-        }
-
-        private async void button_install_cssloader_Click(object sender, RoutedEventArgs e)
-        {
-            string latestReleaseApiUrl = "https://api.github.com/repos/DeckThemes/CSSLoader-Desktop/releases/latest";
-            using (HttpClient httpClient = new HttpClient())
-            {
-                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-                string releaseJson;
-                try
-                {
-                    releaseJson = await httpClient.GetStringAsync(latestReleaseApiUrl);
-                    JsonDocument jsonDoc = JsonDocument.Parse(releaseJson);
-                    JsonElement root = jsonDoc.RootElement;
-                    JsonElement assets = root.GetProperty("assets");
-                    JsonElement? msiAsset = assets.EnumerateArray().FirstOrDefault(asset => asset.GetProperty("name").GetString().EndsWith(".msi", StringComparison.OrdinalIgnoreCase));
-
-                    if (msiAsset == null)
-                    {
-                        Debug.WriteLine("No MSI asset found in the latest release.");
-                        return;
-                    }
-
-                    string downloadUrl = msiAsset.Value.GetProperty("browser_download_url").GetString();
-                    string selectedAssetName = msiAsset.Value.GetProperty("name").GetString();
-                    string downloadsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "DownloadedInstaller");
-                    Directory.CreateDirectory(downloadsFolder);
-
-                    await downloadUrl.DownloadFileAsync(downloadsFolder, selectedAssetName);
-                    Process.Start(new ProcessStartInfo("explorer.exe", $"\"{downloadsFolder}\"") { UseShellExecute = true });
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("Error during CSSLoader download/install process: " + ex.Message);
-                }
-            }
-        }
-
-        private void use_cssloader_Toggled(object sender, RoutedEventArgs e)
-        {
-            AppSettings.Save("usecssloader", use_cssloader.IsOn);
         }
 
         #endregion

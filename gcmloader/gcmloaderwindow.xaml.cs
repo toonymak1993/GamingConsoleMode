@@ -638,54 +638,91 @@ namespace gcmloader
         private const int APPCOMMAND_BROWSER_HOME = 7;
         // Updates the controller battery status and UI icon
         // Updates the controller battery status with icon and custom text
+        #region controllerbattery icon
+
+        // Updates the controller battery status with a hybrid API approach (WGI + XInput)
         private void UpdateControllerBatteryStatus()
         {
             this.DispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
+                    // =================================================================
+                    // METHOD 1: Windows.Gaming.Input (Modern API)
+                    // Better for Bluetooth Xbox controllers and modern gamepads (e.g. PS5)
+                    // =================================================================
+                    if (Windows.Gaming.Input.Gamepad.Gamepads.Count > 0)
+                    {
+                        var modernGamepad = Windows.Gaming.Input.Gamepad.Gamepads[0];
+                        var report = modernGamepad.TryGetBatteryReport();
+
+                        // Check if a valid battery report is present
+                        if (report != null && report.Status != Windows.System.Power.BatteryStatus.NotPresent)
+                        {
+                            if (report.FullChargeCapacityInMilliwattHours.HasValue &&
+                                report.RemainingCapacityInMilliwattHours.HasValue &&
+                                report.FullChargeCapacityInMilliwattHours.Value > 0)
+                            {
+                                double percentage = ((double)report.RemainingCapacityInMilliwattHours.Value / report.FullChargeCapacityInMilliwattHours.Value) * 100;
+                                UpdateBatteryUI((int)percentage, report.Status == Windows.System.Power.BatteryStatus.Charging);
+                                return; // Success via WGI, exit method
+                            }
+                        }
+                    }
+
+                    // =================================================================
+                    // METHOD 2: SharpDX.XInput Fallback
+                    // Perfect for Xbox Wireless Adapter & Wired connections
+                    // =================================================================
                     Controller activeController = null;
-                    // Scan ports for the first connected controller
                     for (int i = 0; i < 4; i++)
                     {
                         var temp = new Controller((UserIndex)i);
                         if (temp.IsConnected) { activeController = temp; break; }
                     }
 
+                    // No controller found at all
                     if (activeController == null)
                     {
-                        // Hide the whole group if no controller is found
                         ControllerStatusGroup.Visibility = Visibility.Collapsed;
                         return;
                     }
 
-                    // Get status
                     var batteryInfo = activeController.GetBatteryInformation(BatteryDeviceType.Gamepad);
                     ControllerStatusGroup.Visibility = Visibility.Visible;
 
-                    // Map battery level to readable text
-                    // Map XInput battery levels to approximate percentage values
-                    // Since XInput only provides 4 states, we translate them to clean numbers
-                    ControllerBatteryText.Text = batteryInfo.BatteryLevel switch
+                    // Handle edge cases (Bluetooth bug, Wired connection)
+                    if (batteryInfo.BatteryType == BatteryType.Wired)
                     {
-                        BatteryLevel.Empty => "0%",   // Critical
-                        BatteryLevel.Low => "25%",  // Low
-                        BatteryLevel.Medium => "65%",  // Medium/Half
-                        BatteryLevel.Full => "100%", // Full
-                        _ => "100%"  // Wired or unknown fallback
+                        UpdateBatteryUI(100, true); // Wired -> show as charging/100%
+                        return;
+                    }
+                    else if (batteryInfo.BatteryType == BatteryType.Disconnected)
+                    {
+                        ControllerStatusGroup.Visibility = Visibility.Collapsed;
+                        return;
+                    }
+                    else if (batteryInfo.BatteryType == BatteryType.Unknown)
+                    {
+                        // THE BLUETOOTH BUG FIX: 
+                        // XInput cannot read Bluetooth battery telemetry. Instead of showing a wrong "0%", we show "BT".
+                        ControllerBatteryText.Text = "BT";
+                        ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+                        return;
+                    }
+
+                    // Map XInput battery levels (4 states) to approximate percentages
+                    int mappedPercentage = batteryInfo.BatteryLevel switch
+                    {
+                        BatteryLevel.Empty => 0,      // Critical
+                        BatteryLevel.Low => 25,       // Low
+                        BatteryLevel.Medium => 65,    // Medium
+                        BatteryLevel.Full => 100,     // Full
+                        _ => 100
                     };
 
-                    // Change color to red if battery is under 30%
-                    if (batteryInfo.BatteryLevel == BatteryLevel.Low || batteryInfo.BatteryLevel == BatteryLevel.Empty)
-                    {
-                        ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red);
-                    }
-                    else
-                    {
-                        ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
-                    }
-
-                    Debug.WriteLine($"[Controller] Battery updated: {batteryInfo.BatteryLevel}");
+                    UpdateBatteryUI(mappedPercentage, false);
+                    Debug.WriteLine($"[Controller] Battery updated via XInput: {batteryInfo.BatteryLevel}");
                 }
                 catch (Exception ex)
                 {
@@ -695,17 +732,53 @@ namespace gcmloader
             });
         }
 
+        /// <summary>
+        /// Helper method to cleanly update the UI colors and text for the battery status.
+        /// </summary>
+        private void UpdateBatteryUI(int percentage, bool isCharging)
+        {
+            ControllerStatusGroup.Visibility = Visibility.Visible;
+
+            if (isCharging)
+            {
+                ControllerBatteryText.Text = "Charging";
+                ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.LightGreen);
+            }
+            else
+            {
+                ControllerBatteryText.Text = $"{percentage}%";
+
+                // Change color to red if battery is critical (<= 25%)
+                if (percentage <= 25)
+                {
+                    ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red);
+                }
+                else
+                {
+                    ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+                }
+            }
+        }
+        #endregion controllerbattery icon
+
         #endregion controllerbattery icon
         #region mousecontrol 
 
         private void ParkMouseCursor()
         {
-            // Wir schieben die Maus an eine Position weit außerhalb des Bildschirms (9999, 9999).
-            // Da Windows den Cursor oft bei Klicks oder App-Wechseln zurückholt, 
-            // zwingen wir ihn hier aktiv in die Ecke.
+            // 1. Fokus-Check: Nur parken, wenn GCM das aktive Fenster ist
+            IntPtr foregroundHwnd = GetForegroundWindow();
+            IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+            if (foregroundHwnd != selfHwnd)
+            {
+                // GCM ist im Hintergrund (z.B. ein Spiel läuft) -> Maus absolut nicht anrühren!
+                return;
+            }
+
+            // 2. Eigentliche Park-Logik (nur wenn Fokus vorhanden)
             SetCursorPos(9999, 9999);
 
-            // Falls der Cursor laut System noch sichtbar ist, setzen wir den internen Zähler auf unsichtbar.
             if (_isCursorVisible)
             {
                 while (ShowCursor(false) >= 0) ;
@@ -968,7 +1041,6 @@ namespace gcmloader
     "opera gx",
     "opera",
     "Microsoft Edge",
-    "explorer",
     "moonlight"
 };
 
@@ -1854,6 +1926,8 @@ namespace gcmloader
             public GamepadButtonFlags RequiredButtons; // Bitmask of buttons that must be pressed
             public string FunctionName;
             public double HoldDurationSeconds;
+            public string DisplayText;
+
 
             // State tracking per controller index (0-3 Xbox, 4+ PS)
             // We use array size 10 to be safe
@@ -2992,8 +3066,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private bool IsWindowInForeground()
         {
-            IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            return GetForegroundWindow() == hWnd;
+            IntPtr fgHwnd = GetForegroundWindow();
+            IntPtr mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+            // 1. Hat das Hauptfenster den Fokus?
+            if (fgHwnd == mainHwnd) return true;
+
+            // 2. NEU: Hat unser Shortcut-Overlay den Fokus?
+            if (_globalShortcutOverlay != null)
+            {
+                IntPtr overlayHwnd = WinRT.Interop.WindowNative.GetWindowHandle(_globalShortcutOverlay);
+                if (fgHwnd == overlayHwnd) return true;
+            }
+
+            return false;
         }
 
         private int GetScreenWidth()
@@ -7196,23 +7282,58 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-
         private void SetupButtonLayout(StackPanel banner, string type)
         {
             banner.Children.Clear();
 
             if (type == "Xbox")
             {
-                // A = Grün, B = Rot
-                banner.Children.Add(CreateControllerButton("A", "#FF22b14c", "Start"));
-                banner.Children.Add(CreateControllerButton("B", "#FFe74c3c", "Close"));
+                // WICHTIG: Ersetze die Dateinamen durch deine exakten PNG-Namen!
+                banner.Children.Add(CreateImageButton("controllericons/xbox/a.png", "Play"));
+                banner.Children.Add(CreateImageButton("controllericons/xbox/b.png", "Close"));
+
+                // NEU: Das Start-Symbol ganz rechts für das Optionen-Menü
+                banner.Children.Add(CreateImageButton("controllericons/xbox/start.png", ""));
             }
             else // PlayStation Style
             {
-                // X = Weißer Kreis mit grauem Text / Kreis-Symbol = Weißer Kreis
-                banner.Children.Add(CreateControllerButton("\uE739", "#FFFFFFFF", "Start", true)); // X Symbol
-                banner.Children.Add(CreateControllerButton("\uE711", "#FFFFFFFF", "Close", true)); // O Symbol
+                // WICHTIG: Ersetze die Dateinamen durch deine exakten PNG-Namen!
+                banner.Children.Add(CreateImageButton("controllericons/playstation/cross.png", "Play"));
+                banner.Children.Add(CreateImageButton("controllericons/playstation/circle.png", "Close"));
+
+                // NEU: Das Start-Symbol für PlayStation
+                banner.Children.Add(CreateImageButton("controllericons/playstation/start.png", ""));
             }
+        }
+
+        // Hilfsmethode, die das Bild aus dem relativen Pfad lädt und den Text daneben setzt
+        private StackPanel CreateImageButton(string relativeImagePath, string label)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+            // Das PNG laden (ms-appx:///Assets/ + der Pfad, den wir oben übergeben haben)
+            var iconImage = new Image
+            {
+                Source = new BitmapImage(new Uri($"ms-appx:///Assets/{relativeImagePath}")),
+                Width = 24,  // Passe diese Werte an, falls die Icons zu groß/klein sind
+                Height = 24,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var textBlock = new TextBlock
+            {
+                Text = label,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            sp.Children.Add(iconImage);
+            sp.Children.Add(textBlock);
+
+            return sp;
         }
 
         private StackPanel CreateControllerButton(string symbol, string colorHex, string label, bool isPS = false)
@@ -7753,6 +7874,87 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion // TaskManager
         #region Gamepad/Keyboard_Navigation
         #region shortcuts
+        #region shortcut overlay
+        // --- HELPER: Macht aus den Config-Strings schöne Anzeige-Namen ---
+        private string GetNiceKeyName(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key) || key.Equals("None", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            key = key.Trim();
+
+            // Übersetzungen für schönere Namen im Overlay
+            if (key.Equals("Back", StringComparison.OrdinalIgnoreCase)) return "Select";
+            if (key.Equals("Guide", StringComparison.OrdinalIgnoreCase)) return "Xbox";
+            if (key.Equals("LeftShoulder", StringComparison.OrdinalIgnoreCase)) return "LB";
+            if (key.Equals("RightShoulder", StringComparison.OrdinalIgnoreCase)) return "RB";
+            if (key.Equals("LeftThumb", StringComparison.OrdinalIgnoreCase)) return "LS";
+            if (key.Equals("RightThumb", StringComparison.OrdinalIgnoreCase)) return "RS";
+            if (key.Equals("DPadUp", StringComparison.OrdinalIgnoreCase)) return "D-Up";
+            if (key.Equals("DPadDown", StringComparison.OrdinalIgnoreCase)) return "D-Down";
+            if (key.Equals("DPadLeft", StringComparison.OrdinalIgnoreCase)) return "D-Left";
+            if (key.Equals("DPadRight", StringComparison.OrdinalIgnoreCase)) return "D-Right";
+
+            // Fallback: Wenn es keine Abkürzung braucht (z.B. "A", "B", "Start")
+            return key;
+        }
+
+        // --- OVERLAY LOGIC ---
+        private BlankWindow1 _globalShortcutOverlay = null;
+        private bool _isOverlayClosing = false; // Neu: Unser Türsteher für die Animation
+
+        private void ToggleGlobalShortcutOverlay()
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_globalShortcutOverlay != null)
+                {
+                    CloseGlobalShortcutOverlay();
+                }
+                else
+                {
+                    var displayList = new List<ShortcutDisplayItem>();
+                    foreach (var shortcut in _runtimeShortcuts)
+                    {
+                        string actionText = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(shortcut.FunctionName);
+                        string keysText = shortcut.DisplayText;
+
+                        if (shortcut.HoldDurationSeconds > 0)
+                            keysText = $"Hold [ {keysText} ] for {shortcut.HoldDurationSeconds}s";
+                        else
+                            keysText = $"Press [ {keysText} ]";
+
+                        displayList.Add(new ShortcutDisplayItem { KeysDisplay = keysText, ActionName = actionText });
+                    }
+
+                    _globalShortcutOverlay = new BlankWindow1(displayList);
+                    PlayNavigationSound();
+                }
+            });
+        }
+
+        private void CloseGlobalShortcutOverlay()
+        {
+            // Only trigger close if it's not already currently closing
+            if (_globalShortcutOverlay != null && !_isOverlayClosing)
+            {
+                _isOverlayClosing = true;
+                PlaydeactivationSound();
+
+                // Pass the callback to set null ONLY after the animation has finished
+                _globalShortcutOverlay.CloseAnimated(() =>
+                {
+                    _globalShortcutOverlay = null;
+                    _isOverlayClosing = false;
+                });
+            }
+        }
+
+
+
+
+
+        #endregion shortcut overlay
         #region alt tab
         private const byte VK_MENU = 0x12; // ALT key
         private const byte VK_TAB = 0x09;
@@ -7808,6 +8010,62 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion performance overlay shortcut AHK
         #region audio management
+
+        private void VolumeUp()
+        {
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                float currentVol = device.AudioEndpointVolume.MasterVolumeLevelScalar;
+                device.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Min(1.0f, currentVol + 0.05f);
+
+                int newVolPercent = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
+                SendOverlayNotification($"Volume Up: {newVolPercent}%");
+            }
+            catch (Exception ex) { Debug.WriteLine($"[Shortcut Error] Volume Up failed: {ex.Message}"); }
+        }
+
+        private void VolumeDown()
+        {
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                float currentVol = device.AudioEndpointVolume.MasterVolumeLevelScalar;
+                device.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Max(0.0f, currentVol - 0.05f);
+
+                int newVolPercent = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
+                SendOverlayNotification($"Volume Down: {newVolPercent}%");
+            }
+            catch (Exception ex) { Debug.WriteLine($"[Shortcut Error] Volume Down failed: {ex.Message}"); }
+        }
+
+        private void KillCurrentProcess()
+        {
+            try
+            {
+                IntPtr hwnd = GetForegroundWindow();
+                if (hwnd == IntPtr.Zero) return;
+
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                if (pid == 0 || pid == Process.GetCurrentProcess().Id) return;
+
+                using var proc = Process.GetProcessById((int)pid);
+                string name = proc.ProcessName;
+
+                // Verhindert das Schließen von kritischen Systemprozessen oder GCM selbst
+                if (name.ToLower() == "explorer" || name.ToLower() == "gcmloader") return;
+
+                proc.Kill(true); // true schließt auch Child-Prozesse
+                SendOverlayNotification($"Terminated: {name}");
+                Debug.WriteLine($"[Shortcut] Process {name} killed by user shortcut.");
+
+                // UI Liste aktualisieren, falls GCM gerade sichtbar ist
+                _ = RefreshAppListAsync();
+            }
+            catch (Exception ex) { Debug.WriteLine($"[Shortcut Error] Kill Process failed: {ex.Message}"); }
+        }
 
         private bool _isMasterVolumeFocused = false;
 
@@ -8921,11 +9179,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     // If Key1 is invalid, skip. Key2 can be None.
                     if (flags1 == GamepadButtonFlags.None) return;
 
+                    // --- NEU: Wir bauen den Display-Text exakt in der Reihenfolge von k1 und k2 ---
+                    var textParts = new List<string>();
+
+                    string niceK1 = GetNiceKeyName(k1);
+                    if (niceK1 != null) textParts.Add(niceK1);
+
+                    string niceK2 = GetNiceKeyName(k2);
+                    if (niceK2 != null) textParts.Add(niceK2);
+
+                    string finalDisplayText = string.Join(" + ", textParts);
+                    // -------------------------------------------------------------------------------
+
                     var newShortcut = new RuntimeShortcut
                     {
-                        RequiredButtons = flags1 | flags2, // Combine bitmasks
+                        RequiredButtons = flags1 | flags2, // Combine bitmasks for the logic
                         FunctionName = func,
-                        HoldDurationSeconds = duration
+                        HoldDurationSeconds = duration,
+                        DisplayText = finalDisplayText     // <-- Speichert den Text für unser Overlay!
                     };
 
                     _runtimeShortcuts.Add(newShortcut);
@@ -8965,6 +9236,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 // 4. Map Functions to Actions
+                // 4. Map Functions to Actions
                 _shortcutActions["taskmanager"] = BringTaskManagerToFrontAndFocus;
                 _shortcutActions["switch tab"] = SendWinTab;
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
@@ -8972,6 +9244,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 _shortcutActions["xbox bar"] = xboxbar;
                 _shortcutActions["lossless scaling"] = LosslessScaling;
                 _shortcutActions["xbox keyboard"] = ToggleTouchKeyboard;
+                _shortcutActions["volume up"] = VolumeUp;
+                _shortcutActions["shortcut overlay"] = ToggleGlobalShortcutOverlay;//VolumeUp;
+                _shortcutActions["volume down"] = VolumeDown;
+                _shortcutActions["kill process"] = KillCurrentProcess;
             }
             catch (Exception ex)
             {
@@ -9133,6 +9409,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void HandleGamepadInput(GamepadButtonFlags newPresses, bool stickMovedLeft, bool stickMovedRight, bool stickMovedUp, bool stickMovedDown, int controllerIndex)
         {
+            if (_globalShortcutOverlay != null || _isOverlayClosing)
+            {
+                // Only trigger close if we aren't already closing
+                if ((newPresses & GamepadButtonFlags.B) != 0 && !_isOverlayClosing)
+                {
+                    DispatcherQueue.TryEnqueue(() => CloseGlobalShortcutOverlay());
+                }
+
+                return; // Block other inputs to the list underneath
+            }
+
             // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
             if (!IsWindowInForeground()) return;
 

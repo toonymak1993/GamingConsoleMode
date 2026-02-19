@@ -51,7 +51,7 @@
                 <StackPanel Grid.Column="1" Spacing="6">
                     <TextBlock Text="Guide Button Setup Note" FontWeight="Bold" FontSize="14"/>
                     <TextBlock Text="Important: To use the Guide button, you must disable the 'Open Game Bar using Guide button' option in Windows Settings. Additionally, check Steam Big Picture settings (Settings > Controller > Guide Button Chord Layout). We recommend downloading and applying the community layout 'gamingconsolemode' (or unbinding the action manually) to prevent Steam from intercepting the input. Failure to do so may result in double inputs. This is a one-time setup." 
-                               Opacity="0.8" FontSize="13" TextWrapping="Wrap" LineHeight="20"/>
+                               Opacity="0.8" FontSize="10" TextWrapping="Wrap" LineHeight="20"/>
                 </StackPanel>
             </Grid>
         </Border>
