@@ -5,15 +5,11 @@ using System.Security.Principal;
 using System.Threading;
 using LaunchActivatedEventArgs = Microsoft.UI.Xaml.LaunchActivatedEventArgs;
 
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
-
-
-
 namespace gcmloader
 {
     public partial class App : Application
     {
+        // WICHTIG: Statische Variable, damit wir das Fenster von überall steuern können
         public static MainWindow m_window;
 
         private static Mutex _mutex = null;
@@ -26,34 +22,52 @@ namespace gcmloader
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
-            // 1. Prüfen, ob bereits eine Instanz der App läuft.
-            bool isFirstInstance;
-            _mutex = new Mutex(true, AppName, out isFirstInstance);
+            // 1. Single Instance Check (Mutex)
+           bool isFirstInstance;
+           _mutex = new Mutex(true, AppName, out isFirstInstance);
             if (!isFirstInstance)
             {
-                Environment.Exit(0); // Beenden, wenn schon eine Instanz da ist.
+                Environment.Exit(0);
                 return;
             }
 
-            // 2. Prüfen, ob diese erste Instanz Admin-Rechte hat.
+             //2. Admin-Rechte Check
             if (!IsAdministrator())
             {
-                RestartAsAdmin(); // Wenn nicht, als Admin neu starten...
-                Environment.Exit(0); // ...und diese Instanz sofort beenden.
+                RestartAsAdmin();
+                Environment.Exit(0);
                 return;
             }
 
+            // 3. Toast Notification Setup (Optional)
             CommunityToolkit.WinUI.Notifications.ToastNotificationManagerCompat.OnActivated += (toastArgs) =>
             {
-                // Hier könnte man Code ausführen, wenn jemand auf den Toast klickt.
-                // Lassen wir erst mal leer.
+                // Hier könnte Logik für Toast-Klicks rein
             };
 
-            // Nur wenn beide Prüfungen bestanden sind, wird das Fenster erstellt.
-
-            //AllyHardwareControl.InitializeAllyButtons();
+            // 4. Hauptfenster erstellen
             m_window = new MainWindow();
             m_window.Activate();
+        }
+
+        /* * DOCUMENTATION:
+         * Dies ist die entscheidende Methode für deinen Skalierungs-Fix.
+         * Da WinUI 3 oft das Layout bei DPI-Wechseln (100% -> 150%) intern "vergisst",
+         * schließen wir das alte Fenster und bauen ein komplett neues auf.
+         * Nur so wird die neue Windows-Skalierung garantiert zu 100% übernommen.
+         */
+        public static void RebuildMainWindow()
+        {
+            var oldWindow = m_window;
+
+            // Neue Instanz erstellen - diese liest die DPI beim Start frisch aus
+            m_window = new MainWindow();
+            m_window.Activate();
+
+            // Die alte Instanz sauber schließen
+            oldWindow?.Close();
+
+            Debug.WriteLine("[GCM] MainWindow wurde aufgrund von Skalierungsänderung neu aufgebaut.");
         }
 
         private static bool IsAdministrator()

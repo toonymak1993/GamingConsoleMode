@@ -8,6 +8,8 @@
     mc:Ignorable="d"
     Background="#FF1E1E1E">
 
+    
+    
     <ScrollViewer VerticalScrollBarVisibility="Auto">
 
         <StackPanel Padding="24" Spacing="24">
