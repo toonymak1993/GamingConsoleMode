@@ -6618,17 +6618,42 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             LauncherAreaPanel.Children.Add(mainCard);
             _launcherAreaButtons.Add(mainCard);
 
-            // 2. DISCORD (Wird klein erstellt: 170x170)
-            //var discordItem = new LauncherCardItem
-           // {
-             //   Name = "Discord",
-              //  ImagePath = "ms-appx:///Assets/discord.png",
-              //  TapAction = (s, e) => { MakeSelfNonTopmost(); StartDiscord(); PlayActivationSound(); }
-            //};
-           // var discordCard = CreateLauncherCard(discordItem);
-            //LauncherAreaPanel.Children.Add(discordCard);
-            //_launcherAreaButtons.Add(discordCard);
+            try
+            {
+                bool exePath = AppSettings.Load<bool>("show_discord");
+                if (exePath == true)
+                {
+                    // 2. DISCORD (Wird klein erstellt: 170x170)
+                   var discordItem = new LauncherCardItem
+                    {
+                      Name = "Discord",
+                    ImagePath = "ms-appx:///Assets/discord.png",
+                     TapAction = (s, e) => { MakeSelfNonTopmost(); StartDiscord(); PlayActivationSound(); }
+                    };
+                    var discordCard = CreateLauncherCard(discordItem);
+                   LauncherAreaPanel.Children.Add(discordCard);
+                   _launcherAreaButtons.Add(discordCard);
+                }
+                else
+                {
+                   
 
+                }
+            }
+            catch
+            {
+                var discordItem = new LauncherCardItem
+                {
+                    Name = "Discord",
+                    ImagePath = "ms-appx:///Assets/discord.png",
+                    TapAction = (s, e) => { MakeSelfNonTopmost(); StartDiscord(); PlayActivationSound(); }
+                };
+                var discordCard = CreateLauncherCard(discordItem);
+                LauncherAreaPanel.Children.Add(discordCard);
+                _launcherAreaButtons.Add(discordCard);
+
+                AppSettings.Save("show_discord", true);
+            }
             // 3. DIE 5 CUSTOM CARDS (Alle klein: 170x170)
             for (int i = 1; i <= 5; i++)
             {
@@ -8446,6 +8471,83 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion // TaskManager
         #region Gamepad/Keyboard_Navigation
+        public static void DisableWindowsControllerShortcuts()
+        {
+            try
+            {
+                // 1. Verhindert, dass der Guide-Button die Game Bar oder die Taskansicht (Alt+Tab) öffnet
+                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\GameBar"))
+                {
+                    if (key != null)
+                    {
+                        // Schaltet "Spieleleiste mit dieser Taste auf einem Controller öffnen" aus
+                        key.SetValue("UseNexusForGameBarEnabled", 0, Microsoft.Win32.RegistryValueKind.DWord);
+                        key.SetValue("ShowStartupPanel", 0, Microsoft.Win32.RegistryValueKind.DWord);
+                    }
+                }
+
+                // 2. Schaltet das GameDVR Overlay (Hintergrundaufzeichnung) auf Systemebene ab
+                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\GameDVR"))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue("AppCaptureEnabled", 0, Microsoft.Win32.RegistryValueKind.DWord);
+                    }
+                }
+
+                Debug.WriteLine("[System] Windows Controller Shortcuts (Game Bar / Task View) erfolgreich deaktiviert.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[System] Fehler beim Deaktivieren der Controller Shortcuts: {ex.Message}");
+            }
+        }
+        public static void NukeWindowsGuideButton()
+        {
+            try
+            {
+                // 1. Töte die Game Bar Prozesse, die versteckt im Hintergrund lauern
+                string[] processesToKill = { "GameBar", "GameBarFTServer", "bcastdvr" };
+                foreach (string p in processesToKill)
+                {
+                    foreach (var proc in Process.GetProcessesByName(p))
+                    {
+                        try { proc.Kill(); } catch { }
+                    }
+                }
+
+                // 2. Deaktiviere den Dienst, der den Guide-Button an Windows weiterleitet!
+                // Da GCM "Secret XInput #100" nutzt, können WIR den Button trotzdem noch lesen!
+                var psiDisable = new ProcessStartInfo
+                {
+                    FileName = "sc.exe",
+                    Arguments = "config XboxGipSvc start= disabled",
+                    UseShellExecute = true,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    Verb = "runas" // Braucht Admin-Rechte
+                };
+                Process.Start(psiDisable)?.WaitForExit();
+
+                var psiStop = new ProcessStartInfo
+                {
+                    FileName = "sc.exe",
+                    Arguments = "stop XboxGipSvc",
+                    UseShellExecute = true,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    Verb = "runas"
+                };
+                Process.Start(psiStop)?.WaitForExit();
+
+                Debug.WriteLine("[System] Windows Xbox-Dienst blockiert. Guide-Button gehört jetzt GCM!");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[System] Fehler beim Blockieren des Guide-Buttons: {ex.Message}");
+            }
+        }
+
         #region shortcuts
         #region shortcut overlay
         // --- HELPER: Macht aus den Config-Strings schöne Anzeige-Namen ---

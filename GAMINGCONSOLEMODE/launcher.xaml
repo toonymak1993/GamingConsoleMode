@@ -114,20 +114,6 @@
                                     <ToggleSwitch x:Name="use_gfn" Grid.Column="2" Toggled="use_gfn_Toggled" MinWidth="0" Margin="-80,-5,-10,-5"/>
                                 </Grid>
                             </Border>
-
-                            <Border Style="{StaticResource LauncherItemBorderStyle}">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Image Source="/Assets/launcher/custom_logo.png" Width="24" Height="24"/>
-                                    <TextBlock Text="Custom" Grid.Column="1" VerticalAlignment="Center" Margin="15,0" FontWeight="SemiBold"/>
-                                    <ToggleSwitch x:Name="use_custom" Grid.Column="2" Toggled="use_custom_Toggled" MinWidth="0" Margin="-80,-5,-10,-5"/>
-                                </Grid>
-                            </Border>
-
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -157,31 +143,6 @@
                             <HyperlinkButton Content="Download Steam" NavigateUri="https://store.steampowered.com/about/download" HorizontalAlignment="Center"/>
                         </StackPanel>
 
-                        <Border Background="#2D2D30" CornerRadius="8" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="20">
-                            <StackPanel Spacing="15">
-                                <TextBlock Text="Executable Path" FontWeight="SemiBold" Foreground="White"/>
-
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBox x:Name="textbox_steam_path" 
-                                             TextChanged="textbox_steam_path_TextChanged" 
-                                             PlaceholderText="C:\Program Files (x86)\Steam\steam.exe"
-                                             VerticalAlignment="Center"/>
-
-                                    <Button x:Name="pichsteampath" Grid.Column="1" Click="pichsteampath_Click" Style="{StaticResource AccentButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="Browse"/>
-                                            <FontIcon Glyph="&#xE8E5;" FontFamily="Segoe MDL2 Assets" FontSize="12"/>
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                                <TextBlock x:Name="textbox_select_steam_path" Visibility="Collapsed"/>
-                            </StackPanel>
-                        </Border>
                     </StackPanel>
                 </Grid>
 
@@ -201,25 +162,7 @@
                             <HyperlinkButton Content="Download Playnite" NavigateUri="https://playnite.link/" HorizontalAlignment="Center"/>
                         </StackPanel>
 
-                        <Border Background="#2D2D30" CornerRadius="8" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="20">
-                            <StackPanel Spacing="15">
-                                <TextBlock Text="Executable Path" FontWeight="SemiBold" Foreground="White"/>
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="textbox_playnite_path" TextChanged="textbox_playnite_path_TextChanged" PlaceholderText="Path to Playnite.FullscreenApp.exe"/>
-                                    <Button x:Name="pichplaynitepath" Grid.Column="1" Click="pichplaynitepath_Click" Style="{StaticResource AccentButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="Browse"/>
-                                            <FontIcon Glyph="&#xE8E5;" FontFamily="Segoe MDL2 Assets" FontSize="12"/>
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                                <TextBlock x:Name="textbox_select_playnite_path" Visibility="Collapsed"/>
-                            </StackPanel>
-                        </Border>
+                      
                     </StackPanel>
                 </Grid>
 
@@ -257,64 +200,10 @@
                             <TextBlock Text="Stream your games via cloud." FontSize="14" Foreground="#AAAAAA" HorizontalAlignment="Center"/>
                         </StackPanel>
 
-                        <Border Background="#2D2D30" CornerRadius="8" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="20">
-                            <StackPanel Spacing="15">
-                                <TextBlock Text="Executable Path" FontWeight="SemiBold" Foreground="White"/>
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="textbox_gfn_path" TextChanged="textbox_gfn_path_TextChanged" PlaceholderText="Path to GeForceNow.exe"/>
-                                    <Button x:Name="pickgfnpath" Grid.Column="1" Click="pickgfnpath_Click" Style="{StaticResource AccentButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="Browse"/>
-                                            <FontIcon Glyph="&#xE8E5;" FontFamily="Segoe MDL2 Assets" FontSize="12"/>
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                                <TextBlock x:Name="textbox_select_gfn_path" Visibility="Collapsed"/>
-                            </StackPanel>
-                        </Border>
+
                     </StackPanel>
                 </Grid>
 
-                <Grid x:Name="CustomPanel" Visibility="Collapsed">
-                    <Grid.Background>
-                        <RadialGradientBrush Center="0.5,0.3" GradientOrigin="0.5,0.3" RadiusX="0.8" RadiusY="0.8">
-                            <GradientStop Color="#2A004A" Offset="0"/>
-                            <GradientStop Color="#121212" Offset="1"/>
-                        </RadialGradientBrush>
-                    </Grid.Background>
-
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="30" MaxWidth="600">
-                        <StackPanel Spacing="10" HorizontalAlignment="Center">
-                            <Image Source="/Assets/launcher/custom_logo.png" Width="100" Height="100" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Custom Launcher" FontSize="32" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Run any application as your launcher." FontSize="14" Foreground="#AAAAAA" HorizontalAlignment="Center"/>
-                        </StackPanel>
-
-                        <Border Background="#2D2D30" CornerRadius="8" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="20">
-                            <StackPanel Spacing="15">
-                                <TextBlock Text="Executable Path" FontWeight="SemiBold" Foreground="White"/>
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="textbox_custom_path" TextChanged="textbox_custom_path_TextChanged" PlaceholderText="Select any .exe file"/>
-                                    <Button x:Name="pichcustompath" Grid.Column="1" Click="pichcustompath_Click" Style="{StaticResource AccentButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="Browse"/>
-                                            <FontIcon Glyph="&#xE8E5;" FontFamily="Segoe MDL2 Assets" FontSize="12"/>
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                                <TextBlock x:Name="textbox_select_custom_path" Visibility="Collapsed"/>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </Grid>
 
             </Grid>
         </SplitView>

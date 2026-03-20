@@ -51,7 +51,7 @@ namespace GAMINGCONSOLEMODE
                 // Ignore if API key setting doesn't exist
             }
 
-            LoadShellVisibilitySettings();
+            LoadToggleSettings();
         }
 
         #region SteamGridDB
@@ -269,6 +269,54 @@ namespace GAMINGCONSOLEMODE
         }
         #endregion
 
+        #region settingsframe
+        private void LoadToggleSettings()
+        {
+            // 1. Taskbar Setting laden (Standard: Aus / false)
+            try
+            {
+                TaskbarToggle.IsOn = AppSettings.Load<bool>("enable_taskbar");
+            }
+            catch
+            {
+                TaskbarToggle.IsOn = false;
+                AppSettings.Save("enable_taskbar", false);
+            }
+
+            // 2. Discord Setting laden (Standard: An / true, damit der Button erstmal da ist)
+            try
+            {
+                DiscordToggle.IsOn = AppSettings.Load<bool>("show_discord");
+            }
+            catch
+            {
+                DiscordToggle.IsOn = true;
+                AppSettings.Save("show_discord", true);
+            }
+        }
+
+        // --- EVENT HANDLER FÜR DIE SCHALTER ---
+
+        private void Taskbar_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleSwitch toggle)
+            {
+                AppSettings.Save("enable_taskbar", toggle.IsOn);
+                Debug.WriteLine($"[Settings] 'enable_taskbar' gespeichert: {toggle.IsOn}");
+            }
+        }
+
+        private void Discord_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleSwitch toggle)
+            {
+                AppSettings.Save("show_discord", toggle.IsOn);
+                Debug.WriteLine($"[Settings] 'show_discord' gespeichert: {toggle.IsOn}");
+            }
+        }
+
+        #endregion
+
         private void Startmenu_Toggled(object sender, RoutedEventArgs e)
         {
             // This event is triggered when the "Enable Startmenu" toggle is changed.
@@ -280,30 +328,7 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        private void Taskbar_Toggled(object sender, RoutedEventArgs e)
-        {
-            // This event is triggered when the "Enable Taskbar" toggle is changed.
-            if (sender is ToggleSwitch toggle)
-            {
-                bool isEnabled = toggle.IsOn;
-                AppSettings.Save("enable_taskbar", isEnabled);
-                Debug.WriteLine($"Setting 'enable_taskbar' saved: {isEnabled}");
-            }
-        }
 
-        private void LoadShellVisibilitySettings()
-        {
-            try
-            {
-                // Find the toggle in XAML and set its state from the saved setting
-                Taskbar.IsOn = AppSettings.Load<bool>("enable_taskbar");
-            }
-            catch
-            {
-                // If setting doesn't exist, default to false (Disabled)
-                Taskbar.IsOn = false;
-                AppSettings.Save("enable_taskbar", false); // Save the default
-            }
-        }
+      
     }
 }
