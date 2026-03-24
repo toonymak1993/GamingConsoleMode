@@ -25,7 +25,7 @@ namespace GAMINGCONSOLEMODE
 
         string owner = "toonymak1993";      // The owner of the GitHub repository.
         string repo = "GameConsoleMode";    // The name of the repository.
-        string currentVersion = "2.4.3";    // The current version of this application. Remember to change this for new releases.
+        string currentVersion = "2.5.1";    // The current version of this application. Remember to change this for new releases.
 
         public MainWindow()
         {

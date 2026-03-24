@@ -31,43 +31,10 @@ namespace GAMINGCONSOLEMODE
 
             try
             {
-                // --- 1. GFN PFAD ---
-                try
-                {
-                    string gfnlauncherpath = AppSettings.Load<string>("gfnlauncherpath");
-                    if (string.IsNullOrEmpty(gfnlauncherpath))
-                    {
-                        string roamingPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                        gfnlauncherpath = System.IO.Path.Combine(roamingPath, @"Microsoft\Windows\Start Menu\Programs\NVIDIA GeForce NOW.lnk");
-                        AppSettings.Save("gfnlauncherpath", gfnlauncherpath);
-                    }
-                    textbox_gfn_path.Text = gfnlauncherpath;
-                }
-                catch { }
+             
+        
 
-                // --- 2. STEAM PFAD ---
-                try
-                {
-                    string steamlauncherpath = AppSettings.Load<string>("steamlauncherpath");
-                    textbox_steam_path.Text = steamlauncherpath ?? "";
-                }
-                catch { }
-
-                // --- 3. PLAYNITE PFAD ---
-                try
-                {
-                    string playnitelauncherpath = AppSettings.Load<string>("playnitelauncherpath");
-                    textbox_playnite_path.Text = playnitelauncherpath ?? "";
-                }
-                catch { }
-
-                // --- 4. CUSTOM PFAD ---
-                try
-                {
-                    string customlauncherpath = AppSettings.Load<string>("customlauncherpath");
-                    textbox_custom_path.Text = customlauncherpath ?? "";
-                }
-                catch { }
+             
 
                 // --- 5. SWITCHES SETZEN ---
                 try
@@ -79,7 +46,6 @@ namespace GAMINGCONSOLEMODE
                         case "steam":
                             use_steam_bp.IsOn = true;
                             use_playnite.IsOn = false;
-                            use_custom.IsOn = false;
                             use_xbox.IsOn = false;
                             use_gfn.IsOn = false;
                             break;
@@ -87,13 +53,11 @@ namespace GAMINGCONSOLEMODE
                         case "playnite":
                             use_playnite.IsOn = true;
                             use_steam_bp.IsOn = false;
-                            use_custom.IsOn = false;
                             use_xbox.IsOn = false;
                             use_gfn.IsOn = false;
                             break;
 
                         case "custom":
-                            use_custom.IsOn = true;
                             use_playnite.IsOn = false;
                             use_steam_bp.IsOn = false;
                             use_xbox.IsOn = false;
@@ -102,7 +66,6 @@ namespace GAMINGCONSOLEMODE
 
                         case "xbox":
                             use_xbox.IsOn = true;
-                            use_custom.IsOn = false;
                             use_playnite.IsOn = false;
                             use_steam_bp.IsOn = false;
                             use_gfn.IsOn = false;
@@ -110,7 +73,6 @@ namespace GAMINGCONSOLEMODE
 
                         case "gfn":
                             use_gfn.IsOn = true;
-                            use_custom.IsOn = false;
                             use_playnite.IsOn = false;
                             use_steam_bp.IsOn = false;
                             use_xbox.IsOn = false;
@@ -121,7 +83,6 @@ namespace GAMINGCONSOLEMODE
                             AppSettings.Save("launcher", launcher);
                             use_steam_bp.IsOn = true;
                             use_playnite.IsOn = false;
-                            use_custom.IsOn = false;
                             use_xbox.IsOn = false;
                             use_gfn.IsOn = false;
                             break;
@@ -129,7 +90,6 @@ namespace GAMINGCONSOLEMODE
 
                     SteamPanel.Visibility = (launcher == "steam") ? Visibility.Visible : Visibility.Collapsed;
                     PlaynitePanel.Visibility = (launcher == "playnite") ? Visibility.Visible : Visibility.Collapsed;
-                    CustomPanel.Visibility = (launcher == "custom") ? Visibility.Visible : Visibility.Collapsed;
                     XboxPanel.Visibility = (launcher == "xbox") ? Visibility.Visible : Visibility.Collapsed;
                     gfnPanel.Visibility = (launcher == "gfn") ? Visibility.Visible : Visibility.Collapsed;
                 }
@@ -176,7 +136,6 @@ namespace GAMINGCONSOLEMODE
 
             if (use_steam_bp.IsOn == false &
                 use_playnite.IsOn == false &
-                use_custom.IsOn == false &
                 use_xbox.IsOn == false &
                 use_gfn.IsOn == false)
             {
@@ -192,11 +151,7 @@ namespace GAMINGCONSOLEMODE
         #region Events
 
         #region Steam Events
-        private void textbox_steam_path_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            AppSettings.Save("steamlauncherpath", textbox_steam_path.Text);
-        }
+      
 
         private async void use_steam_bp_Toggled(object sender, RoutedEventArgs e)
         {
@@ -266,11 +221,7 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        private void textbox_playnite_path_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            AppSettings.Save("playnitelauncherpath", textbox_playnite_path.Text);
-        }
+       
         #endregion
 
         #region Xbox Events
@@ -302,44 +253,13 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        private async void use_custom_Toggled(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
+       
 
-            if (use_custom.IsOn == true)
-            {
-                AppSettings.Save("launcher", "custom");
-                InitializeUI();
-            }
-            else
-            {
-                await CheckLauncherActivatedAsync();
-                CustomPanel.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        private void textbox_custom_path_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            AppSettings.Save("customlauncherpath", textbox_custom_path.Text);
-        }
+       
         #endregion
 
         #region gfn Events
-        private void pickgfnpath_Click(object sender, RoutedEventArgs e)
-        {
-            string exepath = GetExePath();
-            if (exepath == "none") return;
-            textbox_gfn_path.Text = exepath;
-            AppSettings.Save("gfnlauncherpath", exepath);
-        }
-
-        private void textbox_gfn_path_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            AppSettings.Save("gfnlauncherpath", textbox_gfn_path.Text);
-        }
-
+  
         private async void use_gfn_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing) return;

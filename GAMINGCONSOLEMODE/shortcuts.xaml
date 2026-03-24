@@ -4,21 +4,59 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:local="using:GAMINGCONSOLEMODE"
     mc:Ignorable="d">
+
+    <Page.Resources>
+        <local:BoolToVisibilityConverter x:Key="BoolToVis"/>
+
+        <DataTemplate x:Key="ButtonIconTemplate" x:DataType="local:ButtonOption">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="{x:Bind Value}" 
+                           VerticalAlignment="Center" 
+                           Visibility="{x:Bind ShowText, Converter={StaticResource BoolToVis}}"/>
+
+                <StackPanel Orientation="Horizontal" Spacing="8" 
+                            Visibility="{x:Bind ShowIcons, Converter={StaticResource BoolToVis}}">
+                    <Image Source="{x:Bind XboxIcon}" Width="24" Height="24" VerticalAlignment="Center"/>
+                    <Image Source="{x:Bind PlayStationIcon}" Width="24" Height="24" VerticalAlignment="Center"/>
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+    </Page.Resources>
 
     <Grid Padding="32">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Spacing="4" Margin="0,0,0,32">
+        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,24">
             <TextBlock Text="Controller Shortcuts" FontSize="28" FontWeight="Bold" FontFamily="Segoe UI Variable Display"/>
             <TextBlock Text="Customize your experience with custom button combos." 
                        Foreground="{ThemeResource SystemControlPageTextBaseMediumBrush}" FontSize="14"/>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0">
+        <Border Grid.Row="1" Margin="0,0,0,24" CornerRadius="8" 
+                Background="#15FFFFFF" BorderBrush="#25FFFFFF" BorderThickness="1" Padding="16">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <FontIcon Glyph="&#xE7BA;" FontSize="24" VerticalAlignment="Top" Foreground="#FFCC00" Margin="0,2,0,0" FontFamily="{StaticResource SymbolThemeFontFamily}"/>
+
+                <StackPanel Grid.Column="1" Spacing="6">
+                    <TextBlock Text="Guide Button Setup Note" FontWeight="Bold" FontSize="14"/>
+                    <TextBlock Text="Important: To use the Guide button, you must disable the 'Open Game Bar using Guide button' option in Windows Settings. Additionally, check Steam Big Picture settings (Settings > Controller > Guide Button Chord Layout). We recommend downloading and applying the community layout 'gamingconsolemode' (or unbinding the action manually) to prevent Steam from intercepting the input. Failure to do so may result in double inputs. This is a one-time setup." 
+                               Opacity="0.8" FontSize="10" TextWrapping="Wrap" LineHeight="20"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0">
             <ItemsControl x:Name="FunctionsControl">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
@@ -64,7 +102,9 @@
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="Primary Button" FontSize="12" FontWeight="SemiBold" Opacity="0.8"/>
                                         <ComboBox ItemsSource="{Binding AvailableButtons}" 
-                                                  SelectedItem="{Binding Key1, Mode=TwoWay}"
+                                                  SelectedValue="{Binding Key1, Mode=TwoWay}"
+                                                  SelectedValuePath="Value"
+                                                  ItemTemplate="{StaticResource ButtonIconTemplate}"
                                                   SelectionChanged="ControlChanged" 
                                                   HorizontalAlignment="Stretch"/>
                                     </StackPanel>
@@ -72,7 +112,9 @@
                                     <StackPanel Grid.Column="1" Spacing="8">
                                         <TextBlock Text="Secondary Button" FontSize="12" FontWeight="SemiBold" Opacity="0.8"/>
                                         <ComboBox ItemsSource="{Binding AvailableButtons}" 
-                                                  SelectedItem="{Binding Key2, Mode=TwoWay}"
+                                                  SelectedValue="{Binding Key2, Mode=TwoWay}"
+                                                  SelectedValuePath="Value"
+                                                  ItemTemplate="{StaticResource ButtonIconTemplate}"
                                                   SelectionChanged="ControlChanged" 
                                                   HorizontalAlignment="Stretch"/>
                                     </StackPanel>

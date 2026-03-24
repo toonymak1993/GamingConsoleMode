@@ -103,7 +103,7 @@ Margin="0,0,20,0">
            VerticalAlignment="Center"/>
 
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="Support us on Patreon"
+                                <TextBlock Text="Unlock premium feature"
                    FontSize="18"
                    FontWeight="Bold"
                    Foreground="White"/>
