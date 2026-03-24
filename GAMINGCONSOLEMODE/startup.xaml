@@ -206,28 +206,6 @@
                             </Grid>
                         </Button>
 
-                        <Button x:Name="joyxoffbutton" Click="joyxoffbutton_Click" Tag="DISABLED" Style="{StaticResource ModernCardButtonStyle}">
-                            <Grid Padding="15">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-
-                                <Grid Grid.Row="0">
-                                    <Image Source="/functions/joyxoff_logo.png" Width="32" Height="32" HorizontalAlignment="Left"/>
-                                    <Border x:Name="joyxoffstate_color" Background="Orange" CornerRadius="10" Padding="8,2" HorizontalAlignment="Right">
-                                        <TextBlock x:Name="joyxoffstate_text" Text="DISABLED" Foreground="White" FontSize="10" FontWeight="Bold"/>
-                                    </Border>
-                                </Grid>
-
-                                <StackPanel Grid.Row="2">
-                                    <TextBlock Text="JoyXOff" FontSize="18" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
-                                    <TextBlock Text="Integrate your keyboard and mouse in one place." FontSize="12" Foreground="#AAAAAA" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"/>
-                                </StackPanel>
-                            </Grid>
-                        </Button>
-
                         <Button x:Name="deckyloaderbutton" Click="deckyloaderbutton_Click" Tag="DISABLED" Style="{StaticResource ModernCardButtonStyle}">
                             <Grid Padding="15">
                                 <Grid.RowDefinitions>
@@ -370,59 +348,80 @@
 
                     <Grid x:Name="DetailContentGrid" Grid.Row="1">
 
-                        <Grid x:Name="JoyxoffPanel" Visibility="Collapsed">
-                            <ScrollViewer>
-                                <Grid Padding="24" MaxWidth="800" HorizontalAlignment="Stretch">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                                        <controls:SettingsCard Description="Enable JoyXoff in GCM mode" Header="ON/OFF">
-                                            <ToggleSwitch x:Name="use_joyxoff" Toggled="use_joyxoff_Toggled" HorizontalAlignment="Right"/>
-                                        </controls:SettingsCard>
-
-                                        <controls:SettingsCard Header="INSTALLATION STATUS">
-                                            <controls:SettingsCard.Description>
-                                                <Border x:Name="border_install_state_joyxoff" Background="Green" CornerRadius="4" Padding="8,4" HorizontalAlignment="Left">
-                                                    <TextBlock x:Name="text_install_state_joyxoff" Text="INSTALLED" Foreground="White" FontWeight="Bold"/>
-                                                </Border>
-                                            </controls:SettingsCard.Description>
-                                            <Button x:Name="button_install_joyxoff" Content="DOWNLOAD" Click="button_install_joyxoff_Click"/>
-                                        </controls:SettingsCard>
-
-                                        <TextBlock Text="Documentation" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,10"/>
-                                        <muxc:InfoBar IsOpen="True" Severity="Warning" Title="Windows Only" Message="Could collide in GCM mode" Margin="0,0,0,10"/>
-                                        <controls:SettingsCard Header="Installation instructions" Description="Please extract all files into a folder and run the executable inside. Then, return to GCM."/>
-                                        <controls:SettingsCard Header="Official Website">
-                                            <controls:SettingsCard.Description>
-                                                <HyperlinkButton Content="Learn more about JoyXoff" NavigateUri="https://wiki.joyxoff.com/wiki/Main_Page"/>
-                                            </controls:SettingsCard.Description>
-                                            <HyperlinkButton Content="Link to Website" NavigateUri="https://joyxoff.com/en/"/>
-                                        </controls:SettingsCard>
-                                    </StackPanel>
-                                </Grid>
-                            </ScrollViewer>
-                        </Grid>
-
                         <Grid x:Name="preloadlist" Visibility="Collapsed">
                             <ScrollViewer>
                                 <Grid Padding="24" MaxWidth="800" HorizontalAlignment="Stretch">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                                        <controls:SettingsCard Description="Enable Preload List in GCM mode" Header="ON/OFF">
+                                    <StackPanel Spacing="16">
+                                        <TextBlock Text="Startup Applications" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,4"/>
+
+                                        <controls:SettingsCard Description="Enable custom startup apps when GCM starts" Header="Enable Preload List">
                                             <ToggleSwitch x:Name="use_preloadlist" Toggled="use_preloadlist_Toggled" HorizontalAlignment="Right"/>
                                         </controls:SettingsCard>
-                                        <controls:SettingsCard Header="INSTALLATION STATUS">
-                                            <controls:SettingsCard.Description>
-                                                <Border x:Name="border_install_state_preloadlist" Background="Green" CornerRadius="4" Padding="8,4">
-                                                    <TextBlock x:Name="text_install_state_preloadlist" Text="INSTALLED" Foreground="White" FontWeight="Bold"/>
-                                                </Border>
-                                            </controls:SettingsCard.Description>
-                                        </controls:SettingsCard>
-                                        <controls:SettingsCard Header="Preload List Creation" Description="Use button to create/open .txt file.">
-                                            <StackPanel Spacing="10">
-                                                <Button x:Name="btn_create_or_open_preloadlist" Content="Create / Open list" Click="btn_create_or_open_preloadlist_Click" HorizontalAlignment="Stretch"/>
-                                                <TextBox x:Name="preloadlist_path" Header="Path" IsEnabled="False" TextChanged="preloadlist_path_TextChanged"/>
-                                            </StackPanel>
-                                        </controls:SettingsCard>
+
+                                        <Grid Margin="0,16,0,0">
+                                            <TextBlock Text="Configured Applications" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <Button x:Name="BtnAddPreloadApp" HorizontalAlignment="Right" Click="BtnAddPreloadApp_Click" Style="{StaticResource AccentButtonStyle}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <FontIcon Glyph="&#xE710;" FontSize="14"/>
+                                                    <TextBlock Text="Add App"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+
+                                        <ListView x:Name="PreloadAppListView" SelectionMode="None" Margin="0,8,0,0">
+                                            <ListView.ItemContainerStyle>
+                                                <Style TargetType="ListViewItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Margin" Value="0,0,0,12"/>
+                                                </Style>
+                                            </ListView.ItemContainerStyle>
+
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                                    BorderThickness="1" CornerRadius="8" Padding="16">
+                                                        <StackPanel Spacing="12">
+
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+
+                                                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis"/>
+                                                                    <TextBlock Text="{Binding Path}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,20,0"/>
+                                                                </StackPanel>
+
+                                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                                    <Button Click="BtnBrowsePreloadApp_Click" Tag="{Binding}" ToolTipService.ToolTip="Browse Executable">
+                                                                        <FontIcon Glyph="&#xE8E5;" FontSize="14"/>
+                                                                    </Button>
+                                                                    <Button Click="BtnRemovePreloadApp_Click" Tag="{Binding}" ToolTipService.ToolTip="Remove App">
+                                                                        <FontIcon Glyph="&#xE74D;" FontSize="14" Foreground="Red"/>
+                                                                    </Button>
+                                                                </StackPanel>
+                                                            </Grid>
+
+                                                            <Grid ColumnSpacing="16">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="2*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+
+                                                                <TextBox Header="Launch Parameters" Text="{Binding Arguments, Mode=TwoWay}" PlaceholderText="-silent -minimized" Grid.Column="0" TextChanged="PreloadAppSetting_Changed"/>
+
+                                                                <ToggleSwitch Header="Start Hidden" IsOn="{Binding StartHidden, Mode=TwoWay}" Grid.Column="1" VerticalAlignment="Bottom" Toggled="PreloadAppSetting_Toggled"/>
+                                                            </Grid>
+
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+
                                     </StackPanel>
                                 </Grid>
                             </ScrollViewer>
@@ -503,7 +502,7 @@
                                                 <TextBox x:Name="textbox_startupvideo_path" IsReadOnly="True" PlaceholderText="Path" TextChanged="textbox_startupvideo_path_TextChanged"/>
                                             </StackPanel>
                                         </controls:SettingsCard>
-                                        <controls:SettingsCard Header="Steam Integration" Description="Replaces default Steam intro (WebM only)">
+                                        <controls:SettingsCard Header="Steam Integration" Description="Replaces default Steam intro (WebM only)" Visibility="Collapsed">
                                             <StackPanel Spacing="10">
                                                 <CheckBox x:Name="UseSteamStartupVideo" Content="Use with Steam" Checked="UseSteamStartupVideoCheckBox_Checked" Unchecked="UseSteamStartupVideoCheckBox_Unchecked"/>
                                                 <Button x:Name="Injectstartupvideo_button" Content="Inject Video" Click="Injectstartupvideo_button_Click" Style="{StaticResource AccentButtonStyle}"/>

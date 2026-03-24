@@ -9,6 +9,7 @@ using NAudio.CoreAudioApi;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -41,6 +42,10 @@ namespace GAMINGCONSOLEMODE
 
             updateui();
             InitializeTimer();
+
+            // --- NEU: Liste exakt EINMAL beim Start laden ---
+            InitializePreloadList();
+
             ShowDetailStoryboard = (Storyboard)this.Resources["ShowDetailPanelStoryboard"];
             HideDetailStoryboard = (Storyboard)this.Resources["HideDetailPanelStoryboard"];
 
@@ -79,6 +84,203 @@ namespace GAMINGCONSOLEMODE
             updateui();
         }
 
+        #endregion
+
+        #region preloadlistdata
+        // The data model representing a single app configuration
+        public class PreloadAppEntry
+        {
+            public string Name { get; set; } = "New Application";
+            public string Path { get; set; } = "";
+            public string Arguments { get; set; } = "";
+            public bool StartHidden { get; set; } = false;
+        }
+        // Collection to hold our apps and update the UI automatically
+        private ObservableCollection<PreloadAppEntry> _preloadApps = new ObservableCollection<PreloadAppEntry>();
+
+        // Path to our new JSON save file
+        private string _preloadAppsJsonPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "preloadapps.json");
+
+        // Call this in your constructor to load data and bind it to the ListView
+        private void InitializePreloadList()
+        {
+            PreloadAppListView.ItemsSource = _preloadApps;
+            LoadPreloadApps();
+        }
+        #region preloadlist button
+        // Main toggle to enable or disable the whole feature
+        private void use_preloadlist_Toggled(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Speichert den Status in der settings.toml
+                AppSettings.Save("usepreloadlist", use_preloadlist.IsOn);
+
+                // UI sofort aktualisieren (nur Dashboard-Kachel)
+                if (use_preloadlist.IsOn)
+                {
+                    preloadlistbutton.Tag = "ENABLED";
+                    preloadliststate_color.Background = new SolidColorBrush(Colors.Green);
+                    preloadliststate_text.Text = "ENABLED";
+                }
+                else
+                {
+                    preloadlistbutton.Tag = "DISABLED";
+                    preloadliststate_color.Background = new SolidColorBrush(Colors.Orange);
+                    preloadliststate_text.Text = "DISABLED";
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PreloadList] Problem saving toggle state: {ex.Message}");
+            }
+        }
+
+        // Opens the file picker to add a brand new app to the list
+        private void BtnAddPreloadApp_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Startet auf dem Desktop, da man dort oft Verknüpfungen (.lnk) für Windows-Apps hat
+                string startFolder = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+                string file = FilePicker.ShowDialog(
+                    startFolder,
+                    new string[] { "*" }, // Lässt wirklich JEDES Dateiformat zu
+                    "Alle Dateien (*.*)|*.*|Programme & Skripte (*.exe, *.bat, *.cmd, *.ps1)|*.exe;*.bat;*.cmd;*.ps1|Verknüpfungen & Webseiten (*.lnk, *.url)|*.lnk;*.url",
+                    "Wähle eine App, Verknüpfung oder Datei zum Starten aus"
+                );
+
+                if (!string.IsNullOrEmpty(file) && File.Exists(file))
+                {
+                    string appName = Path.GetFileNameWithoutExtension(file);
+
+                    var newApp = new PreloadAppEntry
+                    {
+                        Name = appName,
+                        Path = file,
+                        Arguments = "",
+                        StartHidden = false
+                    };
+
+                    // Zur UI-Liste hinzufügen
+                    _preloadApps.Add(newApp);
+
+                    // Liste in die JSON-Datei schreiben
+                    SavePreloadApps();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PreloadList] Error adding app: {ex.Message}");
+            }
+        }
+
+        // Opens the file picker to change the path of an EXISTING app in the list
+        private void BtnBrowsePreloadApp_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.Tag is PreloadAppEntry entry)
+            {
+                try
+                {
+                    string startFolder = string.IsNullOrEmpty(entry.Path)
+                        ? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+                        : Path.GetDirectoryName(entry.Path);
+
+                    string file = FilePicker.ShowDialog(
+                        startFolder,
+                        new string[] { "*" }, // Lässt wirklich JEDES Dateiformat zu
+                        "Alle Dateien (*.*)|*.*|Programme & Skripte (*.exe, *.bat, *.cmd, *.ps1)|*.exe;*.bat;*.cmd;*.ps1|Verknüpfungen & Webseiten (*.lnk, *.url)|*.lnk;*.url",
+                        "Wähle eine neue App oder Datei aus"
+                    );
+
+                    if (!string.IsNullOrEmpty(file) && File.Exists(file))
+                    {
+                        // Eintrag aktualisieren
+                        entry.Path = file;
+                        entry.Name = Path.GetFileNameWithoutExtension(file);
+
+                        // UI visuell zum Neuladen zwingen
+                        PreloadAppListView.ItemsSource = null;
+                        PreloadAppListView.ItemsSource = _preloadApps;
+
+                        // Liste in die JSON-Datei schreiben
+                        SavePreloadApps();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[PreloadList] Error browsing for app: {ex.Message}");
+                }
+            }
+        }
+
+        // Removes an app from the list when clicking the trash icon
+        private void BtnRemovePreloadApp_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.Tag is PreloadAppEntry entry)
+            {
+                _preloadApps.Remove(entry);
+                SavePreloadApps();
+            }
+        }
+
+        // Saves automatically when the user types in the arguments box
+        private void PreloadAppSetting_Changed(object sender, TextChangedEventArgs e)
+        {
+            SavePreloadApps();
+        }
+
+        // Saves automatically when the user flips the "Start Hidden" switch
+        private void PreloadAppSetting_Toggled(object sender, RoutedEventArgs e)
+        {
+            SavePreloadApps();
+        }
+
+        // Serializes our list and saves it as a JSON file
+        private void SavePreloadApps()
+        {
+            try
+            {
+                string directory = Path.GetDirectoryName(_preloadAppsJsonPath);
+                if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
+
+                string json = JsonSerializer.Serialize(_preloadApps, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(_preloadAppsJsonPath, json);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PreloadList] Error saving apps: {ex.Message}");
+            }
+        }
+
+        // Reads the JSON file and populates our list on startup
+        private void LoadPreloadApps()
+        {
+            try
+            {
+                if (File.Exists(_preloadAppsJsonPath))
+                {
+                    string json = File.ReadAllText(_preloadAppsJsonPath);
+                    var loadedList = JsonSerializer.Deserialize<List<PreloadAppEntry>>(json);
+
+                    if (loadedList != null)
+                    {
+                        _preloadApps.Clear();
+                        foreach (var app in loadedList)
+                        {
+                            _preloadApps.Add(app);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PreloadList] Error loading apps: {ex.Message}");
+            }
+        }
+
+        #endregion
         #endregion
 
         #region Main UI Update Method
@@ -153,52 +355,6 @@ namespace GAMINGCONSOLEMODE
             catch
             {
                 Debug.WriteLine("Pre-audio GUI error during live update.");
-            }
-            #endregion
-
-            #region JoyXoff
-            string joyxoffExePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Joyxoff", "Joyxoff.exe");
-            try
-            {
-                if (File.Exists(joyxoffExePath))
-                {
-                    text_install_state_joyxoff.Text = "INSTALLED";
-                    border_install_state_joyxoff.Background = new SolidColorBrush(Colors.Green);
-                    use_joyxoff.IsEnabled = true;
-
-                    bool joyxofftogglestatus = AppSettings.Load<bool>("usejoyxoff");
-                    if (joyxofftogglestatus)
-                    {
-                        use_joyxoff.IsOn = true;
-                        // Dashboard Grid
-                        joyxoffbutton.Tag = "ENABLED";
-                        joyxoffstate_color.Background = new SolidColorBrush(Colors.Green);
-                        joyxoffstate_text.Text = "ENABLED";
-                    }
-                    else
-                    {
-                        use_joyxoff.IsOn = false;
-                        // Dashboard Grid
-                        joyxoffbutton.Tag = "DISABLED";
-                        joyxoffstate_color.Background = new SolidColorBrush(Colors.Orange);
-                        joyxoffstate_text.Text = "DISABLED";
-                    }
-                }
-                else
-                {
-                    text_install_state_joyxoff.Text = "NOT INSTALLED";
-                    border_install_state_joyxoff.Background = new SolidColorBrush(Colors.Brown);
-                    use_joyxoff.IsEnabled = false;
-                    use_joyxoff.IsOn = false;
-                    // Dashboard Grid (should be consistent with disabled state)
-                    joyxoffbutton.Tag = "DISABLED";
-                    joyxoffstate_color.Background = new SolidColorBrush(Colors.Orange);
-                    joyxoffstate_text.Text = "DISABLED";
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"JoyXoff UI check failed: {ex.Message}");
             }
             #endregion
 
@@ -436,17 +592,13 @@ namespace GAMINGCONSOLEMODE
             }
             #endregion
 
-            #region Preload List
+            #region Preload List (UPDATED)
             try
             {
                 bool usepreloadlist = AppSettings.Load<bool>("usepreloadlist");
                 if (usepreloadlist)
                 {
-                    text_install_state_preloadlist.Text = "ACTIVATED";
-                    border_install_state_preloadlist.Background = new SolidColorBrush(Colors.Green);
                     use_preloadlist.IsOn = true;
-                    string preloadListFilePath = AppSettings.Load<string>("prealoadlistpath");
-                    preloadlist_path.Text = preloadListFilePath;
 
                     // Dashboard Grid
                     preloadlistbutton.Tag = "ENABLED";
@@ -455,10 +607,7 @@ namespace GAMINGCONSOLEMODE
                 }
                 else
                 {
-                    text_install_state_preloadlist.Text = "DISABLED";
-                    border_install_state_preloadlist.Background = new SolidColorBrush(Colors.Brown);
                     use_preloadlist.IsOn = false;
-                    AppSettings.Save("usepreloadlist", false);
 
                     // Dashboard Grid
                     preloadlistbutton.Tag = "DISABLED";
@@ -470,6 +619,10 @@ namespace GAMINGCONSOLEMODE
             {
                 Debug.WriteLine("Preload list GUI error.");
             }
+            #endregion
+
+            #region Preload List
+
             #endregion
 
             #region BoilR
@@ -741,71 +894,6 @@ namespace GAMINGCONSOLEMODE
         {
             Openpanel("lossless");
             BreadcrumbBar1.ItemsSource = new string[] { "Extensions", "Lossless Scaling" };
-        }
-
-        #endregion
-
-        #region Feature Handlers: Preload List
-
-        private void btn_create_or_open_preloadlist_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                string gcmFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings");
-                Directory.CreateDirectory(gcmFolderPath); // Ensure the folder exists.
-                string preloadListFilePath = Path.Combine(gcmFolderPath, "preloadlist.txt");
-
-                if (!File.Exists(preloadListFilePath))
-                {
-                    File.WriteAllText(preloadListFilePath, "# Add one executable name per line, for example: discord.exe");
-                }
-
-                // Save the path and update the UI.
-                AppSettings.Save("prealoadlistpath", preloadListFilePath);
-                preloadlist_path.Text = preloadListFilePath;
-
-                // Open the file with the default editor.
-                Process.Start(new ProcessStartInfo { FileName = preloadListFilePath, UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                ContentDialog errorDialog = new ContentDialog
-                {
-                    Title = "Error",
-                    Content = $"Could not open the file.\n\n{ex.Message}",
-                    CloseButtonText = "OK",
-                    XamlRoot = this.Content.XamlRoot
-                };
-                _ = errorDialog.ShowAsync();
-            }
-        }
-
-        private void preloadlist_path_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            // This event handler is currently not used.
-        }
-
-        private void use_preloadlist_Toggled(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (use_preloadlist.IsOn)
-                {
-                    AppSettings.Save("usepreloadlist", true);
-                    text_install_state_preloadlist.Text = "ACTIVATED";
-                    border_install_state_preloadlist.Background = new SolidColorBrush(Colors.Green);
-                }
-                else
-                {
-                    AppSettings.Save("usepreloadlist", false);
-                    text_install_state_preloadlist.Text = "DISABLED";
-                    border_install_state_preloadlist.Background = new SolidColorBrush(Colors.Brown);
-                }
-            }
-            catch
-            {
-                Debug.WriteLine("Problem with preload list integration.");
-            }
         }
 
         #endregion
@@ -1415,55 +1503,6 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
-        #endregion
-
-        #region Feature Handlers: JoyXoff
-
-        private void button_uninstall_joyxoff_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo("ms-settings:appsfeatures") { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Error opening Windows settings: " + ex.Message);
-            }
-        }
-
-        private void button_install_joyxoff_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                string baseDownloadUrl = "https://joyxoff.com/download.php?culture=en";
-                string pageContent;
-                using (WebClient wc = new WebClient())
-                {
-                    wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-                    pageContent = wc.DownloadString(baseDownloadUrl);
-                }
-
-                string pattern = @"download\.php\?culture=en&version=([\d\.]+)";
-                var match = Regex.Match(pageContent, pattern);
-                string version = match.Success ? match.Groups[1].Value : "3.63.10.7"; // Fallback version
-                string downloadUrl = $"https://joyxoff.com/download.php?culture=en&version={version}";
-                string downloadFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "joyxoffInstaller");
-                Directory.CreateDirectory(downloadFolder);
-                string fileName = "joyxoff.rar";
-
-                downloadUrl.DownloadFileAsync(downloadFolder, fileName).GetAwaiter().GetResult();
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{downloadFolder}\"") { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("JoyXoff download error: " + ex.Message);
-            }
-        }
-
-        private void use_joyxoff_Toggled(object sender, RoutedEventArgs e)
-        {
-            AppSettings.Save("usejoyxoff", use_joyxoff.IsOn);
-        }
         #endregion
 
         #region Feature Handlers: BoilR

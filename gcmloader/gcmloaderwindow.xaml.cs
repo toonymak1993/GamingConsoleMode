@@ -1,5 +1,8 @@
-﻿using Discord.WebSocket;
+﻿using Discord;
+using Discord.WebSocket;
+using DualSenseAPI;
 using GAMINGCONSOLEMODE;
+using HidSharp;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
@@ -10,18 +13,15 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
-using NAudio.CoreAudioApi.Interfaces;
 using Microsoft.Win32;
 using Microsoft.Win32.TaskScheduler;
 using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
 using SharpDX.XInput;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
-using HidSharp;
-using Windows.UI;
-using Windows.Gaming.Input;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -31,7 +31,6 @@ using System.Media;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Numerics;
-using DualSenseAPI;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
@@ -46,10 +45,12 @@ using Tomlyn;
 using Tomlyn.Model;
 using Vanara.PInvoke;
 using Windows.Devices.Power;
+using Windows.Gaming.Input;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Networking.Connectivity;
 using Windows.System;
+using Windows.UI;
 using static Vanara.PInvoke.Shell32;
 using static Vanara.PInvoke.User32;
 using Application = Microsoft.UI.Xaml.Application;
@@ -4175,91 +4176,107 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
         #endregion rog ally
-        public void prestartlist()
+
+  
+        public class PreloadAppEntry
+        {
+            public string Name { get; set; }
+            public string Path { get; set; }
+            public string Arguments { get; set; }
+            public bool StartHidden { get; set; }
+        }
+
+        // WICHTIG: Die Methode ist jetzt 'async Task', damit wir kurz warten können!
+        public async Task prestartlist()
         {
             try
             {
-                bool prestartlist = AppSettings.Load<bool>("usepreloadlist");
-
-                if (prestartlist == true)
+                bool usePreloadList = AppSettings.Load<bool>("usepreloadlist");
+                if (!usePreloadList)
                 {
-                    string prestartlistpath = AppSettings.Load<string>("prealoadlistpath");
+                    Debug.WriteLine("[PreloadList] Feature ist deaktiviert.");
+                    return;
+                }
 
-                    if (File.Exists(prestartlistpath))
+                string jsonPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "gcmsettings", "preloadapps.json");
+
+                if (!File.Exists(jsonPath)) return;
+
+                string json = File.ReadAllText(jsonPath);
+                var appsToStart = JsonSerializer.Deserialize<List<PreloadAppEntry>>(json);
+
+                if (appsToStart == null || appsToStart.Count == 0) return;
+
+                foreach (var app in appsToStart)
+                {
+                    try
                     {
-                        string[] lines = File.ReadAllLines(prestartlistpath);
+                        if (string.IsNullOrWhiteSpace(app.Path)) continue;
 
-                        foreach (var line in lines)
+                        // --- FALL A: Weblinks ---
+                        if (app.Path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                            app.Path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                         {
-                            string entry = line.Trim();
-
-                            // Skip empty lines or comments
-                            if (string.IsNullOrWhiteSpace(entry) || entry.StartsWith("#"))
-                                continue;
-
-                            try
-                            {
-                                // Open URLs in default browser
-                                if (entry.StartsWith("http://") || entry.StartsWith("https://"))
-                                {
-                                    Process.Start(new ProcessStartInfo
-                                    {
-                                        FileName = entry,
-                                        UseShellExecute = true
-                                    });
-                                }
-                                // Run executable files
-                                else if (entry.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    if (File.Exists(entry))
-                                    {
-                                        Process.Start(new ProcessStartInfo
-                                        {
-                                            FileName = entry,
-                                            UseShellExecute = true
-                                        });
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"Executable not found: {entry}");
-                                    }
-                                }
-                                // Open other files (e.g., images, txt, etc.)
-                                else if (File.Exists(entry))
-                                {
-                                    Process.Start(new ProcessStartInfo
-                                    {
-                                        FileName = entry,
-                                        UseShellExecute = true
-                                    });
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"File not found: {entry}");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                // Log error but continue
-                                Console.WriteLine($"Error with entry '{entry}': {ex.Message}");
-                            }
+                            Process.Start(new ProcessStartInfo { FileName = app.Path, UseShellExecute = true });
+                            continue;
                         }
 
-                        Console.WriteLine("Finished running preload list.");
+                        // --- FALL B: Lokale Programme (.exe, .bat, .lnk) ---
+                        if (File.Exists(app.Path))
+                        {
+                            var psi = new ProcessStartInfo
+                            {
+                                FileName = app.Path,
+                                Arguments = string.IsNullOrWhiteSpace(app.Arguments) ? "" : app.Arguments,
+                                UseShellExecute = true
+                            };
+
+                            // Versuch der App vorher schon zu sagen, dass sie minimiert starten soll
+                            if (app.StartHidden)
+                            {
+                                psi.WindowStyle = ProcessWindowStyle.Minimized;
+                            }
+
+                            Process p = Process.Start(psi);
+
+                            // --- DIE MAGIE: Warten & Hart Minimieren ---
+                            if (app.StartHidden && p != null)
+                            {
+                                // Wir warten bis zu 3 Sekunden, ob die App ein Fenster erstellt
+                                int retries = 0;
+                                while (p.MainWindowHandle == IntPtr.Zero && retries < 30)
+                                {
+                                    await Task.Delay(100);
+                                    p.Refresh();
+                                    retries++;
+                                }
+
+                                // Wenn ein Fenster da ist -> Ab in den Hintergrund damit!
+                                if (p.MainWindowHandle != IntPtr.Zero)
+                                {
+                                    // 7 = SW_SHOWMINNOACTIVE (Minimieren OHNE den Fokus zu klauen!)
+                                    ShowWindow(p.MainWindowHandle, 7);
+                                    Debug.WriteLine($"[PreloadList] {app.Name} wurde in den Hintergrund gezwungen.");
+                                }
+
+                                // GCM sofort wieder dominant in den Vordergrund holen!
+                                await ForceGcmToFront();
+                            }
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        Console.WriteLine("prestartlist not found");
+                        Debug.WriteLine($"[PreloadList] Fehler bei '{app.Name}': {ex.Message}");
                     }
                 }
-                else
-                {
-                    Console.WriteLine("no prestartlist set");
-                }
+
+                // Am Ende zur absoluten Sicherheit: GCM nochmal nach ganz vorne holen
+                await ForceGcmToFront();
+                Debug.WriteLine("[PreloadList] Alle Apps erfolgreich abgearbeitet.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Unhandled error in preload list processing: {ex.Message}");
+                Debug.WriteLine($"[PreloadList] Kritischer Fehler: {ex.Message}");
             }
         }
         public static void preaudio(bool start,bool end)
@@ -4569,37 +4586,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Console.WriteLine("DisplayFusion problem-");
             }
         }
-        static void IsJoyxoffInstalledAndStart()
-        {
-            try
-            {
-                bool joyxofftogglestatus = AppSettings.Load<bool>("usejoyxoff");
-                if (joyxofftogglestatus == true)
-                {
-                    string joyxoffExePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Joyxoff", "Joyxoff.exe");
-                    try
-                    {
-                        if (File.Exists(joyxoffExePath))
-                        {
-                            Process.Start(joyxoffExePath);
-                        }
-                    }
-                    catch
-                    {
-
-                    }
-                }
-                else
-                {
-
-                }
-            }
-            catch
-            {
-
-            }
-
-        }
         static void cssloader()
         {
             try
@@ -4743,10 +4729,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private async void BackToWindows()
         {
+            // 1. Notify the user what is happening
+            SendOverlayNotification("Restoring desktop...");
+
+            // 2. Visual Delay (1.5 seconds) - Gives the feeling of "booting up"
+            await Task.Delay(1500);
+
             // Restore essential settings before restarting Explorer
             TaskbarManager.RestoreOriginalState();
             TaskManagerReEnableServices();
             MakeSelfNonTopmost();
+            MinimizeAllToDesktop();
             Console.WriteLine("Exit-Button clicked. Restoring desktop and exiting app...");
 
             // Unregister to prevent crashes during shutdown
@@ -6009,56 +6002,126 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 string steamExePath = AutoDetectLauncherPath("steam");
                 if (string.IsNullOrWhiteSpace(steamExePath))
-                    throw new FileNotFoundException("Steam konnte auf diesem System nicht automatisch gefunden werden.");
+                    throw new FileNotFoundException("Steam could not be found automatically on this system.");
 
-                // GCM IN DEN HINTERGRUND SCHIEBEN, um Platz für Steam zu machen
+                // Push GCM to the background to make room for Steam
                 IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 SetWindowPos(myHwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
                 bool steamLiefSchon = false;
 
-                // --- FALL A: KALTSTART BEIM BOOTEN (forceRestart = true) ---
-                if (forceRestart)
-                {
-                    Debug.WriteLine("[GCM] Brute-Force Steam Start: Beende alte Instanzen (Kaltstart angefordert)...");
-                    var steamProcs = Process.GetProcessesByName("steam")
-                                            .Concat(Process.GetProcessesByName("steamwebhelper"))
-                                            .ToList();
+                // Check if Steam is already running right at the beginning
+                var steamProc = Process.GetProcessesByName("steam").FirstOrDefault();
+                bool isSteamRunning = steamProc != null;
 
-                    if (steamProcs.Any())
+                // A "Cold Start" is required if explicitly requested (e.g., on boot) OR if Steam is completely closed
+                bool isColdStart = forceRestart || !isSteamRunning;
+
+                // --- DECKY LOADER INTEGRATION ---
+                bool useDeckyLoader = false;
+                try
+                {
+                    useDeckyLoader = AppSettings.Load<bool>("usedeckyloader");
+                }
+                catch
+                {
+                    // Fallback in case the setting doesn't exist yet
+                    Debug.WriteLine("[GCM] 'usedeckyloader' setting not found, defaulting to false.");
+                }
+
+                // We ONLY reset Decky Loader if we are doing a cold start.
+                // If we are just switching via the Launcher Card (Warmstart), we skip this heavy process!
+                if (useDeckyLoader && isColdStart)
+                {
+                    Debug.WriteLine("[GCM] Decky Loader enabled & Cold Boot required. Preparing environment...");
+
+                    // Make sure Steam is completely dead before doing anything with Decky
+                    var allSteamProcs = Process.GetProcessesByName("steam")
+                                               .Concat(Process.GetProcessesByName("steamwebhelper"))
+                                               .ToList();
+
+                    if (allSteamProcs.Any())
                     {
-                        foreach (var proc in steamProcs)
+                        foreach (var proc in allSteamProcs)
                         {
                             try { if (!proc.HasExited) proc.Kill(); } catch { }
                         }
-                        await Task.Delay(1500);
                     }
 
-                    Debug.WriteLine("[GCM] Steam Kaltstart im Big Picture Modus...");
-                    RenameSteamStartupVideo_Start();
-                    Process.Start(new ProcessStartInfo(steamExePath) { Arguments = "-gamepadui", UseShellExecute = true });
-                }
-                // --- FALL B: WARMSTART ÜBER DAS MENÜ (forceRestart = false) ---
-                else
-                {
-                    Process steamProc = Process.GetProcessesByName("steam").FirstOrDefault();
-                    if (steamProc != null)
+                    // Terminate existing Decky Loader instances (PluginLoader_noconsole)
+                    var deckyProcs = Process.GetProcessesByName("PluginLoader_noconsole");
+                    if (deckyProcs.Any())
                     {
-                        Debug.WriteLine("[GCM] Steam läuft bereits. Trigger Big Picture Protokoll (Warmstart)...");
-                        Process.Start(new ProcessStartInfo("steam://open/gamepadui") { UseShellExecute = true });
-                        steamLiefSchon = true;
+                        foreach (var proc in deckyProcs)
+                        {
+                            try { if (!proc.HasExited) proc.Kill(); } catch { }
+                        }
+                    }
+
+                    // Give the OS a moment to free up file handles and ports
+                    await Task.Delay(1500);
+
+                    // Resolve the dynamic path to the user's homebrew folder
+                    string userProfileFolder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    string deckyPath = Path.Combine(userProfileFolder, "homebrew", "services", "PluginLoader_noconsole.exe");
+
+                    if (File.Exists(deckyPath))
+                    {
+                        Debug.WriteLine("[GCM] Launching PluginLoader...");
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = deckyPath,
+                            UseShellExecute = true,
+                            WindowStyle = ProcessWindowStyle.Hidden // Keep the background clean
+                        });
+
+                        // Wait for the plugin loader to initialize its hooks before firing up Steam
+                        await Task.Delay(2000);
                     }
                     else
                     {
-                        Debug.WriteLine("[GCM] Steam lief nicht. Normaler Start...");
-                        Process.Start(new ProcessStartInfo(steamExePath) { Arguments = "-gamepadui", UseShellExecute = true });
+                        Debug.WriteLine($"[GCM] WARNING: Decky Loader executable not found at {deckyPath}");
                     }
+
+                    // Since we forcibly closed Steam above, we MUST guarantee a cold boot for Steam now
+                    forceRestart = true;
+                    isSteamRunning = false;
+                }
+                // --- END DECKY LOADER INTEGRATION ---
+
+                // --- CASE A: COLD START (Boot or Steam was closed) ---
+                if (forceRestart || !isSteamRunning)
+                {
+                    Debug.WriteLine("[GCM] Steam Cold Boot into Big Picture Mode...");
+
+                    // If Decky was OFF, but we still need a force restart, ensure Steam is dead
+                    if (!useDeckyLoader && forceRestart)
+                    {
+                        var steamProcs = Process.GetProcessesByName("steam")
+                                                .Concat(Process.GetProcessesByName("steamwebhelper"))
+                                                .ToList();
+                        if (steamProcs.Any())
+                        {
+                            foreach (var proc in steamProcs) { try { if (!proc.HasExited) proc.Kill(); } catch { } }
+                            await Task.Delay(1500);
+                        }
+                    }
+
+                    RenameSteamStartupVideo_Start();
+                    Process.Start(new ProcessStartInfo(steamExePath) { Arguments = "-gamepadui", UseShellExecute = true });
+                }
+                // --- CASE B: WARM START (Switching via Launcher Card) ---
+                else
+                {
+                    Debug.WriteLine("[GCM] Steam is already running. Triggering Big Picture switch (Warmstart)...");
+                    Process.Start(new ProcessStartInfo("steam://open/gamepadui") { UseShellExecute = true });
+                    steamLiefSchon = true;
                 }
 
-                // --- AUF DAS FENSTER WARTEN ---
+                // --- WAIT FOR THE STEAM WINDOW ---
                 IntPtr steamHwnd = IntPtr.Zero;
                 int attempts = 0;
-                // Wenn es nur ein Warmstart ist, müssen wir nicht so lange warten
+                // Faster timeout if it's just a warm switch
                 int maxAttempts = steamLiefSchon ? 20 : 60;
 
                 while (attempts < maxAttempts)
@@ -6066,28 +6129,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     steamHwnd = FindSteamBigPictureWindow();
                     if (steamHwnd != IntPtr.Zero)
                     {
-                        await Task.Delay(800); // UI aufbauen lassen
+                        await Task.Delay(800); // Let the UI build up
                         break;
                     }
                     await Task.Delay(250);
                     attempts++;
                 }
 
-                // --- FENSTER MAXIMIEREN UND IN DEN VORDERGRUND ZWINGEN ---
+                // --- MAXIMIZE AND FORCE TO FOREGROUND ---
                 if (steamHwnd != IntPtr.Zero)
                 {
-                    Debug.WriteLine($"[GCM] Steam BP Fenster bereit. Wende Nuclear-Fokus an...");
+                    Debug.WriteLine($"[GCM] Steam BP window ready. Applying Nuclear-Focus...");
                     await ForcefullyBringToForeground(steamHwnd);
                     ShowWindow(steamHwnd, 3); // SW_SHOWMAXIMIZED
                 }
                 else
                 {
-                    Debug.WriteLine("[GCM] Timeout! Steam BP Fenster wurde nicht gefunden.");
+                    Debug.WriteLine("[GCM] Timeout! Steam BP window was not found.");
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[GCM] Fehler in StartSteam: {ex.Message}");
+                Debug.WriteLine($"[GCM] Error in StartSteam: {ex.Message}");
             }
         }
 
@@ -6139,8 +6202,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[GCM] Fehler in StartPlaynite: {ex.Message}");
-                await messagebox("Playnite Fullscreen konnte nicht gestartet werden. Bitte prüfe die Installation.");
+                Debug.WriteLine($"[GCM] Error in StartPlaynite: {ex.Message}");
+                await messagebox("Playnite Fullscreen could not be started. Please check the installation.");
             }
         }
 
@@ -6169,7 +6232,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 if (string.IsNullOrWhiteSpace(gfnPath))
                 {
-                    throw new FileNotFoundException("GeForce Now konnte auf diesem System nicht automatisch gefunden werden.");
+                    throw new FileNotFoundException("GeForce Now could not be detected automatically on this system.");
                 }
 
                 Process.Start(new ProcessStartInfo(gfnPath) { UseShellExecute = true });
@@ -6302,17 +6365,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             BoostProcessPriority();
             uac("off");
 
+            // ---> HIER IST DAS NEUE AWAIT <---
+            await prestartlist();
+
             SettingsVerify();
             KeyboardRedirector.EnableRedirect();
 
             // Hintergrund-Tools asynchron starten
             _ = Task.Run(() => RunBoilrNoUI());
             displayfusion("start");
-            IsJoyxoffInstalledAndStart();
             EnsureTouchKeyboardServiceIsRunning();
             cssloader();
             preaudio(true, false);
-            prestartlist();
             await StartLosslessScaling();
 
             // Autostart-Apps deaktivieren, falls gewünscht
@@ -6326,7 +6390,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             catch { }
 
             // JETZT laden wir den Desktop (explorer.exe) und verstecken die Taskleiste.
-            // Da das Video im Vordergrund läuft, sieht der User keine aufblitzenden Fenster!
             Debug.WriteLine("Starte WinPart-Modus (Desktop laden) im Hintergrund...");
             await winpart();
         }
