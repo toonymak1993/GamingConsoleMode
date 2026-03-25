@@ -5994,6 +5994,167 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion functions
         #region launcher
+
+        #region non-admin launch helper
+        private const uint TOKEN_DUPLICATE_ACCESS = 0x0002;
+        private const uint MAXIMUM_ALLOWED_ACCESS = 0x02000000;
+        private const uint CREATE_UNICODE_ENVIRONMENT_FLAG = 0x00000400;
+
+        private enum SECURITY_IMPERSONATION_LEVEL_ENUM { SecurityAnonymous = 0, SecurityIdentification = 1, SecurityImpersonation = 2, SecurityDelegation = 3 }
+        private enum TOKEN_TYPE_ENUM { TokenPrimary = 1, TokenImpersonation = 2 }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SECURITY_ATTRIBUTES_TOKEN
+        {
+            public int nLength;
+            public IntPtr lpSecurityDescriptor;
+            public bool bInheritHandle;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct STARTUPINFOW
+        {
+            public int cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public uint dwX, dwY, dwXSize, dwYSize;
+            public uint dwXCountChars, dwYCountChars;
+            public uint dwFillAttribute, dwFlags;
+            public short wShowWindow, cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput, hStdOutput, hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION_W
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public uint dwProcessId;
+            public uint dwThreadId;
+        }
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+        [DllImport("wtsapi32.dll", SetLastError = true)]
+        private static extern bool WTSQueryUserToken(uint sessionId, out IntPtr phToken);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint WTSGetActiveConsoleSessionId();
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool DuplicateTokenEx(IntPtr hExistingToken, uint dwDesiredAccess, ref SECURITY_ATTRIBUTES_TOKEN lpTokenAttributes, SECURITY_IMPERSONATION_LEVEL_ENUM ImpersonationLevel, TOKEN_TYPE_ENUM TokenType, out IntPtr phNewToken);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool CreateProcessWithTokenW(IntPtr hToken, uint dwLogonFlags, string lpApplicationName, string lpCommandLine, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFOW lpStartupInfo, out PROCESS_INFORMATION_W lpProcessInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        
+        private static void StartProcessAsNonAdmin(string filePath, string arguments = null, string workingDirectory = null)
+        {
+            IntPtr userToken = GetNonElevatedUserToken();
+
+            if (userToken == IntPtr.Zero)
+            {
+                // Standard launch (will inherit elevated token)
+                Debug.WriteLine("[GCM] StartProcessAsNonAdmin: could not obtain non-elevated token, falling back to elevated launch.");
+                var psi = new ProcessStartInfo(filePath) { UseShellExecute = true };
+                if (!string.IsNullOrEmpty(arguments)) psi.Arguments = arguments;
+                if (!string.IsNullOrEmpty(workingDirectory)) psi.WorkingDirectory = workingDirectory;
+                Process.Start(psi);
+                return;
+            }
+
+            IntPtr duplicateToken = IntPtr.Zero;
+            try
+            {
+                var sa = new SECURITY_ATTRIBUTES_TOKEN { nLength = Marshal.SizeOf<SECURITY_ATTRIBUTES_TOKEN>() };
+
+                if (!DuplicateTokenEx(userToken, MAXIMUM_ALLOWED_ACCESS, ref sa,
+                    SECURITY_IMPERSONATION_LEVEL_ENUM.SecurityImpersonation, TOKEN_TYPE_ENUM.TokenPrimary, out duplicateToken))
+                    throw new InvalidOperationException($"DuplicateTokenEx failed: {Marshal.GetLastWin32Error()}");
+
+                var si = new STARTUPINFOW
+                {
+                    cb = Marshal.SizeOf<STARTUPINFOW>(),
+                    lpDesktop = "winsta0\\default"
+                };
+
+                string cmdLine = string.IsNullOrEmpty(arguments)
+                    ? $"\"{filePath}\""
+                    : $"\"{filePath}\" {arguments}";
+
+                if (!CreateProcessWithTokenW(duplicateToken, 0, null, cmdLine,
+                    CREATE_UNICODE_ENVIRONMENT_FLAG, IntPtr.Zero, workingDirectory, ref si, out var pi))
+                    throw new InvalidOperationException($"CreateProcessWithTokenW failed: {Marshal.GetLastWin32Error()}");
+
+                if (pi.hProcess != IntPtr.Zero) CloseHandle(pi.hProcess);
+                if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+            }
+            finally
+            {
+                CloseHandle(userToken);
+                if (duplicateToken != IntPtr.Zero) CloseHandle(duplicateToken);
+            }
+        }
+
+        
+        private static IntPtr GetNonElevatedUserToken()
+        {
+            // 1. Try explorer first 
+            IntPtr token = TryGetTokenFromProcessName("explorer");
+            if (token != IntPtr.Zero) return token;
+
+            // 2. Try other non-elevated user-session processes 
+            string[] candidates = { "RuntimeBroker", "sihost", "ctfmon", "taskhostw", "ShellExperienceHost" };
+            foreach (string name in candidates)
+            {
+                token = TryGetTokenFromProcessName(name);
+                if (token != IntPtr.Zero)
+                {
+                    Debug.WriteLine($"[GCM] GetNonElevatedUserToken: obtained token from '{name}'.");
+                    return token;
+                }
+            }
+
+            // 3. WTSQueryUserToken — the last chance :)
+            try
+            {
+                uint sessionId = WTSGetActiveConsoleSessionId();
+                if (sessionId != 0xFFFFFFFF && WTSQueryUserToken(sessionId, out token))
+                {
+                    Debug.WriteLine($"[GCM] GetNonElevatedUserToken: obtained token via WTSQueryUserToken (session {sessionId}).");
+                    return token;
+                }
+                Debug.WriteLine($"[GCM] WTSQueryUserToken failed: {Marshal.GetLastWin32Error()}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] WTSQueryUserToken exception: {ex.Message}");
+            }
+
+            return IntPtr.Zero;
+        }
+
+        private static IntPtr TryGetTokenFromProcessName(string processName)
+        {
+            try
+            {
+                Process? proc = Process.GetProcessesByName(processName).FirstOrDefault();
+                if (proc == null) return IntPtr.Zero;
+
+                if (OpenProcessToken(proc.Handle, TOKEN_DUPLICATE_ACCESS, out IntPtr token))
+                    return token;
+            }
+            catch { }
+            return IntPtr.Zero;
+        }
+        #endregion non-admin launch helper
+
         private const uint SWP_NOACTIVATE = 0x0010;
         // Wir fügen den Parameter 'forceRestart' hinzu. Standard ist 'false'.
         private async Task StartSteam(bool forceRestart = false)
@@ -6108,7 +6269,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
 
                     RenameSteamStartupVideo_Start();
-                    Process.Start(new ProcessStartInfo(steamExePath) { Arguments = "-gamepadui", UseShellExecute = true });
+                    StartProcessAsNonAdmin(steamExePath, "-gamepadui");
                 }
                 // --- CASE B: WARM START (Switching via Launcher Card) ---
                 else
@@ -6193,12 +6354,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 MakeSelfNonTopmost();
 
                 // 4. Starten mit WorkingDirectory und strikten Parametern
-                Process.Start(new ProcessStartInfo(playnitePath)
-                {
-                    WorkingDirectory = Path.GetDirectoryName(playnitePath), // Verhindert Pfad-Fehler
-                    Arguments = "--startfullscreen --hidesplashscreen",     // Zwingt Fullscreen
-                    UseShellExecute = true
-                });
+                StartProcessAsNonAdmin(playnitePath, "--startfullscreen --hidesplashscreen", Path.GetDirectoryName(playnitePath));
             }
             catch (Exception ex)
             {
@@ -6285,7 +6441,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 KillProcess(Path.GetFileName(launcherPath));
-                Process.Start(launcherPath);
+                StartProcessAsNonAdmin(launcherPath, null, Path.GetDirectoryName(launcherPath));
             }
             catch (Exception ex)
             {
@@ -11639,17 +11795,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             try
             {
-                // ### THIS IS THE FIX ###
-                // We now handle .lnk files correctly, just like the mouse click does.
+                // Launch without admin privileges so apps don't inherit the elevated token.
                 if (app.FilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Use ShellExecute to let Windows handle the shortcut file.
-                    Process.Start(new ProcessStartInfo(app.FilePath) { UseShellExecute = true });
+                    // For .lnk shortcuts use IShellDispatch2 which runs at medium integrity
+                    // even when called from an elevated process.
+                    dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application"));
+                    shell.ShellExecute(app.FilePath);
                 }
                 else
                 {
-                    // For regular .exe files, the direct start is fine.
-                    Process.Start(app.FilePath);
+                    StartProcessAsNonAdmin(app.FilePath);
                 }
 
                 // Clean up the UI after launching.
