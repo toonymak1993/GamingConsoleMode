@@ -34,9 +34,9 @@ namespace gcmloader
              //2. Admin-Rechte Check
             if (!IsAdministrator())
             {
-                //RestartAsAdmin();
-               // Environment.Exit(0);
-                //return;
+                RestartAsAdmin();
+                Environment.Exit(0);
+                return;
             }
 
             // 3. Toast Notification Setup (Optional)
@@ -79,7 +79,7 @@ namespace gcmloader
             }
         }
 
-        /*private static void RestartAsAdmin()
+        private static void RestartAsAdmin()
         {
             var startInfo = new ProcessStartInfo
             {
@@ -91,6 +91,6 @@ namespace gcmloader
             try { Process.Start(startInfo); }
             catch (Exception ex) { Debug.WriteLine($"Failed to restart as admin: {ex.Message}"); }
         }
-        */
+        
     }
 }

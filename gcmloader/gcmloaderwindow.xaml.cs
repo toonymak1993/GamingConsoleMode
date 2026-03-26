@@ -907,11 +907,6 @@ namespace gcmloader
         private float _cursorYRemainder = 0f; 
 
 
-
-
-        [DllImport("user32.dll")]
-        private static extern bool DestroyWindow(IntPtr hWnd);
-
         private bool _isMouseModeActive = false;
         private DateTime? _comboPressTime = null;
         private bool _mouseModeToggledThisPress = false;
@@ -2471,7 +2466,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
            // Logger.Initialize();
             this.InitializeComponent();
-
+            
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (s, e) =>
             {
                 TriggerAutomaticResync();
@@ -2566,7 +2561,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             UpdateControllerBatteryStatus();
 
             MinimizeAllToDesktop();
+           
             LoadDynamicLauncherCards();
+            //GhostFocusWindow.Initialize();
             _quickLauncherButtons = new List<Border> { QuickSteam, QuickPlaynite, QuickXbox, QuickGfn };
             QuickLauncherPanel.Visibility = Visibility.Visible; // Damit es Layout-Platz einnimmt
 
@@ -4732,7 +4729,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             // 1. Notify the user what is happening
             SendOverlayNotification("Restoring desktop...");
-
             // 2. Visual Delay (1.5 seconds) - Gives the feeling of "booting up"
             await Task.Delay(1500);
 
@@ -8457,52 +8453,115 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private static double _lastKnownDpi = 0;
 
+
         /* * Documentation:
-         * This is the fully updated BringTaskManagerToFrontAndFocus method.
-         * It now checks the current system DPI before doing anything else.
-         * If the DPI has changed since the last time GCM was shown, it triggers 
-         * a complete window rebuild to ensure a 100% accurate UI.
-         */
+ * Diese Methode bringt GCM in den Vordergrund und zwingt Steam dazu, den Controller loszulassen.
+ * Der Trick: Wir entfernen alle "Stealth/Overlay"-Eigenschaften vom GCM-Fenster, bevor wir 
+ * den Fokus anfordern. Dadurch behandelt Windows GCM wie eine normale App (z.B. Opera) 
+ * und entzieht Steam offiziell den Eingabefokus.
+ */
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr CreateWindowEx(
+         uint dwExStyle, string lpClassName, string lpWindowName,
+         uint dwStyle, int x, int y, int nWidth, int nHeight,
+         IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+
+
+        /* * Documentation:
+  * Die "Alt + Esc" (Push-to-Back) Methode.
+  * Da Steam Big Picture kaputtgeht, wenn es minimiert wird (Win+M oder SW_MINIMIZE),
+  * nutzen wir die systemeigene Tastenkombination Alt+Esc. 
+  * Diese schiebt das aktuelle Vordergrundfenster lautlos und ohne UI-Overlays 
+  * an das Ende der Z-Order (Hintergrund), OHNE es zu minimieren. 
+  * Dadurch verliert Steam sofort den exklusiven Controller-Hook.
+  */
         public void BringTaskManagerToFrontAndFocus()
         {
             this.DispatcherQueue.TryEnqueue(async () =>
             {
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                IntPtr gcmHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                IntPtr currentForeground = GetForegroundWindow();
 
-                // 1. GCM in den Vordergrund bringen (JETZT WARTEN WIR DARAUF!)
-                await ForceGcmToFront();
-                UpdateControllerBatteryStatus();
+                // Wenn GCM schon vorne ist, nichts tun
+                if (gcmHwnd == currentForeground) return;
 
-                // 2. Launcher-Logik (Steam minimieren etc.)
-                try
+                // --- 1. DER "ALT + ESC" HACK ---
+                // Schiebt das aktuelle Fenster (Steam/Spiel) in den Hintergrund, ohne es zu minimieren.
+                const byte VK_MENU = 0x12;   // ALT Taste
+                const byte VK_ESCAPE = 0x1B; // ESC Taste
+
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+
+                keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                // Windows einen winzigen Moment geben, um den Fokus-Wechsel (KillFocus) an Steam zu senden
+                await Task.Delay(50);
+
+                // --- 2. GCM ALS KORREKTES FENSTER DEKLARIEREN ---
+                long exStyle = (long)GetWindowLongPtr(gcmHwnd, GWL_EXSTYLE);
+                exStyle &= ~0x00000080L; // Entferne WS_EX_TOOLWINDOW
+                exStyle &= ~0x08000000L; // Entferne WS_EX_NOACTIVATE
+                exStyle |= 0x00040000L;  // Setze WS_EX_APPWINDOW
+                SetWindowLongPtr(gcmHwnd, GWL_EXSTYLE, (IntPtr)exStyle);
+
+                AllowSetForegroundWindow(-1);
+
+                // --- 3. GCM IN DEN VORDERGRUND HOLEN ---
+                ShowWindow(gcmHwnd, 9); // SW_RESTORE
+
+                // Zwinge GCM visuell nach vorne
+                SetWindowPos(gcmHwnd, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0040); // HWND_TOPMOST
+
+                SetForegroundWindow(gcmHwnd);
+                SetActiveWindow(gcmHwnd);
+                SetFocus(gcmHwnd);
+
+                // TopMost sofort wieder auflösen, damit Spiele später nicht blockiert werden
+                await Task.Delay(50);
+                SetWindowPos(gcmHwnd, new IntPtr(-2), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0040); // HWND_NOTOPMOST
+
+                // --- 4. XAML FOKUS SICHERSTELLEN ---
+                if (this.Content is UIElement root)
                 {
-                    string launcher = AppSettings.Load<string>("launcher");
-                    if (launcher == "steam")
-                    {
-                        IntPtr steamHwnd = FindSteamBigPictureWindow();
-                        if (steamHwnd != IntPtr.Zero)
-                        {
-                            // Steam-spezifische Korrektur: Falls Steam sich kurzzeitig wehrt,
-                            // setzen wir GCM zur Sicherheit nach 50ms nochmal in den Fokus.
-                            await Task.Delay(50);
-                            await ForceGcmToFront();
-                        }
-                    }
-                    else if (launcher == "playnite" || launcher == "custom")
-                    {
-                        string procToFind = launcher == "playnite"
-                            ? "Playnite.FullscreenApp"
-                            : Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath"));
-
-                        Process proc = Process.GetProcessesByName(procToFind).FirstOrDefault();
-                        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
-                            ShowWindow(proc.MainWindowHandle, 6); // SW_MINIMIZE
-                    }
+                    root.Focus(FocusState.Programmatic);
                 }
-                catch (Exception ex) { Debug.WriteLine($"[GCM] Launcher logic error: {ex.Message}"); }
+
+                // --- 5. UI ZURÜCKSETZEN ---
+                if (_cardCache.Count > 0)
+                {
+                    _selectedCardIndex = 0;
+                    HighlightSelectedCard();
+                }
+
+                UpdateControllerBatteryStatus();
+                Debug.WriteLine("[GCM] Alt+Esc Hack erfolgreich. Steam in den Hintergrund geschoben, ohne es zu minimieren.");
             });
         }
 
+        // Hilfsmethode: Erzwingt XInput-Reset ohne vollständigen Fensterwechsel.
+        // Wird aufgerufen wenn GCM schon im Vordergrund ist, aber der Controller
+        // noch auf Steam "hört" (kann nach Spielstart passieren).
+        private void ResetXInputFocusFromSteam(IntPtr gcmHwnd)
+        {
+            // Kurzer "Ping" an Windows: GCM ist aktiv, Input soll hierher.
+            SetActiveWindow(gcmHwnd);
+            SetFocus(gcmHwnd);
+            this.Content?.Focus(FocusState.Programmatic);
+
+            // XInput-Controller-States zurücksetzen damit kein "stuck button" bleibt
+            for (int i = 0; i < 4; i++)
+            {
+                _lastButtonStates[i] = GamepadButtonFlags.None;
+            }
+            _lastPs5ButtonState = GamepadButtonFlags.None;
+            _lastEdgeButtonState = GamepadButtonFlags.None;
+            _lastShortcutButtons = new GamepadButtonFlags[10];
+
+            Debug.WriteLine("[GCM] XInput focus reset (already foreground).");
+        }
 
 
 
@@ -12890,6 +12949,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         public BitmapImage Icon { get; set; }
     }
 
-   
+  
 
 }
