@@ -46,6 +46,7 @@ using Tomlyn.Model;
 using Vanara.PInvoke;
 using Windows.Devices.Power;
 using Windows.Gaming.Input;
+using Windows.Media.Control;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Networking.Connectivity;
@@ -2569,7 +2570,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _quickLauncherButtons = new List<Border> { QuickSteam, QuickPlaynite, QuickXbox, QuickGfn };
             QuickLauncherPanel.Visibility = Visibility.Visible; // Damit es Layout-Platz einnimmt
 
-            _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
+            _topButtons = new List<Button> { ExitGcmButton, MediaButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { SleepMenuItem, RestartMenuItem, ShutdownMenuItem, LogOffMenuItem };
 
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
@@ -5511,7 +5512,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-
+                _ = InitMediaControlsAsync();
             }
             catch (Exception ex)
             {
@@ -10320,6 +10321,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 return; // Block other inputs to the list underneath
             }
 
+            if (MediaFlyout != null && MediaFlyout.IsOpen)
+            {
+                if ((newPresses & GamepadButtonFlags.B) != 0)
+                {
+                    DispatcherQueue.TryEnqueue(() => MediaFlyout.Hide());
+                    PlaydeactivationSound();
+                }
+                else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                {
+                    if (_selectedMediaButtonIndex > 0 && _selectedMediaButtonIndex < 3) { _selectedMediaButtonIndex--; UpdateMediaButtonFocus(); PlayNavigationSound(); }
+                }
+                else if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
+                {
+                    if (_selectedMediaButtonIndex < 2) { _selectedMediaButtonIndex++; UpdateMediaButtonFocus(); PlayNavigationSound(); }
+                }
+                else if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) // Spotify Button ansteuern
+                {
+                    if (BtnLaunchSpotify.Visibility == Visibility.Visible && _selectedMediaButtonIndex != 3) { _selectedMediaButtonIndex = 3; UpdateMediaButtonFocus(); PlayNavigationSound(); }
+                }
+                else if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) // Zurück zu Play
+                {
+                    if (_selectedMediaButtonIndex == 3) { _selectedMediaButtonIndex = 1; UpdateMediaButtonFocus(); PlayNavigationSound(); }
+                }
+                else if ((newPresses & GamepadButtonFlags.A) != 0)
+                {
+                    DispatcherQueue.TryEnqueue(() => {
+                        if (_selectedMediaButtonIndex == 0) BtnMediaPrev_Click(null, null);
+                        else if (_selectedMediaButtonIndex == 1) BtnMediaPlayPause_Click(null, null);
+                        else if (_selectedMediaButtonIndex == 2) BtnMediaNext_Click(null, null);
+                        else if (_selectedMediaButtonIndex == 3) BtnLaunchSpotify_Click(null, null);
+                    });
+                }
+                return;
+            }
+
             // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
             if (!IsWindowInForeground()) return;
 
@@ -10375,6 +10411,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         // Öffnet das integrierte Audio-Menü
                         OpenAudioFlyout();
                         PlayActivationSound();
+                    }
+                    // NEU: B-Taste schließt das Media-Flyout, falls es offen ist
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        DispatcherQueue.TryEnqueue(() => {
+                            MediaButton.Flyout?.Hide();
+                        });
                     }
                     break;
 
@@ -10553,6 +10596,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         PlaydeactivationSound();
                         return;
                     }
+
+                  
 
                     // =========================================================
                     // MODUS 1: MASTER SLIDER FOCUSED
@@ -11109,7 +11154,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     ExitGcmButton_Click_1(null, null);
                 }
-                else if (buttonToClick == VolumeButton) // NEU: Reaktion auf A-Taste
+                else if (buttonToClick == MediaButton) // NEU: Media Button öffnet das Flyout
+                {
+                    MediaButton.Flyout?.ShowAt(MediaButton);
+                }
+                else if (buttonToClick == VolumeButton)
                 {
                     ToggleAudioFlyout();
                 }
@@ -11650,7 +11699,199 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #endregion
 
         #endregion Startupvideo
+        #region Media Control
+        private GlobalSystemMediaTransportControlsSessionManager _mediaSessionManager;
+        private GlobalSystemMediaTransportControlsSession _currentMediaSession;
 
+        // Verhindert das Flackern des Bildes und speichert den Pfad
+        private string _lastMediaTitle = "";
+        private string _spotifyExePath = "";
+        private int _selectedMediaButtonIndex = 1; // 0=Prev, 1=Play, 2=Next, 3=Spotify
+
+        private async Task InitMediaControlsAsync()
+        {
+            try
+            {
+                // FIX: WinUI 3 läuft im STA-Thread. Die Media-API braucht oft zwingend 
+                // einen MTA-Hintergrund-Thread, sonst wirft sie "Klasse nicht registriert".
+                _mediaSessionManager = await Task.Run(async () =>
+                    await GlobalSystemMediaTransportControlsSessionManager.RequestAsync());
+
+                if (_mediaSessionManager != null)
+                {
+                    _mediaSessionManager.CurrentSessionChanged += MediaSessionManager_CurrentSessionChanged;
+                    UpdateCurrentMediaSession();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Media Error] Init failed: {ex.Message}");
+            }
+        }
+
+        private void MediaSessionManager_CurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args) => UpdateCurrentMediaSession();
+
+        private void UpdateCurrentMediaSession()
+        {
+            if (_currentMediaSession != null)
+            {
+                _currentMediaSession.MediaPropertiesChanged -= CurrentMediaSession_MediaPropertiesChanged;
+                _currentMediaSession.PlaybackInfoChanged -= CurrentMediaSession_PlaybackInfoChanged;
+            }
+            _currentMediaSession = _mediaSessionManager?.GetCurrentSession();
+            if (_currentMediaSession != null)
+            {
+                _currentMediaSession.MediaPropertiesChanged += CurrentMediaSession_MediaPropertiesChanged;
+                _currentMediaSession.PlaybackInfoChanged += CurrentMediaSession_PlaybackInfoChanged;
+            }
+            UpdateMediaUI();
+        }
+
+        private void CurrentMediaSession_PlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args) => UpdateMediaUI();
+        private void CurrentMediaSession_MediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args) => UpdateMediaUI();
+
+        private async void UpdateMediaUI()
+        {
+            // 1. Sicherheitskopie der Session
+            var session = _currentMediaSession;
+
+            if (session == null)
+            {
+                ResetMediaUI();
+                return;
+            }
+
+            try
+            {
+                // 2. Details abrufen
+                var properties = await session.TryGetMediaPropertiesAsync();
+                var playbackInfo = session.GetPlaybackInfo();
+
+                // FIX: Wenn playbackInfo null ist (App wurde gerade geschlossen), UI leeren und raus
+                if (playbackInfo == null || properties == null)
+                {
+                    ResetMediaUI();
+                    return;
+                }
+
+                this.DispatcherQueue.TryEnqueue(async () => {
+                    try
+                    {
+                        if (MediaAppNameText == null) return;
+
+                        // App-ID sicher auslesen
+                        string appId = session.SourceAppUserModelId ?? "Media";
+                        MediaAppNameText.Text = appId.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+
+                        string title = properties.Title ?? "Unknown";
+                        MediaTitleText.Text = title;
+                        MediaArtistText.Text = properties.Artist ?? "";
+
+                        // Play/Pause Status sicher prüfen
+                        bool isPlaying = playbackInfo.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                        if (IconMediaPlayPause != null)
+                        {
+                            IconMediaPlayPause.Glyph = isPlaying ? "\uE769" : "\uE768";
+                        }
+
+                        // Flacker-Fix: Nur laden wenn Titel neu
+                        if (title != _lastMediaTitle)
+                        {
+                            _lastMediaTitle = title;
+                            if (properties.Thumbnail != null)
+                            {
+                                using var stream = await properties.Thumbnail.OpenReadAsync();
+                                var bitmap = new BitmapImage();
+                                await bitmap.SetSourceAsync(stream);
+                                if (MediaCoverImage != null) MediaCoverImage.Source = bitmap;
+                            }
+                            else
+                            {
+                                if (MediaCoverImage != null) MediaCoverImage.Source = null;
+                            }
+                        }
+                    }
+                    catch (Exception innerEx) { Debug.WriteLine($"[MediaUI Inner] {innerEx.Message}"); }
+                });
+            }
+            catch (Exception outerEx)
+            {
+                Debug.WriteLine($"[MediaUI Outer] {outerEx.Message}");
+                ResetMediaUI();
+            }
+        }
+
+        // Kleine Hilfsmethode, um Code-Dopplung zu vermeiden
+        private void ResetMediaUI()
+        {
+            this.DispatcherQueue.TryEnqueue(() => {
+                if (MediaAppNameText != null) MediaAppNameText.Text = "Media";
+                if (MediaTitleText != null) MediaTitleText.Text = "No playback";
+                if (MediaArtistText != null) MediaArtistText.Text = "";
+                if (MediaCoverImage != null) MediaCoverImage.Source = null;
+                if (IconMediaPlayPause != null) IconMediaPlayPause.Glyph = "\uE768";
+                _lastMediaTitle = "";
+            });
+        }
+
+        private void MediaFlyout_Opened(object sender, object e)
+        {
+            CheckSpotifyInstallation(); // Button-Check beim Öffnen
+            _selectedMediaButtonIndex = 1;
+            UpdateMediaButtonFocus();
+        }
+
+        private void UpdateMediaButtonFocus()
+        {
+            this.DispatcherQueue.TryEnqueue(() => {
+                // Alle zurücksetzen
+                BtnMediaPrev.Background = BtnMediaPlayPause.Background = BtnMediaNext.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                if (BtnLaunchSpotify != null) BtnLaunchSpotify.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+
+                AnimateScale(BtnMediaPrev, false); AnimateScale(BtnMediaPlayPause, false); AnimateScale(BtnMediaNext, false);
+                if (BtnLaunchSpotify != null) AnimateScale(BtnLaunchSpotify, false);
+
+                var activeBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                if (_selectedMediaButtonIndex == 0) { BtnMediaPrev.Background = activeBrush; AnimateScale(BtnMediaPrev, true); }
+                else if (_selectedMediaButtonIndex == 1) { BtnMediaPlayPause.Background = activeBrush; AnimateScale(BtnMediaPlayPause, true); }
+                else if (_selectedMediaButtonIndex == 2) { BtnMediaNext.Background = activeBrush; AnimateScale(BtnMediaNext, true); }
+                else if (_selectedMediaButtonIndex == 3 && BtnLaunchSpotify != null) { BtnLaunchSpotify.Background = activeBrush; AnimateScale(BtnLaunchSpotify, true); }
+            });
+        }
+
+        private async void BtnMediaPlayPause_Click(object sender, RoutedEventArgs e) { if (_currentMediaSession != null) await _currentMediaSession.TryTogglePlayPauseAsync(); PlayActivationSound(); }
+        private async void BtnMediaPrev_Click(object sender, RoutedEventArgs e) { if (_currentMediaSession != null) await _currentMediaSession.TrySkipPreviousAsync(); PlayActivationSound(); }
+        private async void BtnMediaNext_Click(object sender, RoutedEventArgs e) { if (_currentMediaSession != null) await _currentMediaSession.TrySkipNextAsync(); PlayActivationSound(); }
+
+        private void CheckSpotifyInstallation()
+        {
+            if (BtnLaunchSpotify == null) return;
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            _spotifyExePath = Path.Combine(appData, "Spotify", "Spotify.exe");
+            if (!File.Exists(_spotifyExePath))
+            {
+                string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                _spotifyExePath = Path.Combine(local, "Microsoft", "WindowsApps", "Spotify.exe");
+            }
+            BtnLaunchSpotify.Visibility = File.Exists(_spotifyExePath) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void BtnLaunchSpotify_Click(object sender, RoutedEventArgs e)
+        {
+            if (File.Exists(_spotifyExePath))
+            {
+                // 1. Spotify starten
+                Process.Start(new ProcessStartInfo(_spotifyExePath) { UseShellExecute = true });
+
+                // 2. Medien-Flyout schließen
+                MediaFlyout?.Hide();
+
+                // 3. Sound abspielen
+                PlayActivationSound();
+
+            }
+        }
+        #endregion
         #region shurdownmenuitem
         private void ShutdownMenuItem_Click(object sender, RoutedEventArgs e)
         {
