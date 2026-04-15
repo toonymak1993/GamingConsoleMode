@@ -37,7 +37,8 @@ Delete `uac("off")` call. Remove UAC restore block from exit sequence (lines 480
 
 ---
 
-### 4. Fix the config system
+### 4. Fix the config system [DONE]
+<!-- AddDefaultSettingsKeys in both AppSettings — Handoff keys + mini-launcher paths + winmode_shortcut table; no merge — 2026-04-15 -->
 **Files:** `gcmloader/AppSettings.cs`, `GAMINGCONSOLEMODE/AppSettings.cs`
 
 - Merge into one `AppSettings.cs`

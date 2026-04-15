@@ -216,6 +216,64 @@ namespace GAMINGCONSOLEMODE
         #region Default Configuration & Restart Logic
 
         /// <summary>
+        /// Scalar and table defaults for a fresh settings.toml (kept in sync with gcmloader/AppSettings.cs).
+        /// </summary>
+        private static void AddDefaultSettingsKeys(TomlTable t)
+        {
+            t["uac"] = false; // REMOVED: UAC registry — backward compat only, no effect
+            t["launcher"] = "steam";
+            t["steamlauncherpath"] = "";
+            t["playnitelauncherpath"] = "";
+            t["customlauncherpath"] = "";
+            t["gfnlauncherpath"] = "";
+            t["onboarding"] = false;
+            t["lossless"] = false;
+            t["losslesspath"] = "";
+            t["usewinpart"] = false;
+            t["usewinpartstartapps"] = false;
+            t["useboilr"] = false;
+            t["usecssloader"] = false;
+            t["usedeckyloader"] = false;
+            t["usedisplayfusion"] = false;
+            t["usepreaudio"] = false;
+            t["usesteamstartupvideo"] = false;
+            t["usestartupvideo"] = false;
+            t["useseamlessswitchtogcm"] = false;
+            t["usepreloadlist"] = false;
+            t["preaudiostart"] = "";
+            t["preaudioend"] = "";
+            t["usedisplayfusion_start"] = "";
+            t["usedisplayfusion_end"] = "";
+            t["startupvideo_path"] = "";
+            t["gcmwallpaper"] = false;
+            t["gcmwallpaperpath"] = "";
+            t["shortcutpopup"] = true;
+            t["enable_taskbar"] = false;
+            t["enable_startmenu"] = false;
+            t["show_discord"] = true;
+            t["handheldtouchlauncher"] = false;
+            t["steamgriddb_api_key"] = "";
+            t["rog_m1_action"] = "";
+            t["rog_m2_action"] = "";
+            t["replace"] = false;
+
+            t["winmode_shortcut"] = new TomlTable
+            {
+                ["key1"] = "",
+                ["key2"] = "",
+                ["enabled"] = false
+            };
+
+            for (int i = 1; i <= 5; i++)
+            {
+                t[$"button{i}link"] = "";
+                t[$"button{i}image"] = "";
+                t[$"button{i}args"] = "";
+                t[$"button{i}workdir"] = "";
+            }
+        }
+
+        /// <summary>
         /// Creates a new settings.toml file with default values and standard shortcuts.
         /// </summary>
         public static void initialconfig()
@@ -224,13 +282,9 @@ namespace GAMINGCONSOLEMODE
             {
                 try
                 {
-                    // 1. Define the base default settings.
-                    var defaultSettings = new TomlTable
-                    {
-                        ["launcher"] = "steam",
-                        ["steamlauncherpath"] = @"C:\Program Files (x86)\Steam\steam.exe",
-                        ["onboarding"] = false
-                    };
+                    // 1. Base defaults (all keys referenced by UI / gcmloader).
+                    var defaultSettings = new TomlTable();
+                    AddDefaultSettingsKeys(defaultSettings);
 
                     // 2. Create the list for default shortcuts in the new format.
                     // We now include "time" for hold duration to match our new logic.
@@ -258,10 +312,10 @@ namespace GAMINGCONSOLEMODE
                 //}
             };
 
-                    // 3. Add the shortcut list to the main settings.
+                    // 3. Shortcut list (gamepad / chord shortcuts).
                     defaultSettings["shortcuts"] = defaultShortcuts;
 
-                    // 4. Save the complete settings object to the file.
+                    // 4. Persist.
                     var tomlText = Toml.FromModel(defaultSettings);
                     File.WriteAllText(SettingsFilePath, tomlText);
 

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Threading;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -102,18 +101,72 @@ namespace GAMINGCONSOLEMODE
             }
         }
 
+        /// <summary>
+        /// Scalar and table defaults for a fresh settings.toml (kept in sync with GAMINGCONSOLEMODE/AppSettings.cs).
+        /// </summary>
+        private static void AddDefaultSettingsKeys(TomlTable t)
+        {
+            t["uac"] = false; // REMOVED: UAC registry — backward compat only, no effect
+            t["launcher"] = "steam";
+            t["steamlauncherpath"] = "";
+            t["playnitelauncherpath"] = "";
+            t["customlauncherpath"] = "";
+            t["gfnlauncherpath"] = "";
+            t["onboarding"] = false;
+            t["lossless"] = false;
+            t["losslesspath"] = "";
+            t["usewinpart"] = false;
+            t["usewinpartstartapps"] = false;
+            t["useboilr"] = false;
+            t["usecssloader"] = false;
+            t["usedeckyloader"] = false;
+            t["usedisplayfusion"] = false;
+            t["usepreaudio"] = false;
+            t["usesteamstartupvideo"] = false;
+            t["usestartupvideo"] = false;
+            t["useseamlessswitchtogcm"] = false;
+            t["usepreloadlist"] = false;
+            t["preaudiostart"] = "";
+            t["preaudioend"] = "";
+            t["usedisplayfusion_start"] = "";
+            t["usedisplayfusion_end"] = "";
+            t["startupvideo_path"] = "";
+            t["gcmwallpaper"] = false;
+            t["gcmwallpaperpath"] = "";
+            t["shortcutpopup"] = true;
+            t["enable_taskbar"] = false;
+            t["enable_startmenu"] = false;
+            t["show_discord"] = true;
+            t["handheldtouchlauncher"] = false;
+            t["steamgriddb_api_key"] = "";
+            t["rog_m1_action"] = "";
+            t["rog_m2_action"] = "";
+            t["replace"] = false;
+
+            t["winmode_shortcut"] = new TomlTable
+            {
+                ["key1"] = "",
+                ["key2"] = "",
+                ["enabled"] = false
+            };
+
+            for (int i = 1; i <= 5; i++)
+            {
+                t[$"button{i}link"] = "";
+                t[$"button{i}image"] = "";
+                t[$"button{i}args"] = "";
+                t[$"button{i}workdir"] = "";
+            }
+        }
+
         public static void initialconfig()
         {
             lock (_fileLock)
             {
                 try
                 {
-                    var defaultSettings = new TomlTable
-                    {
-                        ["launcher"] = "steam",
-                        ["steamlauncherpath"] = @"C:\Program Files (x86)\Steam\steam.exe",
-                        ["onboarding"] = false
-                    };
+                    var defaultSettings = new TomlTable();
+                    AddDefaultSettingsKeys(defaultSettings);
 
                     var tomlText = Toml.FromModel(defaultSettings);
                     File.WriteAllText(SettingsFilePath, tomlText);
