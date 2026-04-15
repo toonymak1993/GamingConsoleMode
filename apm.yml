@@ -4,6 +4,7 @@ description: A desktop-first Windows shell replacement built on GameConsoleMode.
   keyboard and mouse driven, sleek and with no controller assumptions.
 author: mta-babel
 dependencies:
-  apm: []
+  apm:
+  - danielmeppiel/form-builder
   mcp: []
 scripts: {}

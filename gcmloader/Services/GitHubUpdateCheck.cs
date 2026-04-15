@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace gcmloader.Services;
@@ -15,6 +16,7 @@ public static class GitHubUpdateCheck
 {
     private const string Owner = "toonymak1993";
     private const string Repo = "GameConsoleMode";
+    private static readonly HttpClient Client = CreateClient();
 
     public static void RunOptionalFireAndForget()
     {
@@ -54,10 +56,11 @@ public static class GitHubUpdateCheck
 
     private static async Task<string?> GetLatestReleaseTagAsync()
     {
-        using var client = new HttpClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("DeckTop-gcmloader");
         string url = $"https://api.github.com/repos/{Owner}/{Repo}/releases/latest";
-        string json = await client.GetStringAsync(url).ConfigureAwait(false);
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var response = await Client.GetAsync(url, timeoutCts.Token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        string json = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
         using JsonDocument doc = JsonDocument.Parse(json);
         return doc.RootElement.GetProperty("tag_name").GetString();
     }
@@ -68,5 +71,15 @@ public static class GitHubUpdateCheck
         Version.TryParse(latest.TrimStart('v'), out Version? l);
         if (c == null || l == null) return false;
         return l > c;
+    }
+
+    private static HttpClient CreateClient()
+    {
+        var client = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("DeckTop-gcmloader");
+        return client;
     }
 }

@@ -11,6 +11,7 @@ namespace gcmloader.Services
     public sealed class ServiceManagementService : IServiceManager
     {
         public static readonly ServiceManagementService Instance = new();
+        private const int ScWaitTimeoutMs = 15000;
 
         private static readonly List<(string ServiceName, string? ProcessName)> DebloatServicesDesktop = new()
         {
@@ -60,14 +61,14 @@ namespace gcmloader.Services
             };
 
             using var process = Process.Start(psi);
-            process?.WaitForExit();
+            WaitForExitWithTimeout(process, $"sc config {serviceName} disabled");
         }
 
         public void SetServiceStartupToAuto(string serviceName)
         {
             try
             {
-                Process.Start(new ProcessStartInfo
+                using var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = "sc.exe",
                     Arguments = $"config \"{serviceName}\" start= auto",
@@ -75,7 +76,8 @@ namespace gcmloader.Services
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     Verb = "runas"
-                })?.WaitForExit();
+                });
+                WaitForExitWithTimeout(process, $"sc config {serviceName} auto");
 
                 Debug.WriteLine($"[✓] Service {serviceName} set to automatic startup.");
             }
@@ -98,7 +100,7 @@ namespace gcmloader.Services
                         service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(5));
                     }
 
-                    Process.Start(new ProcessStartInfo
+                    using var process = Process.Start(new ProcessStartInfo
                     {
                         FileName = "sc.exe",
                         Arguments = $"config \"{serviceName}\" start= disabled",
@@ -106,7 +108,8 @@ namespace gcmloader.Services
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
                         Verb = "runas"
-                    })?.WaitForExit();
+                    });
+                    WaitForExitWithTimeout(process, $"sc config {serviceName} disabled");
                 }
 
                 foreach (var proc in Process.GetProcessesByName(processName))
@@ -192,6 +195,17 @@ namespace gcmloader.Services
             catch (Exception ex)
             {
                 Debug.WriteLine($"[GCM] ERROR: Could not start service ('{serviceName}'). Details: {ex.Message}");
+            }
+        }
+
+        private static void WaitForExitWithTimeout(Process? process, string operationName)
+        {
+            if (process == null)
+                return;
+
+            if (!process.WaitForExit(ScWaitTimeoutMs))
+            {
+                Debug.WriteLine($"[!] Timeout waiting for operation: {operationName}");
             }
         }
     }

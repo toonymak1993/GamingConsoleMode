@@ -1,0 +1,41 @@
+lockfile_version: '1'
+generated_at: '2026-04-15T08:20:04.246274+00:00'
+apm_version: 0.8.11
+dependencies:
+- repo_url: danielmeppiel/form-builder
+  host: github.com
+  resolved_commit: 6be19fcbba6ac9f114175e7df14cfe5688e247fa
+  package_type: hybrid
+  deployed_files:
+  - .claude/rules/forms.md
+  - .claude/skills/form-builder
+  - .cursor/rules/forms.mdc
+  - .cursor/skills/form-builder
+  - .github/instructions/forms.instructions.md
+  - .github/skills/form-builder
+  content_hash: sha256:b99778ca321b11a1a05cc0e92ca1ac3bd7acccd49855316738cc8f28383b7ede
+- repo_url: danielmeppiel/design-guidelines
+  host: github.com
+  resolved_commit: a392369c8c66955041376649db3396364f6a9586
+  depth: 2
+  resolved_by: danielmeppiel/form-builder
+  package_type: apm_package
+  deployed_files:
+  - .claude/agents/design-reviewer.md
+  - .claude/commands/accessibility-audit.md
+  - .claude/commands/design-review.md
+  - .claude/commands/style-guide-check.md
+  - .claude/rules/design-standards.md
+  - .cursor/agents/design-reviewer.md
+  - .cursor/rules/design-standards.mdc
+  - .github/agents/design-reviewer.agent.md
+  - .github/instructions/design-standards.instructions.md
+  - .github/prompts/accessibility-audit.prompt.md
+  - .github/prompts/design-review.prompt.md
+  - .github/prompts/style-guide-check.prompt.md
+  content_hash: sha256:93ae0c912b3147e56c2e495e35aa3364d4c68eeb8a6d4cde22ec11b7021e13d2
+mcp_servers:
+- io.github.github/github-mcp-server
+mcp_configs:
+  io.github.github/github-mcp-server:
+    name: io.github.github/github-mcp-server

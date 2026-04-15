@@ -1,0 +1,8 @@
+name: form-builder
+version: 1.0.0
+type: skill
+description: Build accessible, production-ready forms for React/TypeScript projects
+
+dependencies:
+  apm:
+    - danielmeppiel/design-guidelines

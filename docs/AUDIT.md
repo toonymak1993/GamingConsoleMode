@@ -132,7 +132,7 @@ gcmloader/App.xaml.cs:23  OnLaunched
 
 | Package | Used For | Conflict | Action |
 |---------|----------|----------|--------|
-| `SharpDX.XInput` | Gamepad input | CRITICAL — entire input model | REMOVE with controller code |
+| `SharpDX.XInput` | Gamepad input | CRITICAL — entire input model | Legacy recommendation: superseded by `docs/PRIORITY.md` §6 (`use_controller_navigation` default false, preserve optional controller path) |
 | `System.Management` | WMI service control | HIGH — tightly coupled to startup | MODIFY (extract `IServiceManager`) |
 | `Microsoft.TaskScheduler` | Scheduled tasks | HIGH — shell assumption | MODIFY or REMOVE |
 | `Microsoft.WindowsAppSDK` | WinUI 3 runtime | None | KEEP |

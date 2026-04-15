@@ -142,6 +142,8 @@ Build and fix compile errors after each sub-task.
 
 ### Step 6 — Remove gamepad input system
 
+> Superseded by `docs/PRIORITY.md` §6: controller navigation is optional behind `use_controller_navigation` (default `false`), not fully removed.
+
 **Target files:**
 
 - `gcmloader/gcmloaderwindow.xaml.cs`

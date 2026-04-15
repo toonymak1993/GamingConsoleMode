@@ -12,6 +12,7 @@ obj/
 
 # Claude Code local overrides
 .claude/
+.cursor/
 
 # Cursor hook runtime state (not shareable rules; those live elsewhere)
 .cursor/hooks/state/
@@ -82,3 +83,7 @@ Desktop.ini
 
 # Windows shell shortcut next to solution (local path)
 *.sln.lnk
+
+
+# APM dependencies
+apm_modules/

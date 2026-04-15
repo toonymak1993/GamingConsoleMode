@@ -3150,8 +3150,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Task.Run(async () =>
                 {
                     // *** ADD THIS CHECK ***
-                    bool enableTaskbar = false;
-                    try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
+                    bool enableTaskbar = TryLoadSetting("enable_taskbar", false);
 
                     if (enableTaskbar)
                     {
@@ -3834,7 +3833,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     return;
                 }
 
-                string losslessPath = AppSettings.Load<string>("losslesspath");
+                string losslessPath = TryLoadSetting("losslesspath", "");
                 if (string.IsNullOrEmpty(losslessPath) || !File.Exists(losslessPath))
                 {
                     Console.WriteLine($"Error: The path to Lossless Scaling is invalid: {losslessPath}");
@@ -4199,18 +4198,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             try
             {
                 string rawPath = "";
-                bool useGcmWallpaper = false;
-
-                // 1. Einstellung laden mit Fehlerprüfung
-                try
-                {
-                    useGcmWallpaper = AppSettings.Load<bool>("gcmwallpaper");
-                }
-                catch { useGcmWallpaper = false; }
+                bool useGcmWallpaper = TryLoadSetting("gcmwallpaper", false);
 
                 if (useGcmWallpaper)
                 {
-                    try { rawPath = AppSettings.Load<string>("gcmwallpaperpath"); } catch { rawPath = ""; }
+                    rawPath = TryLoadSetting("gcmwallpaperpath", "");
                 }
 
                 // 2. FALLBACK auf Windows-Standard, falls GCM-Pfad leer oder Datei nicht existiert
@@ -4822,8 +4814,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 Debug.WriteLine($"[GCM] Nuclear-Focus FEHLGESCHLAGEN nach {attempts} Versuchen.");
 
             // --- SCHRITT 4: Playnite spezifische Logik (wie gehabt) ---
-            string launcher = "";
-            try { launcher = AppSettings.Load<string>("launcher"); } catch { }
+            string launcher = TryLoadSetting("launcher", "");
 
             if (launcher == "playnite")
             {
@@ -4954,30 +4945,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     Debug.WriteLine("[Settings] Verification returned false, but proceeding with application startup to prevent immediate exit.");
                 }
 
-                string launcher = "steam"; // Fallback
-                try { launcher = AppSettings.Load<string>("launcher"); } catch { }
+                string launcher = TryLoadSetting("launcher", "steam");
 
                 switch (launcher)
                 {
                     case "steam":
-                        string steamPath = "";
-                        try { steamPath = AppSettings.Load<string>("steamlauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(steamPath) && !File.Exists(steamPath))
-                            Debug.WriteLine("[Settings] The Steam path in settings is invalid, but continuing startup.");
+                        ValidateLauncherPathSetting("steamlauncherpath", "Steam");
                         break;
 
                     case "playnite":
-                        string playnitePath = "";
-                        try { playnitePath = AppSettings.Load<string>("playnitelauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(playnitePath) && !File.Exists(playnitePath))
-                            Debug.WriteLine("[Settings] The Playnite path in settings is invalid, but continuing startup.");
+                        ValidateLauncherPathSetting("playnitelauncherpath", "Playnite");
                         break;
 
                     case "custom":
-                        string customPath = "";
-                        try { customPath = AppSettings.Load<string>("customlauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(customPath) && !File.Exists(customPath))
-                            Debug.WriteLine("[Settings] The Custom Launcher path is invalid, but continuing startup.");
+                        ValidateLauncherPathSetting("customlauncherpath", "Custom Launcher");
                         break;
 
                     case "xbox":
@@ -4985,10 +4966,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         break;
 
                     case "gfn":
-                        string gfnPath = "";
-                        try { gfnPath = AppSettings.Load<string>("gfnlauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(gfnPath) && !File.Exists(gfnPath))
-                            Debug.WriteLine("[Settings] The GeForce Now path is invalid, but continuing startup.");
+                        ValidateLauncherPathSetting("gfnlauncherpath", "GeForce Now");
                         break;
 
                     default:
@@ -5027,6 +5005,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // which causes the "app starts and immediately closes" behavior.
             }
         }
+
+        private static void ValidateLauncherPathSetting(string settingKey, string launcherLabel)
+        {
+            string configuredPath = TryLoadSetting(settingKey, "");
+            if (!string.IsNullOrEmpty(configuredPath) && !File.Exists(configuredPath))
+            {
+                Debug.WriteLine($"[Settings] The {launcherLabel} path in settings is invalid, but continuing startup.");
+            }
+        }
+
+        private static T TryLoadSetting<T>(string settingKey, T fallbackValue)
+        {
+            try { return AppSettings.Load<T>(settingKey); }
+            catch { return fallbackValue; }
+        }
+
         public async System.Threading.Tasks.Task StartAsynctasks()
         {
             try
@@ -5169,15 +5163,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private async Task Showwinpartandlauncher()
         {
             // Autostart-Apps deaktivieren, falls gewünscht
-            try
+            if (TryLoadSetting("usewinpartstartapps", false))
             {
-                bool usewinpartstartapps = AppSettings.Load<bool>("usewinpartstartapps");
-                if (usewinpartstartapps)
-                {
-                    StartupControl.DisableAllStartupApps();
-                }
+                StartupControl.DisableAllStartupApps();
             }
-            catch { }
 
             // Desktop shell bootstrap (winpart) removed — DeckTop does not replace Winlogon Shell
             Debug.WriteLine("Launcher sequence (no winpart)...");
@@ -10830,8 +10819,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     return;
                 }
 
-                string videoPath = "";
-                try { videoPath = AppSettings.Load<string>("startupvideo_path"); } catch { }
+                string videoPath = TryLoadSetting("startupvideo_path", "");
 
                 if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
                 {
@@ -11776,7 +11764,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             // Load the settings
             bool enableTaskbar = false;
-
             try { enableTaskbar = AppSettings.Load<bool>("enable_taskbar"); } catch { }
 
             // Wenn die Taskleiste aktiviert sein soll, machen wir hier gar nichts
