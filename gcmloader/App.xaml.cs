@@ -1,4 +1,5 @@
-﻿using Microsoft.UI.Xaml;
+﻿// PRIMARY ENTRY POINT — single-instance mutex, admin gate, launches MainWindow.
+using Microsoft.UI.Xaml;
 using System;
 using System.Diagnostics;
 using System.Security.Principal;

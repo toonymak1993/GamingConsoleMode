@@ -4727,89 +4727,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
-        private async void BackToWindows()
+        private void BackToWindows()
         {
-            // 1. Notify the user what is happening
-            SendOverlayNotification("Restoring desktop...");
-
-            // 2. Visual Delay (1.5 seconds) - Gives the feeling of "booting up"
-            await Task.Delay(1500);
-
-            // Restore essential settings before restarting Explorer
-            TaskbarManager.RestoreOriginalState();
-            TaskManagerReEnableServices();
-            MakeSelfNonTopmost();
-            MinimizeAllToDesktop();
-            Console.WriteLine("Exit-Button clicked. Restoring desktop and exiting app...");
-
-            // Unregister to prevent crashes during shutdown
-            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= SystemEvents_DisplaySettingsChanged;
-
-            try
-            {
-                // 1. Reset shell to explorer.exe in Registry
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", true))
-                {
-                    if (key != null)
-                    {
-                        key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
-                    }
-                }
-
-                // 2. Restore startup apps
-                if (AppSettings.Load<bool>("usewinpartstartapps"))
-                {
-                    StartupControl.RestoreStartupApps();
-                }
-
-                // 3. Task Manager Style Restart
-                // By killing and restarting explorer.exe, Windows naturally rebuilds the 
-                // Taskbar, Desktop (Progman), and Icons without us needing to unhide them manually.
-                Console.WriteLine("Restarting explorer.exe (Task Manager style)...");
-
-                // Kill all running instances of explorer
-                KillProcess("explorer.exe");
-
-                // Give Windows a brief moment to clear file locks and handles
-                await Task.Delay(500);
-
-                // Start a fresh explorer.exe instance
-                Process.Start("explorer.exe");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error restoring Windows: {ex.Message}");
-            }
-
-            // Clean up Steam video
-            try
-            {
-                RenameSteamStartupVideo_End();
-                Debug.WriteLine("[Cleanup] Steam startup video restored.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[Cleanup] Error restoring Steam startup video: {ex.Message}");
-            }
-
-            // Remaining cleanup tasks
-            displayfusion("end");
-            KillProcess("PluginLoader_noconsole.exe");
-            Console.WriteLine("PluginLoader_noconsole killed");
-            CleanupLogging();
-            preaudio(false, true);
-
-            // Restore UAC settings
-            try
-            {
-                if (AppSettings.Load<bool>("uac"))
-                {
-                    uac("on");
-                }
-            }
-            catch { uac("on"); }
-
-            // Exit safely
+            // TODO: restore taskbar, re-enable services, cleanup audio
+            // Shell registration and UAC steps removed — DeckTop is not a shell replacement
+            Logger.Log("BackToWindows called — graceful exit");
             Environment.Exit(0);
         }
 
@@ -5310,119 +5232,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
 
-        static void uac(string art)
-        {
-            if (art == "on")
-            {
-                try
-                {
-                    Registry.SetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "ConsentPromptBehaviorAdmin", 5);
-                    Registry.SetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "PromptOnSecureDesktop", 1);
-
-                    //  MessageBox.Show("UAC has been successfully enabled.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    throw new Exception("Unauthorized access: you need to run this program as an administrator.");
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Unable to restore default UAC settings: " + ex.Message);
-                }
-            }
-            else if (art == "off")
-            {
-                try
-                {
-                    Registry.SetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "ConsentPromptBehaviorAdmin", 0);
-                    Registry.SetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "PromptOnSecureDesktop", 0);
-
-                    //  MessageBox.Show("UAC has been successfully disabled.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                }
-                catch (Exception ex)
-                {
-                    //  MessageBox.Show("An error occurred while disabling UAC: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
-        }
-        private async void ConsoleModeToShell()
-        {
-            // Die Pfade zur Windows Shell Registry
-            const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-            const string valueName = "Shell";
-
-            try
-            {
-                // 1. SCHUTZ: Prüfen, ob wir Admin-Rechte haben. Ohne diese stürzt die App bei Registry-Schreibzugriffen ab.
-                if (!IsAdministrator())
-                {
-                    Debug.WriteLine("[ConsoleMode] ERROR: Keine Administratorrechte. Überspringe Shell-Registrierung.");
-                    return;
-                }
-
-                // 2. PFAD ERMITTELN: Pfad der aktuellen .exe holen und in Anführungszeichen setzen
-                string targetExecutable = Process.GetCurrentProcess().MainModule.FileName;
-                if (!targetExecutable.StartsWith("\""))
-                {
-                    targetExecutable = $"\"{targetExecutable}\"";
-                }
-
-                // 3. REGISTRY ÖFFNEN: LocalMachine erfordert Admin-Rechte
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
-                {
-                    if (key == null)
-                    {
-                        Debug.WriteLine($"[ConsoleMode] ERROR: Registry-Pfad '{keyName}' konnte nicht geöffnet werden.");
-                        return;
-                    }
-
-                    // 4. RETRY-LOGIK: Wir versuchen es 3x, falls Windows den Zugriff kurzzeitig blockiert
-                    const int maxRetries = 3;
-                    bool success = false;
-
-                    for (int i = 0; i < maxRetries; i++)
-                    {
-                        try
-                        {
-                            // Wert setzen
-                            key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
-
-                            // Kurze Pause zur Verarbeitung durch das System
-                            await Task.Delay(150);
-
-                            // Überprüfung: Hat es geklappt?
-                            string currentValue = key.GetValue(valueName)?.ToString();
-                            if (currentValue != null && currentValue.Equals(targetExecutable, StringComparison.OrdinalIgnoreCase))
-                            {
-                                Debug.WriteLine($"[ConsoleMode] Shell erfolgreich gesetzt im Versuch {i + 1}.");
-                                success = true;
-                                break;
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"[ConsoleMode] Versuch {i + 1} fehlgeschlagen: {ex.Message}");
-                        }
-
-                        await Task.Delay(500); // Längere Pause vor dem nächsten Versuch
-                    }
-
-                    if (!success)
-                    {
-                        Debug.WriteLine("[ConsoleMode] FATAL: Shell konnte nach mehreren Versuchen nicht geändert werden.");
-                    }
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Debug.WriteLine("[ConsoleMode] Zugriff verweigert. Die App muss als Administrator ausgeführt werden.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ConsoleMode] Unbekannter Fehler in ConsoleModeToShell: {ex.Message}");
-            }
-        }
         private void SettingsVerify()
         {
             try
@@ -5595,127 +5404,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
         private const int SW_HIDE = 0;
 
-        // Method signature changed to async Task to allow non-blocking waits
-        public static async Task winpart()
-        {
-            try
-            {
-                // Only execute if the setting is enabled
-                bool usewinpart = true;
-
-                if (usewinpart)
-                {
-                    try
-                    {
-                        // Set explorer.exe as the default shell in the registry
-                        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
-                            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", writable: true))
-                        {
-                            if (key != null)
-                            {
-                                key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
-                                Console.WriteLine("Shell successfully set to explorer.exe.");
-                            }
-                            else
-                            {
-                                Console.WriteLine("Registry key not found.");
-                            }
-                        }
-
-                        Console.WriteLine("Starting explorer.exe...");
-
-                        // Check if explorer is already running
-                        bool explorerRunning = Process.GetProcessesByName("explorer").Any();
-                        TaskManagerDebloatServices();
-
-                        if (!explorerRunning)
-                        {
-                            Process.Start("explorer.exe");
-                        }
-
-                        // --- OPTIMIZATION: Smart Wait for Explorer ---
-                        // Instead of freezing the app for 5 seconds, we wait asynchronously 
-                        // until the Windows Taskbar is actually created by explorer.exe.
-                        int timeoutCounter = 0;
-                        IntPtr taskbarHandle = IntPtr.Zero;
-
-                        // Poll every 100ms for up to 10 seconds (100 attempts)
-                        while (taskbarHandle == IntPtr.Zero && timeoutCounter < 100)
-                        {
-                            await Task.Delay(100);
-                            taskbarHandle = FindWindow("Shell_TrayWnd", null);
-                            timeoutCounter++;
-                        }
-
-                        // Give Windows a tiny moment to draw the desktop icons properly
-                        await Task.Delay(500);
-                        // ---------------------------------------------
-
-                        // Now safely hide everything
-                        KillProcess("WidgetBoard");
-                        KillProcess("WidgetService");
-                        DesktopIconController.HideDesktopIcons();
-
-                        // Make taskbar invisible
-                        TaskbarVisibility.HideTaskbar();
-                        Console.WriteLine("Shell windows successfully hidden.");
-
-                        TaskbarManager.EnableAutoHide();
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                        Console.WriteLine("Error: Access Denied. Run the application as an administrator.");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Error during explorer startup: " + ex.Message);
-                    }
-
-                    // Restore gcmloader as the shell for the next boot
-                    try
-                    {
-                        const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-                        const string valueName = "Shell";
-
-                        string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-                        string targetExecutable = Path.Combine(programFilesX86, "GCM", "gcmloader", "gcmloader.exe");
-
-                        if (!File.Exists(targetExecutable))
-                        {
-                            return;
-                        }
-
-                        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, writable: true))
-                        {
-                            if (key != null)
-                            {
-                                key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
-
-                                // Verify the change
-                                string currentValue = key.GetValue(valueName)?.ToString();
-                                if (currentValue == targetExecutable)
-                                {
-                                    Console.WriteLine($"Current value: {currentValue} successfully set.");
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"Failed to set '{valueName}'.");
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error restoring shell: {ex.Message}");
-                    }
-                }
-            }
-            catch
-            {
-                AppSettings.Save("usewinpart", false);
-                AppSettings.Save("usewinpartstartapps", false);
-            }
-        }
         #region debloat service
 
         public static void TaskManagerDebloatServices()
@@ -5952,9 +5640,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch { }
 
-            // 1. ZUERST laden wir den Desktop und die Taskleiste im Hintergrund (winpart)
-            Debug.WriteLine("Starte WinPart-Modus (Desktop laden)...");
-            await winpart();
+            // Desktop shell bootstrap (winpart) removed — DeckTop does not replace Winlogon Shell
+            Debug.WriteLine("Launcher sequence (no winpart)...");
 
             // 2. Wir geben dem System kurz Zeit zum Durchatmen (1 Sekunde), 
             // damit keine Popups oder Fokus-Diebe vom Windows-Explorer stören.
@@ -5986,9 +5673,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     await StartSteam();
                     break;
             }
-
-            // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
-            ConsoleModeToShell();
         }
         #endregion winparts
 
@@ -6499,9 +6183,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // starten wir den eigentlichen Launcher. Er poppt jetzt nahezu sofort auf!
                 await StartConfiguredLauncherAsync();
 
-                // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
-                ConsoleModeToShell();
-
                 await Task.Delay(500);
             }
             catch (Exception ex)
@@ -6519,7 +6200,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SetupLogging();
             BoostProcessPriority();
-            uac("off");
 
             // ---> HIER IST DAS NEUE AWAIT <---
             await prestartlist();
@@ -6545,9 +6225,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch { }
 
-            // JETZT laden wir den Desktop (explorer.exe) und verstecken die Taskleiste.
-            Debug.WriteLine("Starte WinPart-Modus (Desktop laden) im Hintergrund...");
-            await winpart();
+            // winpart (explorer + Winlogon shell swap) removed — DeckTop does not replace Shell
+            Debug.WriteLine("SetupSystemAndDesktopAsync: skipping legacy winpart desktop bootstrap.");
         }
 
         // Diese Methode kümmert sich am Ende NUR noch um das reine Öffnen des Launchers.

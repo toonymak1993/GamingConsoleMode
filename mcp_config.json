@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "args": [
+        "-m",
+        "mcp_server_fetch"
+      ],
+      "command": "python",
+      "disabled": false
+    }
+  }
+}

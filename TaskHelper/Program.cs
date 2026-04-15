@@ -1,5 +1,4 @@
-﻿using Microsoft.Win32;
-using Microsoft.Win32.TaskScheduler;
+﻿using Microsoft.Win32.TaskScheduler;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -32,8 +31,6 @@ namespace TaskHelper
                 Console.WriteLine("Usage:");
                 Console.WriteLine("  TaskHelper.exe --enable");
                 Console.WriteLine("  TaskHelper.exe --disable");
-                Console.WriteLine("  TaskHelper.exe --uac=enable");
-                Console.WriteLine("  TaskHelper.exe --uac=disable");
                 return;
             }
 
@@ -53,14 +50,6 @@ namespace TaskHelper
                     DisableAutoLaunchTask();
                     Logger.Write("Task removed and process terminated.");
                     Console.WriteLine("Task removed and process terminated.");
-                }
-                else if (arg == "--uac=enable")
-                {
-                    SetUAC(true);
-                }
-                else if (arg == "--uac=disable")
-                {
-                    SetUAC(false);
                 }
                 else
                 {
@@ -169,39 +158,6 @@ namespace TaskHelper
             catch (Exception ex)
             {
                 Logger.Write("Error terminating wingamepad.exe: " + ex.Message);
-            }
-        }
-
-        private static void SetUAC(bool enable)
-        {
-            try
-            {
-                string key = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
-
-                if (enable)
-                {
-                    Registry.SetValue(key, "ConsentPromptBehaviorAdmin", 5);
-                    Registry.SetValue(key, "PromptOnSecureDesktop", 1);
-                    Logger.Write("UAC prompt behavior ENABLED.");
-                    Console.WriteLine("UAC prompt behavior ENABLED. No reboot required.");
-                }
-                else
-                {
-                    Registry.SetValue(key, "ConsentPromptBehaviorAdmin", 0);
-                    Registry.SetValue(key, "PromptOnSecureDesktop", 0);
-                    Logger.Write("UAC prompt behavior DISABLED.");
-                    Console.WriteLine("UAC prompt behavior DISABLED. No reboot required.");
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Logger.Write("Access denied while modifying UAC behavior.");
-                Console.WriteLine("Access denied. Please run this tool as Administrator.");
-            }
-            catch (Exception ex)
-            {
-                Logger.Write("Error modifying UAC behavior: " + ex.Message);
-                Console.WriteLine("Error modifying UAC behavior: " + ex.Message);
             }
         }
     }

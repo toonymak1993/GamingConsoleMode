@@ -1,4 +1,5 @@
-﻿using Microsoft.UI.Xaml;
+﻿// SECONDARY — see gcmloader (primary WinUI host with mutex + admin check).
+using Microsoft.UI.Xaml;
 using System;
 
 // To learn more about WinUI, the WinUI project structure,
