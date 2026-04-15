@@ -35,7 +35,6 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Principal;
-using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -43,6 +42,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Tomlyn;
 using Tomlyn.Model;
+using gcmloader.Services;
 using Vanara.PInvoke;
 using Windows.Devices.Power;
 using Windows.Gaming.Input;
@@ -1707,42 +1707,7 @@ namespace gcmloader
                 }
             });
         }
-        private string GetSteamInstallPath()
-        {
-            try
-            {
-                // Try reading the 64-bit path first
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam"))
-                {
-                    if (key != null)
-                    {
-                        var path = key.GetValue("InstallPath")?.ToString();
-                        if (!string.IsNullOrEmpty(path))
-                        {
-                            return path;
-                        }
-                    }
-                }
-
-                // Fallback to the 32-bit path
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam"))
-                {
-                    if (key != null)
-                    {
-                        var path = key.GetValue("InstallPath")?.ToString();
-                        if (!string.IsNullOrEmpty(path))
-                        {
-                            return path;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[GetSteamInstallPath] Error reading registry: {ex.Message}");
-            }
-            return null;
-        }
+        private string GetSteamInstallPath() => RegistryOperations.TryGetSteamInstallDirectory();
 
         // DEBUG-LOGGING-VERSION (ENGLISH) - V3 (Correct Manifest Path)
         private string GetSteamAppIdFromExePath(string exePath) // steamInstallPath parameter removed
@@ -4692,41 +4657,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
             Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
         }
-        static void KillProcess(string ProcessName)
-        {
-            ProcessName = ProcessName.Substring(0, ProcessName.Length - 4);
-            bool explorersStillRunning = true;
-
-            while (explorersStillRunning)
-            {
-                // Get all processes named "explorer"
-                var explorerProcesses = Process.GetProcessesByName(ProcessName);
-
-                // If no "explorer" process found, exit loop
-                if (!explorerProcesses.Any())
-                {
-                    Console.WriteLine(explorerProcesses + " process have been successfully killed.");
-                    explorersStillRunning = false;
-                }
-                else
-                {
-                    // Kill each "explorer" process
-                    foreach (var process in explorerProcesses)
-                    {
-                        try
-                        {
-                            process.Kill();
-                            process.WaitForExit(); // Optional, to ensure process is terminated
-                            Console.WriteLine(process + "process killed successfully.");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error attempting to kill : {ex.Message}");
-                        }
-                    }
-                }
-            }
-        }
         private void BackToWindows()
         {
             // TODO: restore taskbar, re-enable services, cleanup audio
@@ -5017,18 +4947,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             switch (launcher)
             {
                 case "steam":
-                    using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam") ??
-                                     Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam"))
-                    {
-                        if (key != null)
-                        {
-                            string installPath = key.GetValue("InstallPath")?.ToString();
-                            if (!string.IsNullOrEmpty(installPath))
-                            {
-                                path = Path.Combine(installPath, "steam.exe");
-                            }
-                        }
-                    }
+                    path = RegistryOperations.TryGetSteamExePath();
                     break;
 
                 case "playnite":
@@ -5406,174 +5325,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #region debloat service
 
-        public static void TaskManagerDebloatServices()
-        {
-            var debloatList = IsHandheld() ? _debloatServicesHandheld : _debloatServicesDesktop;
+        public static void TaskManagerDebloatServices() =>
+            ServiceManagementService.Instance.TaskManagerDebloatServices(IsHandheld());
 
-            foreach (var (serviceName, processName) in debloatList)
-            {
-                if (!string.IsNullOrWhiteSpace(processName))
-                {
-                    // Wenn Prozessname bekannt → nutze volle Methode
-                    DisableServiceAndKillProcess(serviceName, processName);
-                }
-                else
-                {
-                    // Nur Dienst deaktivieren
-                    try
-                    {
-                        using var service = new ServiceController(serviceName);
-                        if (service.Status != ServiceControllerStatus.Stopped &&
-                            service.Status != ServiceControllerStatus.StopPending)
-                        {
-                            service.Stop();
-                            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
-                            Console.WriteLine($"[✓] Stopped: {serviceName}");
-                        }
+        public static void TaskManagerReEnableServices() =>
+            ServiceManagementService.Instance.TaskManagerReEnableServices(IsHandheld());
 
-                        DisableServiceStartup(serviceName);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[!] Failed: {serviceName} → {ex.Message}");
-                    }
-                }
-            }
-        }
-        public static void TaskManagerReEnableServices()
-        {
-            // Choose correct list based on device mode
-            var servicesToEnable = IsHandheld() ? _debloatServicesHandheld : _debloatServicesDesktop;
+        public static void SetServiceStartupToAuto(string serviceName) =>
+            ServiceManagementService.Instance.SetServiceStartupToAuto(serviceName);
 
-            // Set each service to start automatically (do not start now)
-            foreach (var (serviceName, _) in servicesToEnable)
-            {
-                SetServiceStartupToAuto(serviceName);
-            }
-        }
-        public static void SetServiceStartupToAuto(string serviceName)
-        {
-            try
-            {
-                // Use sc.exe to set service to automatic start
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "sc.exe",
-                    Arguments = $"config \"{serviceName}\" start= auto",
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    Verb = "runas"
-                })?.WaitForExit();
-
-                Debug.WriteLine($"[✓] Service {serviceName} set to automatic startup.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[!] Failed to set {serviceName} to auto: {ex.Message}");
-            }
-        }
-        #region disable
-        private static void DisableServiceStartup(string serviceName)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "sc.exe",
-                Arguments = $"config \"{serviceName}\" start= disabled",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                Verb = "runas" // Admin!
-            };
-
-            using var process = Process.Start(psi);
-            process?.WaitForExit();
-        }
-
-
-        private static readonly List<(string ServiceName, string? ProcessName)> _debloatServicesDesktop = new()
-{
-    ("SysMain", null),                       // Superfetch – unnötig bei SSD
-    ("DiagTrack", null),                     // Telemetrie
-    ("MapsBroker", null),                    // Karten-Dienst
-    ("RetailDemo", null),                    // Demo-Modus
-    ("Fax", null),                           // Fax-Dienst
-    ("WSearch", "SearchIndexer"),            // Windows Suche :contentReference[oaicite:1]{index=1}
-    ("OneSyncSvc", "OneDrive"),              // OneDrive Sync
-    ("PhoneSvc", null),                      // Telefon-Anbindung
-    ("WerSvc", null),                        // Fehlerberichte
-    ("Spooler", null),                       // Druckerwarteschlange
-    ("dmwappushservice", null),              // Push Notifications
-    ("ConnectedUserExperiencesAndTelemetry", null), // Feedback & Telemetrie :contentReference[oaicite:2]{index=2}
-    ("MessagingService", null),              // App-Nachrichten
-    ("ContactDataSvc", null),                // Kontakte Synchronisation
-    ("IpOverUsbSvc", null)                   // USB IP-Geräte
-};
-
-        private static readonly List<(string ServiceName, string? ProcessName)> _debloatServicesHandheld = new()
-{
-    ("SysMain", null),
-    ("DiagTrack", null),
-    ("MapsBroker", null),
-    ("RetailDemo", null),
-    ("Fax", null),
-    ("WSearch", "SearchIndexer"),
-    ("OneSyncSvc", "OneDrive"),
-    ("WerSvc", null),
-    ("dmwappushservice", null),
-    ("PhoneSvc", null),
-    ("MessagingService", null),
-    ("ContactDataSvc", null),
-};
-
-
-        public static void DisableServiceAndKillProcess(string serviceName, string processName)
-        {
-            try
-            {
-                // Stop and disable service
-                using (var service = new ServiceController(serviceName))
-                {
-                    if (service.Status != ServiceControllerStatus.Stopped &&
-                        service.Status != ServiceControllerStatus.StopPending)
-                    {
-                        service.Stop();
-                        service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(5));
-                    }
-
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "sc.exe",
-                        Arguments = $"config \"{serviceName}\" start= disabled",
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        Verb = "runas"
-                    })?.WaitForExit();
-                }
-
-                // Kill background process (if running)
-                foreach (var proc in Process.GetProcessesByName(processName))
-                {
-                    try
-                    {
-                        proc.Kill(true); // true = kill child processes too
-                        Debug.WriteLine($"Killed process {proc.ProcessName} (PID {proc.Id})");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Error killing process {proc.ProcessName}: {ex.Message}");
-                    }
-                }
-
-                Debug.WriteLine($"Service {serviceName} disabled and background process {processName} killed.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error disabling service or killing process: {ex.Message}");
-            }
-        }
-        #endregion disable
+        public static void DisableServiceAndKillProcess(string serviceName, string processName) =>
+            ServiceManagementService.Instance.DisableServiceAndKillProcess(serviceName, processName);
 
         #endregion debloat service
         public static class DesktopIconController
@@ -5608,22 +5370,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Restore visibility of the desktop host windows
             public static void ShowDesktopIcons()
             {
-                // Kill all explorer.exe processes
-                foreach (var proc in Process.GetProcessesByName("explorer"))
-                {
-                    try
-                    {
-                        proc.Kill(true); // Kill including child processes
-                        Debug.WriteLine("✓ explorer.exe killed.");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[!] Error killing explorer.exe: {ex.Message}");
-                    }
-                }
-
-                // Small delay to ensure processes are terminated
-                System.Threading.Thread.Sleep(3000);
+                ShellManagementService.KillExplorerProcesses(3000);
             }
         }
 
@@ -6124,7 +5871,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     throw new FileNotFoundException("Der Pfad für den Custom Launcher ist ungültig oder wurde nicht gefunden.");
                 }
 
-                KillProcess(Path.GetFileName(launcherPath));
+                ShellManagementService.KillAllProcessesForExecutableFileName(Path.GetFileName(launcherPath));
                 StartProcessAsNonAdmin(launcherPath, null, Path.GetDirectoryName(launcherPath));
             }
             catch (Exception ex)
@@ -8373,25 +8120,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                // 1. Verhindert, dass der Guide-Button die Game Bar oder die Taskansicht (Alt+Tab) öffnet
-                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\GameBar"))
-                {
-                    if (key != null)
-                    {
-                        // Schaltet "Spieleleiste mit dieser Taste auf einem Controller öffnen" aus
-                        key.SetValue("UseNexusForGameBarEnabled", 0, Microsoft.Win32.RegistryValueKind.DWord);
-                        key.SetValue("ShowStartupPanel", 0, Microsoft.Win32.RegistryValueKind.DWord);
-                    }
-                }
-
-                // 2. Schaltet das GameDVR Overlay (Hintergrundaufzeichnung) auf Systemebene ab
-                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\GameDVR"))
-                {
-                    if (key != null)
-                    {
-                        key.SetValue("AppCaptureEnabled", 0, Microsoft.Win32.RegistryValueKind.DWord);
-                    }
-                }
+                RegistryOperations.SetDwordCurrentUser(@"Software\Microsoft\GameBar", "UseNexusForGameBarEnabled", 0);
+                RegistryOperations.SetDwordCurrentUser(@"Software\Microsoft\GameBar", "ShowStartupPanel", 0);
+                RegistryOperations.SetDwordCurrentUser(@"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", 0);
 
                 Debug.WriteLine("[System] Windows Controller Shortcuts (Game Bar / Task View) erfolgreich deaktiviert.");
             }
@@ -9839,37 +9570,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #region Gamepad Navigation
 
-        private void EnsureTouchKeyboardServiceIsRunning()
-        {
-            const string serviceName = "TabletInputService";
-            try
-            {
-                // Get a controller for the service.
-                using (ServiceController service = new ServiceController(serviceName))
-                {
-                    // Check if the service is stopped.
-                    if (service.Status == ServiceControllerStatus.Stopped)
-                    {
-                        Debug.WriteLine($"[GCM] Touch Keyboard service ('{serviceName}') is stopped. Starting it now...");
-
-                        // Start the service and wait for it to be running.
-                        service.Start();
-                        service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
-
-                        Debug.WriteLine($"[GCM] Service '{serviceName}' started successfully.");
-                    }
-                    else
-                    {
-                        Debug.WriteLine($"[GCM] Touch Keyboard service ('{serviceName}') is already running.");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log an error if the service cannot be found or started (e.g., due to permissions).
-                Debug.WriteLine($"[GCM] ERROR: Could not start the touch keyboard service ('{serviceName}'). On-screen keyboard may not be available. Details: {ex.Message}");
-            }
-        }
+        private void EnsureTouchKeyboardServiceIsRunning() =>
+            ServiceManagementService.Instance.EnsureServiceRunning("TabletInputService", TimeSpan.FromSeconds(10));
 
 
 

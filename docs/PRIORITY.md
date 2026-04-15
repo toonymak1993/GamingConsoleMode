@@ -49,14 +49,15 @@ Delete `uac("off")` call. Remove UAC restore block from exit sequence (lines 480
 
 ---
 
-### 5. Extract services from the monolith
+### 5. Extract services from the monolith [DONE]
+<!-- gcmloader/Services: ShellManagementService, IServiceManager+ServiceManagementService sc.exe/ServiceController, RegistryOperations Steam+HKCU DWORDs; LauncherService deferred — 2026-04-15 -->
 **File:** `gcmloader/gcmloaderwindow.xaml.cs` (12,654 lines)
 
 Extract into separate service classes:
-- `ShellManagementService` — registry read/write, explorer restart
-- `ServiceManagementService` — Windows service enable/disable via WMI
+- `ShellManagementService` — explorer.exe kill/restart helpers
+- `ServiceManagementService` — Windows service enable/disable via `ServiceController` + `sc.exe` (not WMI)
 - `RegistryOperations` — shared low-level registry helpers
-- `LauncherService` — Steam / Playnite / Xbox App launch logic
+- `LauncherService` — Steam / Playnite / Xbox App launch logic (deferred)
 
 Leave UI code in the window. Services get interfaces so they can be tested or swapped.
 

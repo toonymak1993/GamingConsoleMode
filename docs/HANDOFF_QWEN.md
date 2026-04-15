@@ -5,6 +5,7 @@
 You are picking up a C# / WinUI 3 project called **DeckTop** — a fork of GameConsoleMode, a Windows shell-replacement gaming launcher. The previous agent (Claude) performed a full architectural audit and defined a priority work plan. Your job is to execute that plan in order.
 
 **Read these files before writing a single line of code:**
+
 - `AGENTS.md` — project rules, what to never touch, key file map
 - `docs/AUDIT.md` — full audit with file:line references
 - `docs/PRIORITY.md` — the ordered work plan you will execute
@@ -22,6 +23,7 @@ Execute the DeckTop priority work plan defined in `docs/PRIORITY.md`. Work throu
 ### Step 1 — Decide the entry point project
 
 Read both:
+
 - `GAMINGCONSOLEMODE/App.xaml.cs`
 - `gcmloader/App.xaml.cs`
 
@@ -36,11 +38,9 @@ Determine which project is the real shell host (has the admin check, mutex, and 
 Actions (in this exact order, one at a time):
 
 1. Find and delete method `ConsoleModeToShell()` (lines ~5349–5425). It writes to `HKLM\Winlogon\Shell`. Remove the call site at line ~6503 inside `Start()`.
-
 2. Find method `winpart()` (lines ~5611–5616). Delete it and any call sites.
-
 3. Find method `BackToWindows()` (lines ~4730–4814). This is a 19-step exit sequence. Replace the body with:
-   ```csharp
+  ```csharp
    private async void BackToWindows()
    {
        // TODO: restore taskbar, re-enable services, cleanup audio
@@ -48,11 +48,9 @@ Actions (in this exact order, one at a time):
        Logger.Log("BackToWindows called — graceful exit");
        Environment.Exit(0);
    }
-   ```
+  ```
    You will fill in the non-shell, non-UAC cleanup steps in a follow-up pass.
-
 4. Search the entire solution for any remaining writes to `Winlogon` or `Shell` registry key. Remove them all.
-
 5. Build the solution. Fix any compile errors caused by removed methods. Do not restore deleted logic.
 
 ---
@@ -60,19 +58,16 @@ Actions (in this exact order, one at a time):
 ### Step 3 — Remove UAC disable
 
 **Target files:**
+
 - `gcmloader/gcmloaderwindow.xaml.cs`
 - `TaskHelper/Program.cs`
 
 Actions:
 
 1. In `gcmloaderwindow.xaml.cs` line ~6522: delete the line `uac("off");`
-
 2. Delete method `uac(string art)` (lines ~5313–5348).
-
 3. In `TaskHelper/Program.cs`: remove the `--uac=enable` and `--uac=disable` argument handling (lines ~35–64) and the `SetUAC()` method (lines ~175–206).
-
 4. Search entire solution for any remaining references to `ConsentPromptBehaviorAdmin` or `PromptOnSecureDesktop`. Remove them.
-
 5. Build and fix compile errors.
 
 ---
@@ -80,16 +75,15 @@ Actions:
 ### Step 4 — Fix the config system
 
 **Target files:**
+
 - `gcmloader/AppSettings.cs`
 - `GAMINGCONSOLEMODE/AppSettings.cs`
 
 Actions:
 
 1. Open both `AppSettings.cs` files. They diverge — `gcmloader` version is 130 lines, `GAMINGCONSOLEMODE` is 308 lines. Identify which has the more complete `initialconfig()` method.
-
 2. Add the following keys with safe defaults to `initialconfig()` if they are missing. These keys are referenced throughout the codebase but never initialized:
-
-   ```csharp
+  ```csharp
    // In initialconfig() or equivalent defaults dictionary:
    { "uac", false },
    { "launcher", "steam" },
@@ -107,12 +101,9 @@ Actions:
    { "usestartupvideo", false },
    { "useseamlessswitchtogcm", false },
    { "winmode_shortcut", "" }
-   ```
-
+  ```
 3. Add a `// REMOVED: uac` comment next to any `"uac"` key — it remains in config for backward compat but has no effect now.
-
 4. Do NOT merge the two files yet — that is a larger refactor. Just make both have safe defaults.
-
 5. Build and fix compile errors.
 
 ---
@@ -144,6 +135,7 @@ Build and fix compile errors after each sub-task.
 ### Step 6 — Remove gamepad input system
 
 **Target files:**
+
 - `gcmloader/gcmloaderwindow.xaml.cs`
 - `wingamepad/MainWindow.xaml.cs`
 - `OverlayWindow/MainWindow.xaml.cs`
@@ -151,16 +143,13 @@ Build and fix compile errors after each sub-task.
 Actions:
 
 1. In `gcmloaderwindow.xaml.cs`:
-   - Delete `SetupGamepad()` method and its call site
-   - Delete `XboxInputLoop()`, `PlayStationInputLoop()`, `PlayStationEdgeInputLoop()` methods (lines ~9302–9304 start them)
-   - Delete `XInputGetStateSecret` P/Invoke struct and DllImport (lines ~9325–9345)
-   - Delete D-pad navigation handlers (lines ~10344–10396)
-   - Delete gamepad state arrays: `_lastButtonStates`, `_lastShortcutButtons`, `_nextAllowedInputTime`, `_isStickCentered`
-
+  - Delete `SetupGamepad()` method and its call site
+  - Delete `XboxInputLoop()`, `PlayStationInputLoop()`, `PlayStationEdgeInputLoop()` methods (lines ~9302–9304 start them)
+  - Delete `XInputGetStateSecret` P/Invoke struct and DllImport (lines ~9325–9345)
+  - Delete D-pad navigation handlers (lines ~10344–10396)
+  - Delete gamepad state arrays: `_lastButtonStates`, `_lastShortcutButtons`, `_nextAllowedInputTime`, `_isStickCentered`
 2. Remove `SharpDX.XInput` NuGet reference from `gcmloader.csproj`.
-
 3. In `wingamepad.csproj` and `OverlayWindow`: add a `<!-- DEPRECATED: scheduled for removal -->` comment to the project file's `<PropertyGroup>`. Do not delete the projects yet — confirm with the human first.
-
 4. Build and fix compile errors.
 
 ---
@@ -172,9 +161,8 @@ Actions:
 Actions:
 
 1. Identify the main game card list control (likely a `GridView`, `ListView`, or custom panel).
-
 2. Add `KeyDown` handler on the main window:
-   ```csharp
+  ```csharp
    private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
    {
        switch (e.Key)
@@ -187,13 +175,11 @@ Actions:
            case VirtualKey.Escape: GoBack(); break;
        }
    }
-   ```
-
+  ```
 3. Ensure all interactive elements (game cards, buttons, settings rows) have:
-   - `IsTabStop="True"`
-   - Correct `TabIndex` order
-   - `PointerPressed` or `Click` handlers where missing
-
+  - `IsTabStop="True"`
+  - Correct `TabIndex` order
+  - `PointerPressed` or `Click` handlers where missing
 4. Test that Tab key moves focus through all interactive elements in a logical order.
 
 ---
