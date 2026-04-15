@@ -29,7 +29,6 @@ namespace gcmloader
             if (!isFirstInstance)
             {
                 Environment.Exit(0);
-                return;
             }
 
              //2. Admin-Rechte Check
@@ -37,7 +36,6 @@ namespace gcmloader
             {
                 RestartAsAdmin();
                 Environment.Exit(0);
-                return;
             }
 
             // 3. Toast Notification Setup (Optional)
@@ -51,12 +49,7 @@ namespace gcmloader
             m_window.Activate();
         }
 
-        /* * DOCUMENTATION:
-         * Dies ist die entscheidende Methode für deinen Skalierungs-Fix.
-         * Da WinUI 3 oft das Layout bei DPI-Wechseln (100% -> 150%) intern "vergisst",
-         * schließen wir das alte Fenster und bauen ein komplett neues auf.
-         * Nur so wird die neue Windows-Skalierung garantiert zu 100% übernommen.
-         */
+        /// <summary>Recreate <see cref="m_window"/> so DPI / display scale changes apply cleanly (WinUI quirk).</summary>
         public static void RebuildMainWindow()
         {
             var oldWindow = m_window;

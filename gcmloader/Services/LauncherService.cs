@@ -71,6 +71,9 @@ public sealed class LauncherService : ILauncherService
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
+    /// <summary>Win32 <c>ShowWindow</c> command: maximize (same as SDK SW_SHOWMAXIMIZED).</summary>
+    private const int SwShowMaximized = 3;
+
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
@@ -254,8 +257,13 @@ public sealed class LauncherService : ILauncherService
     public async Task SwitchToConfiguredLauncherAsync(CancellationToken cancellationToken = default)
     {
         _shell.MakeSelfNonTopmost();
+        await StartConfiguredLauncherAsync(forceSteamRestart: false, forceXboxRestart: false, cancellationToken).ConfigureAwait(false);
+    }
 
-        string launcher = AppSettings.Load<string>("launcher");
+    public async Task StartConfiguredLauncherAsync(bool forceSteamRestart = false, bool forceXboxRestart = false, CancellationToken cancellationToken = default)
+    {
+        string launcher = "steam";
+        try { launcher = AppSettings.Load<string>("launcher"); } catch { }
         Debug.WriteLine($"[GCM] Wechsle zu konfiguriertem Launcher: '{launcher}'...");
 
         try
@@ -263,7 +271,7 @@ public sealed class LauncherService : ILauncherService
             switch (launcher)
             {
                 case "steam":
-                    await StartSteamAsync(false, cancellationToken).ConfigureAwait(false);
+                    await StartSteamAsync(forceSteamRestart, cancellationToken).ConfigureAwait(false);
                     return;
 
                 case "gfn":
@@ -290,7 +298,12 @@ public sealed class LauncherService : ILauncherService
                     return;
 
                 case "xbox":
-                    await _shell.StartXboxAsync(false).ConfigureAwait(false);
+                    await _shell.StartXboxAsync(forceXboxRestart).ConfigureAwait(false);
+                    return;
+
+                default:
+                    AppSettings.Save("launcher", "steam");
+                    await StartSteamAsync(forceSteamRestart, cancellationToken).ConfigureAwait(false);
                     return;
             }
         }
@@ -427,7 +440,7 @@ public sealed class LauncherService : ILauncherService
             {
                 Debug.WriteLine($"[GCM] Steam BP window ready. Applying Nuclear-Focus...");
                 await _shell.ForcefullyBringToForeground(steamHwnd).ConfigureAwait(false);
-                ShowWindow(steamHwnd, 3);
+                ShowWindow(steamHwnd, SwShowMaximized);
             }
             else
             {
@@ -485,7 +498,6 @@ public sealed class LauncherService : ILauncherService
 
     public async Task StartGfnAsync(CancellationToken cancellationToken = default)
     {
-        const int SW_SHOWMAXIMIZED = 3;
         try
         {
             Debug.WriteLine("[GCM] Prüfe GeForce Now...");
@@ -497,7 +509,7 @@ public sealed class LauncherService : ILauncherService
                 {
                     _shell.MakeSelfNonTopmost();
                     await _shell.ForcefullyBringToForeground(p.MainWindowHandle).ConfigureAwait(false);
-                    ShowWindow(p.MainWindowHandle, SW_SHOWMAXIMIZED);
+                    ShowWindow(p.MainWindowHandle, SwShowMaximized);
                     return;
                 }
             }
@@ -537,7 +549,7 @@ public sealed class LauncherService : ILauncherService
                 _shell.MakeSelfNonTopmost();
                 await _shell.ForcefullyBringToForeground(gfnHwnd).ConfigureAwait(false);
                 await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-                ShowWindow(gfnHwnd, SW_SHOWMAXIMIZED);
+                ShowWindow(gfnHwnd, SwShowMaximized);
             }
         }
         catch (Exception ex)

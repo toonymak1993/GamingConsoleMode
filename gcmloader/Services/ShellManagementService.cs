@@ -74,13 +74,13 @@ namespace gcmloader.Services
                 ? exeFileName.Substring(0, exeFileName.Length - 4)
                 : exeFileName;
 
-            bool explorersStillRunning = true;
-            while (explorersStillRunning)
+            bool matchingProcessesRemain = true;
+            while (matchingProcessesRemain)
             {
                 var processes = Process.GetProcessesByName(processName);
                 if (!processes.Any())
                 {
-                    explorersStillRunning = false;
+                    matchingProcessesRemain = false;
                 }
                 else
                 {
@@ -90,7 +90,7 @@ namespace gcmloader.Services
                         {
                             process.Kill();
                             process.WaitForExit();
-                            Console.WriteLine(process + "process killed successfully.");
+                            Console.WriteLine($"{process.ProcessName} (PID {process.Id}) process killed successfully.");
                         }
                         catch (Exception ex)
                         {

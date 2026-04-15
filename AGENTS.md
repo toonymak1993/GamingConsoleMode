@@ -97,12 +97,13 @@ Setting `use_controller_navigation` in `settings.toml` defaults to **false** (de
 
 ## Learned User Preferences
 
-- When executing an attached implementation plan, **do not edit the plan file**; implement in the repo only.
 - Name feature branches with the `cursor/` prefix when using tool-driven workflows.
 - Split large work into passes with bounded scope.
-- Treat DeckTop as an independent fork line; contributing upstream is optional, not assumed.
+- Contributing upstream is optional, not assumed (fork context: **What This Project Is**).
 - When the main launcher UI has focus, keyboard typing should engage or focus search automatically.
+
+---
 
 ## Learned Workspace Facts
 
-- Root `global.json` pins the .NET SDK to 8.0.419 with `rollForward: latestFeature` for consistent local builds.
+- SDK: root `global.json` pins **8.0.419** with `rollForward: latestFeature` for reproducible local builds.

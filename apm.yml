@@ -1,0 +1,9 @@
+name: DeckTop
+version: (1.0.0)
+description: A desktop-first Windows shell replacement built on GameConsoleMode. Fast,
+  keyboard and mouse driven, sleek and with no controller assumptions.
+author: mta-babel
+dependencies:
+  apm: []
+  mcp: []
+scripts: {}

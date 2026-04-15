@@ -11,11 +11,12 @@ namespace TaskHelper
 {
     internal class Program
     {
+        private const string AutoLaunchTaskName = "GCM_wingamepad";
+        private const string WingamepadExePath = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\wingamepad\wingamepad.exe";
+        private const string WingamepadProcessName = "wingamepad";
+
         static void Main(string[] args)
         {
-
-
-
             Logger.Init(); // start new log file
             Logger.Write("Program started.");
 
@@ -35,7 +36,7 @@ namespace TaskHelper
                 return;
             }
 
-            string arg = args[0].ToLower();
+            string arg = args[0].ToLowerInvariant();
             Logger.Write("Received argument: " + arg);
 
             try
@@ -82,10 +83,8 @@ namespace TaskHelper
             {
                 try
                 {
-                    string taskName = "GCM_wingamepad";
-
                     // Clean up previous task
-                    ts.RootFolder.DeleteTask(taskName, false);
+                    ts.RootFolder.DeleteTask(AutoLaunchTaskName, false);
                     Logger.Write("Old task deleted (if it existed).");
 
                     TaskDefinition td = ts.NewTask();
@@ -100,8 +99,7 @@ namespace TaskHelper
                         Enabled = true
                     });
 
-                    string exePath = @"C:\Program Files (x86)\GCMcrew\GCM\GCM\wingamepad\wingamepad.exe";
-                    td.Actions.Add(new ExecAction(exePath, null, null));
+                    td.Actions.Add(new ExecAction(WingamepadExePath, null, null));
 
                     td.Settings.StopIfGoingOnBatteries = false;
                     td.Settings.DisallowStartIfOnBatteries = false;
@@ -111,13 +109,13 @@ namespace TaskHelper
                     td.Settings.StartWhenAvailable = true;
                     td.Settings.AllowDemandStart = true;
 
-                    ts.RootFolder.RegisterTaskDefinition(taskName, td,
+                    ts.RootFolder.RegisterTaskDefinition(AutoLaunchTaskName, td,
                         TaskCreation.CreateOrUpdate, null, null,
                         TaskLogonType.InteractiveToken);
 
                     Logger.Write("Task registered successfully.");
 
-                    Task task = ts.FindTask(taskName);
+                    Task task = ts.FindTask(AutoLaunchTaskName);
                     if (task != null)
                     {
                         task.Run();
@@ -142,13 +140,13 @@ namespace TaskHelper
 
             using (TaskService ts = new TaskService())
             {
-                ts.RootFolder.DeleteTask("GCM_wingamepad", false);
+                ts.RootFolder.DeleteTask(AutoLaunchTaskName, false);
                 Logger.Write("Task deleted.");
             }
 
             try
             {
-                Process[] processes = Process.GetProcessesByName("wingamepad");
+                Process[] processes = Process.GetProcessesByName(WingamepadProcessName);
                 foreach (Process proc in processes)
                 {
                     proc.Kill();

@@ -39,9 +39,9 @@ Delete `uac("off")` call. Remove UAC restore block from exit sequence (lines 480
 
 ### 4. Fix the config system [DONE]
 <!-- AddDefaultSettingsKeys in both AppSettings — Handoff keys + mini-launcher paths + winmode_shortcut table; no merge — 2026-04-15 -->
-**Files:** `gcmloader/AppSettings.cs`, `GAMINGCONSOLEMODE/AppSettings.cs`
+**Files:** `DeckTop.Settings/AppSettings.cs` (shared TOML); thin facades in `gcmloader` / `GAMINGCONSOLEMODE`
 
-- Merge into one `AppSettings.cs`
+- Single implementation: `DeckTop.Settings.AppSettings` (`Save` / `Load` / defaults in `AddDefaultSettingsKeys`); WinUI projects forward or add WinUI-only helpers — not duplicate TOML stacks
 - Add every referenced key to `initialconfig()` with safe defaults
 - Keys missing defaults: `"uac"`, `"launcher"`, `"steamlauncherpath"`, `"onboarding"`, `"lossless"`, `"usewinpart"`, `"usewinpartstartapps"`, `"useboilr"`, `"usecssloader"`, `"usedeckyloader"`, `"usedisplayfusion"`, `"usepreaudio"`, `"usesteamstartupvideo"`, `"usestartupvideo"`, `"useseamlessswitchtogcm"`, `"winmode_shortcut"`
 

@@ -9,7 +9,7 @@ namespace gcmloader.Services;
 /// </summary>
 public static class FocusNavigationHelper
 {
-    /// <summary>Returns true if the key is Escape (hardware or Gamepad B).</summary>
+    /// <summary>Returns true if the key is Escape.</summary>
     public static bool IsCancelKey(KeyRoutedEventArgs e)
     {
         return e.Key == VirtualKey.Escape;

@@ -862,42 +862,6 @@ namespace gcmloader
 
         bool isAppListLoaded = false;
 
-        [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        internal interface IShellLinkW
-        {
-            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, uint fFlags);
-            void GetIDList(out IntPtr ppidl);
-            void SetIDList(IntPtr pidl);
-            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
-            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
-            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
-            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxName);
-            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
-            void GetHotkey(out short pwHotkey);
-            void SetHotkey(short wHotkey);
-            void GetShowCmd(out int piShowCmd);
-            void SetShowCmd(int iShowCmd);
-            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
-            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
-            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
-            void Resolve(IntPtr hwnd, uint fFlags);
-            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
-        }
-
-        [ComImport, Guid("0000010b-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        internal interface IPersistFile
-        {
-            void GetClassID(out Guid pClassID);
-            void IsDirty();
-            void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
-            void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, bool fRemember);
-            void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
-            void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
-        }
-
-        [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
-        internal class ShellLink { }
         private List<Button> _launcherResultButtons = new List<Button>();
         private int _selectedLauncherResultIndex = 0;
         private ObservableCollection<AppInfo> AllInstalledApps { get; } = new ObservableCollection<AppInfo>();
@@ -2686,19 +2650,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        // NEU: Unsere eigene Methode zum Auslesen von .lnk-Dateien
-        private string ResolveLnkShortcut(string lnkPath)
-        {
-            var shellLink = (IShellLinkW)new ShellLink();
-            var persistFile = (IPersistFile)shellLink;
-            persistFile.Load(lnkPath, 0); // STGM_READ
-
-            var sb = new StringBuilder(1024);
-            shellLink.GetPath(sb, sb.Capacity, IntPtr.Zero, 0);
-
-            return sb.ToString();
-        }
-
         #endregion
 
 
@@ -2750,9 +2701,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _windowEngineTimer.Start();
         }
 
-        /// <summary>
-        /// Die Kernlogik der Window Engine, wird jede Sekunde ausgeführt.
-        /// </summary>
         /// <summary>
         /// Die Kernlogik der Window Engine, wird jede Sekunde ausgeführt.
         /// </summary>
@@ -5239,31 +5187,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             await Task.Delay(1000);
 
             // 3. ERST JETZT starten wir den eigentlichen Launcher (nach Video und nach Desktop!)
-            string launcher = AppSettings.Load<string>("launcher");
-            Debug.WriteLine($"WinPart abgeschlossen. Starte nun Launcher: {launcher}");
-
-            switch (launcher)
-            {
-                case "steam":
-                    await _launcherService.StartSteamAsync(false).ConfigureAwait(false);
-                    break;
-                case "playnite":
-                    await _launcherService.StartPlayniteAsync().ConfigureAwait(false);
-                    break;
-                case "custom":
-                    await _launcherService.StartOtherLauncherAsync().ConfigureAwait(false);
-                    break;
-                case "gfn":
-                    await _launcherService.StartGfnAsync().ConfigureAwait(false);
-                    break;
-                case "xbox":
-                    await StartXbox(true);
-                    break;
-                default:
-                    AppSettings.Save("launcher", "steam");
-                    await _launcherService.StartSteamAsync(false).ConfigureAwait(false);
-                    break;
-            }
+            await _launcherService.StartConfiguredLauncherAsync(forceSteamRestart: false, forceXboxRestart: true).ConfigureAwait(false);
         }
         #endregion winparts
 
@@ -5361,33 +5285,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         // Diese Methode kümmert sich am Ende NUR noch um das reine Öffnen des Launchers.
         private async Task StartConfiguredLauncherAsync()
         {
-            string launcher = "steam"; // Fallback
-            try { launcher = AppSettings.Load<string>("launcher"); } catch { }
-
-            Debug.WriteLine($"Desktop ist bereit. Starte nun Launcher: {launcher}");
-
-            switch (launcher)
-            {
-                case "steam":
-                    await _launcherService.StartSteamAsync(true).ConfigureAwait(false);
-                    break;
-                case "playnite":
-                    await _launcherService.StartPlayniteAsync().ConfigureAwait(false);
-                    break;
-                case "custom":
-                    await _launcherService.StartOtherLauncherAsync().ConfigureAwait(false);
-                    break;
-                case "gfn":
-                    await _launcherService.StartGfnAsync().ConfigureAwait(false);
-                    break;
-                case "xbox":
-                    await StartXbox(true);
-                    break;
-                default:
-                    AppSettings.Save("launcher", "steam");
-                    await _launcherService.StartSteamAsync(true).ConfigureAwait(false);
-                    break;
-            }
+            await _launcherService.StartConfiguredLauncherAsync(forceSteamRestart: true, forceXboxRestart: true).ConfigureAwait(false);
         }
 
         #endregion start
@@ -5857,19 +5755,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             return d[n, m];
         }
 
-
-        private async Task ShowDebugDialogAsync(string title, string message)
-        {
-            var dialog = new ContentDialog
-            {
-                // CORRECTED: Get the XamlRoot from the Window's Content property, not the Window itself.
-                XamlRoot = this.Content.XamlRoot,
-                Title = "[DEBUG] " + title,
-                Content = message,
-                CloseButtonText = "Weiter"
-            };
-            await dialog.ShowAsync();
-        }
         private string CleanGameNameForSearch(string rawName)
         {
             if (string.IsNullOrEmpty(rawName)) return string.Empty;
@@ -5887,7 +5772,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Trim any resulting whitespace from the ends
             return cleanedName.Trim();
         }
-        // In gcmloader/MainWindow.xaml.cs
 
         private List<string> GetAllSteamLibraryPaths()
         {

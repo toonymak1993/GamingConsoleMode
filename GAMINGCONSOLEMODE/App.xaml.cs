@@ -18,16 +18,12 @@ namespace GAMINGCONSOLEMODE
         /// Initializes the singleton application object.  This is the first line of authored code
         /// executed, and as such is the logical equivalent of main() or WinMain().
         /// </summary>
-        /// 
-      
-
         public App()
         {
             this.InitializeComponent();
             // Erzwinge dunkles Design auch zur Laufzeit (z. B. falls es zur Laufzeit gewechselt wird)
             Application.Current.RequestedTheme = ApplicationTheme.Dark;
         }
-        public static Window? Window { get; private set; }
         /// <summary>
         /// Invoked when the application is launched.
         /// </summary>
@@ -37,8 +33,7 @@ namespace GAMINGCONSOLEMODE
             try
             {
                 MainWindow = new MainWindow();
-                m_window = MainWindow;
-                m_window.Activate();
+                MainWindow.Activate();
 
             }
             catch (Exception ex)
@@ -55,8 +50,5 @@ namespace GAMINGCONSOLEMODE
             var messageDialog = new Windows.UI.Popups.MessageDialog($"An error occurred: {ex.Message}\n\n{ex.StackTrace}", "Error");
             _ = messageDialog.ShowAsync();
         }
-
-
-        private Window? m_window;
     }
 }

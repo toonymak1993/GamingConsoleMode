@@ -49,9 +49,7 @@ public static class AppSettings
         {
             try
             {
-                TomlTable settings = File.Exists(SettingsFilePath)
-                    ? Toml.Parse(File.ReadAllText(SettingsFilePath)).ToModel()
-                    : new TomlTable();
+                TomlTable settings = ReadTomlTableOrEmpty();
 
                 settings[key] = value;
 
@@ -71,16 +69,12 @@ public static class AppSettings
         {
             try
             {
-                if (File.Exists(SettingsFilePath))
-                {
-                    var tomlText = File.ReadAllText(SettingsFilePath);
-                    var settings = Toml.Parse(tomlText).ToModel();
+                var settings = ReadTomlTableOrEmpty();
 
-                    if (settings.ContainsKey(key))
-                    {
-                        var value = settings[key];
-                        return value is T typedValue ? typedValue : (T)Convert.ChangeType(value, typeof(T))!;
-                    }
+                if (settings.ContainsKey(key))
+                {
+                    var value = settings[key];
+                    return value is T typedValue ? typedValue : (T)Convert.ChangeType(value, typeof(T))!;
                 }
 
                 throw new Exception($"Key '{key}' not found in settings.");
@@ -104,7 +98,7 @@ public static class AppSettings
                     return;
                 }
 
-                var tomlTable = Toml.Parse(File.ReadAllText(SettingsFilePath)).ToModel();
+                var tomlTable = ReadTomlTableOrEmpty();
 
                 if (tomlTable.Remove(key))
                 {
@@ -113,9 +107,20 @@ public static class AppSettings
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[ERROR] Failed to delete key '{key}' from AppSettings: {ex.Message}");
+                Trace.WriteLine($"[ERROR] Failed to delete key '{key}' from AppSettings: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>Must be called while holding <see cref="_fileLock"/>.</summary>
+    private static TomlTable ReadTomlTableOrEmpty()
+    {
+        if (!File.Exists(SettingsFilePath))
+        {
+            return new TomlTable();
+        }
+
+        return Toml.Parse(File.ReadAllText(SettingsFilePath)).ToModel();
     }
 
     /// <summary>
@@ -146,6 +151,11 @@ public static class AppSettings
     {
         try
         {
+            if (!Directory.Exists(SettingsFolder))
+            {
+                Directory.CreateDirectory(SettingsFolder);
+            }
+
             var defaultSettings = new TomlTable();
             AddDefaultSettingsKeys(defaultSettings);
 
@@ -214,9 +224,9 @@ public static class AppSettings
         t["rog_m1_action"] = "";
         t["rog_m2_action"] = "";
         t["replace"] = false;
-            t["github_update_check"] = true;
+        t["github_update_check"] = true;
 
-            t["winmode_shortcut"] = new TomlTable
+        t["winmode_shortcut"] = new TomlTable
         {
             ["key1"] = "",
             ["key2"] = "",
