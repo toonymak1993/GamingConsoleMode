@@ -17,7 +17,8 @@
             </Style>
         </Grid.Resources>
 
-        <Grid x:Name="RootGrid" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        <Grid x:Name="RootGrid" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+              KeyDown="MainWindow_KeyDown" IsTabStop="True" TabIndex="0">
 
             <ProgressRing IsActive="True" Opacity="0.01" Width="1" Height="1" 
                           HorizontalAlignment="Left" VerticalAlignment="Top"/>
@@ -29,7 +30,7 @@
                                 Visibility="Collapsed"
                                 Canvas.ZIndex="-2"/>
 
-            <Grid x:Name="MainContent" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <Grid x:Name="MainContent" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" TabIndex="1">
 
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -70,6 +71,12 @@
                             <TextBlock x:Name="ControllerBatteryText" Text="100%" FontSize="14" Foreground="White" Margin="6,0,0,0" FontWeight="SemiBold"/>
                         </StackPanel>
 
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="8,0,0,0">
+                            <TextBlock Text="Gamepad UI" FontSize="12" Foreground="#CCFFFFFF" VerticalAlignment="Center"/>
+                            <ToggleSwitch x:Name="ControllerNavigationToggle" OnContent="On" OffContent="Off" MinWidth="0"
+                                          Toggled="ControllerNavigationToggle_Toggled" TabIndex="5"/>
+                        </StackPanel>
+
                         <FontIcon x:Name="NetworkStatusIcon" Glyph="&#xE701;" FontSize="16" Foreground="White" VerticalAlignment="Center"/>
 
                         <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
@@ -82,31 +89,31 @@
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <Button x:Name="ExitGcmButton" Width="50" Height="40" Click="ExitGcmButton_Click_1" 
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
-                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" TabIndex="10">
                                 <Image Source="ms-appx:///Assets/windowsicon.png" Width="20" Height="20" Stretch="Uniform"/>
                             </Button>
 
-                            <Button x:Name="VolumeButton" Width="50" Height="40" 
+                            <Button x:Name="VolumeButton" Width="50" Height="40" Click="VolumeButton_Click"
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
-                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" TabIndex="11">
                                 <FontIcon Glyph="&#xE767;" FontSize="18" Foreground="White"/>
                             </Button>
 
                             <Button x:Name="SettingsButton" Width="50" Height="40" Click="SettingsButton_Click" 
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
-                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" TabIndex="12">
                                 <FontIcon Glyph="&#xE713;" FontSize="18"/>
                             </Button>
 
                             <Button x:Name="AppLauncherButton" Width="50" Height="40" Click="ToggleAppLauncher_Click" 
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
-                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" TabIndex="13">
                                 <FontIcon Glyph="&#xE71E;" FontSize="18"/>
                             </Button>
 
                             <Button x:Name="ShutdownButton" Width="50" Height="40" Click="PowerButton_Click" 
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
-                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" TabIndex="14">
                                 <FontIcon Glyph="&#xE7E8;" FontSize="18"/>
                             </Button>
                         </StackPanel>
@@ -124,18 +131,18 @@
                         <ColumnDefinition x:Name="CardsColumn" Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="60,0,0,0" Spacing="15">
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="60,0,0,0" Spacing="15" TabIndex="20">
                         <StackPanel x:Name="QuickLauncherPanel" Orientation="Horizontal" Spacing="15" Opacity="0" HorizontalAlignment="Left" Margin="10,0,0,0">
-                            <Border x:Name="QuickSteam" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="steam">
+                            <Border x:Name="QuickSteam" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="steam" TabIndex="21">
                                 <Image Source="ms-appx:///Assets/steam_logo.png" Width="26" Height="26" Stretch="Uniform"/>
                             </Border>
-                            <Border x:Name="QuickPlaynite" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="playnite">
+                            <Border x:Name="QuickPlaynite" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="playnite" TabIndex="22">
                                 <Image Source="ms-appx:///Assets/playnite_logo.png" Width="26" Height="26" Stretch="Uniform"/>
                             </Border>
-                            <Border x:Name="QuickXbox" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="xbox">
+                            <Border x:Name="QuickXbox" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="xbox" TabIndex="23">
                                 <Image Source="ms-appx:///Assets/xbox_logo.png" Width="26" Height="26" Stretch="Uniform"/>
                             </Border>
-                            <Border x:Name="QuickGfn" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="gfn">
+                            <Border x:Name="QuickGfn" Width="45" Height="45" CornerRadius="10" Background="#22FFFFFF" BorderThickness="2" BorderBrush="Transparent" Tag="gfn" TabIndex="24">
                                 <Image Source="ms-appx:///Assets/geforcenow.png" Width="26" Height="26" Stretch="Uniform"/>
                             </Border>
                         </StackPanel>
@@ -152,7 +159,7 @@
                                       VerticalScrollBarVisibility="Disabled" 
                                       HorizontalScrollBarVisibility="Hidden" 
                                       HorizontalScrollMode="Enabled"
-                                      VerticalAlignment="Stretch">
+                                      VerticalAlignment="Stretch" TabIndex="30">
                             <StackPanel x:Name="ProgramCardPanel" 
                                         Orientation="Horizontal" 
                                         Spacing="10" 
@@ -527,11 +534,11 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <FontIcon Glyph="&#xE721;" FontFamily="Segoe Fluent Icons" VerticalAlignment="Center" Margin="15,0,0,0" Foreground="White"/>
-                                <TextBox x:Name="AppSearchBox" Grid.Column="1" Margin="10,0,15,0" PlaceholderText="Search..." TextChanged="AppSearchBox_TextChanged" Background="Transparent" BorderThickness="0" VerticalAlignment="Center" Foreground="White"/>
+                                <TextBox x:Name="AppSearchBox" Grid.Column="1" Margin="10,0,15,0" PlaceholderText="Search..." TextChanged="AppSearchBox_TextChanged" Background="Transparent" BorderThickness="0" VerticalAlignment="Center" Foreground="White" TabIndex="40"/>
                             </Grid>
                         </Border>
                         <Grid Grid.Row="1">
-                            <GridView x:Name="AppGridView" ItemsSource="{x:Bind AllInstalledApps}" IsItemClickEnabled="True" ItemClick="AppGridView_ItemClick" Padding="20">
+                            <GridView x:Name="AppGridView" ItemsSource="{x:Bind AllInstalledApps}" IsItemClickEnabled="True" ItemClick="AppGridView_ItemClick" Padding="20" TabIndex="41">
                                 <GridView.ItemTemplate>
                                     <DataTemplate x:DataType="local:AppInfo">
                                         <StackPanel Width="150" Margin="10">

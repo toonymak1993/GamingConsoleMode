@@ -65,20 +65,21 @@ Leave UI code in the window. Services get interfaces so they can be tested or sw
 
 ---
 
-### 6. Remove gamepad input system
-**Files:** `gcmloader/gcmloaderwindow.xaml.cs` lines 9159–10500+, `wingamepad/`, `OverlayWindow/`
+### 6. Controller navigation is optional (desktop default) [DONE]
+<!-- `use_controller_navigation` in settings.toml (default false); `SetupGamepad()` only when true; battery widget uses WGI only; shortcut overlay Escape/backdrop close — 2026-04-15 -->
+**Files:** `gcmloader/AppSettings.cs`, `GAMINGCONSOLEMODE/AppSettings.cs`, `gcmloader/gcmloaderwindow.xaml.cs`, `gcmloader/GlobalShortcutWindow.*`
 
-- Delete `SetupGamepad()` and the three async input loops (lines 9302–9304)
-- Delete `XInputGetStateSecret` P/Invoke (lines 9325–9345)
-- Delete D-pad navigation handlers (lines 10344–10396)
-- Remove `SharpDX.XInput` NuGet dependency from all projects
-- Quarantine or delete `wingamepad` and `OverlayWindow` projects
+- Add **`use_controller_navigation`** (default **`false`**) — DeckTop is desktop-first; when **`true`**, legacy gamepad polling (Xbox / PS / Edge), D-pad UI navigation, gamepad shortcut combos, and pad mouse mode behave as before.
+- When **`false`**, do not start `SetupGamepad()` / background input loops (no gamepad polling).
+- Battery status uses **Windows.Gaming.Input** only (no SharpDX path).
+- Shortcut overlay: dismiss via **Escape**, **click outside the card**, or existing toggle; document key in TOML (no dedicated Settings page yet).
 
-**Why sixth:** No mouse/keyboard navigation exists. Until gamepad is removed and replaced, the app is literally unnavigable without a controller.
+**Why sixth:** Unblocks mouse/keyboard work (#7) for typical users while preserving handheld/controller parity behind one flag. `wingamepad/` / `OverlayWindow/` remain quarantined optional projects.
 
 ---
 
-### 7. Add keyboard and mouse navigation
+### 7. Add keyboard and mouse navigation [DONE]
+<!-- RootGrid KeyDown + FocusArea routing mirroring HandleGamepadInput; type-to-search; TabIndex; Volume/quick-launch/card pointer parity; Gamepad UI toggle — 2026-04-14 -->
 **File:** `gcmloader/gcmloaderwindow.xaml.cs` (post-extraction)
 
 Replace D-pad navigation with:
@@ -86,7 +87,7 @@ Replace D-pad navigation with:
 - `PointerPressed` / `Click` handlers on all interactive elements
 - Focus management via `FocusManager` / `TabIndex`
 
-**Why last in pre-UI phase:** Requires #6 complete. Once this lands, UI work can begin safely.
+**Why last in pre-UI phase:** Requires #6 complete (optional controller path + desktop default). Once this lands, UI work can begin safely.
 
 ---
 

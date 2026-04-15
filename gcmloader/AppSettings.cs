@@ -138,6 +138,7 @@ namespace GAMINGCONSOLEMODE
             t["enable_startmenu"] = false;
             t["show_discord"] = true;
             t["handheldtouchlauncher"] = false;
+            t["use_controller_navigation"] = false; // DeckTop default: desktop-first; set true for legacy gamepad UI + shortcuts
             t["steamgriddb_api_key"] = "";
             t["rog_m1_action"] = "";
             t["rog_m2_action"] = "";

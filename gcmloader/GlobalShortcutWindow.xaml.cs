@@ -1,11 +1,13 @@
 using GAMINGCONSOLEMODE;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using Windows.System;
 
 namespace gcmloader
 {
@@ -31,8 +33,12 @@ namespace gcmloader
         private const long WS_POPUP = 0x80000000L;
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
 
-        public BlankWindow1(List<ShortcutDisplayItem> shortcuts)
+        private readonly Action _requestClose;
+
+        public BlankWindow1(List<ShortcutDisplayItem> shortcuts, Action requestClose)
         {
+            _requestClose = requestClose ?? (() => { });
+
             this.InitializeComponent();
             ShortcutItemsControl.ItemsSource = shortcuts;
 
@@ -41,6 +47,20 @@ namespace gcmloader
 
             // Setze das Fenster in den Vordergrund
             SetupTrueBorderlessTopmostWindow();
+        }
+
+        private void RootBackground_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key == VirtualKey.Escape)
+            {
+                e.Handled = true;
+                _requestClose();
+            }
+        }
+
+        private void BackdropDismissLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            _requestClose();
         }
 
         private void LoadWallpaper()
@@ -115,9 +135,11 @@ namespace gcmloader
             sb.Children.Add(scaleYAnim);
             sb.Children.Add(slideAnim);
             sb.Begin();
+
+            _ = RootBackground.Focus(FocusState.Programmatic);
         }
 
-        public void CloseAnimated(Action onCompleted = null)
+        public void CloseAnimated(Action? onCompleted = null)
         {
             var sb = new Storyboard();
 

@@ -131,3 +131,18 @@ Settings keys referenced throughout code but **not initialized in `initialconfig
 - No force pushes to `main`
 - PRs should reference a step from `docs/PRIORITY.md` in the description
 - Each PR should be scoped to one priority step — do not bundle shell removal with config fixes
+
+---
+
+## Learned User Preferences
+
+- Split large change work into explicit passes with a bounded scope so quality does not leak across unrelated concerns.
+- When executing an attached implementation plan, keep the plan file read-only (do not edit the plan document as part of the implementation).
+- Name feature branches for scoped tool-driven work with the `cursor/` prefix and a short description (for example `cursor/handoff-steps-1-3-shell-uac`).
+- Treat DeckTop as an independent fork line; contributing changes upstream is optional rather than assumed.
+
+## Learned Workspace Facts
+
+- Root `global.json` pins the .NET SDK (currently 8.0.419 with `rollForward: latestFeature`) for predictable local builds.
+- Monolith decomposition introduces and extends `gcmloader/Services/` (interfaces and implementations extracted from `gcmloaderwindow.xaml.cs`).
+- `use_controller_navigation` in `%APPDATA%\gcmsettings\settings.toml` defaults to **false** (desktop-first). Set **true** to enable legacy gamepad polling, D-pad UI navigation, gamepad shortcut combos, and pad mouse mode; **restart** to apply loop start/stop.

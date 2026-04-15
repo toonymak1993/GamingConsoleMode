@@ -1,6 +1,5 @@
 ﻿using Discord;
 using Discord.WebSocket;
-using DualSenseAPI;
 using GAMINGCONSOLEMODE;
 using HidSharp;
 using Microsoft.UI;
@@ -709,85 +708,43 @@ namespace gcmloader
         // Updates the controller battery status and UI icon
         #region controllerbattery icon
 
-        // Die verbesserte Hybrid-Methode: Zeigt immer den echten Wert an, auch wenn es 10% sind.
+        // Windows.Gaming.Input only (no SharpDX) — works for typical Bluetooth / modern stack; hides when none.
         private void UpdateControllerBatteryStatus()
         {
             this.DispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
-                    bool isAnyControllerConnected = false;
-
-                    // =================================================================
-                    // METHOD 1: SharpDX.XInput (Natives Xbox-Protokoll)
-                    // Funktioniert am besten mit Dongle / Kabel
-                    // =================================================================
-                    Controller activeController = null;
-                    for (int i = 0; i < 4; i++)
-                    {
-                        var temp = new Controller((UserIndex)i);
-                        if (temp.IsConnected) { activeController = temp; break; }
-                    }
-
-                    if (activeController != null)
-                    {
-                        isAnyControllerConnected = true;
-                        var batteryInfo = activeController.GetBatteryInformation(BatteryDeviceType.Gamepad);
-
-                        if (batteryInfo.BatteryType == BatteryType.Wired)
-                        {
-                            UpdateControllerUI_Text("USB", true);
-                            return;
-                        }
-
-                        // Über XInput haben wir klare Hardware-Stufen (High, Med, Low)
-                        if (batteryInfo.BatteryType != BatteryType.Disconnected && batteryInfo.BatteryType != BatteryType.Unknown)
-                        {
-                            UpdateControllerUI_State(batteryInfo.BatteryLevel);
-                            return;
-                        }
-                    }
-
-                    // =================================================================
-                    // METHOD 2: Windows.Gaming.Input (Modern API)
-                    // Für Bluetooth (gibt Prozentwerte aus)
-                    // =================================================================
-                    if (Windows.Gaming.Input.Gamepad.Gamepads.Count > 0)
-                    {
-                        isAnyControllerConnected = true;
-                        var modernGamepad = Windows.Gaming.Input.Gamepad.Gamepads[0];
-                        var report = modernGamepad.TryGetBatteryReport();
-
-                        if (report != null && report.Status != Windows.System.Power.BatteryStatus.NotPresent)
-                        {
-                            bool isCharging = report.Status == Windows.System.Power.BatteryStatus.Charging;
-
-                            if (report.FullChargeCapacityInMilliwattHours.HasValue &&
-                                report.RemainingCapacityInMilliwattHours.HasValue &&
-                                report.FullChargeCapacityInMilliwattHours.Value > 0)
-                            {
-                                int exactPercentage = (int)(((double)report.RemainingCapacityInMilliwattHours.Value / report.FullChargeCapacityInMilliwattHours.Value) * 100);
-
-                                // HIER IST DER FIX: Wir filtern nichts mehr weg! 
-                                // Wir zeigen exakt das an, was der Controller an Windows funkt.
-                                UpdateControllerUI_Exact(exactPercentage, isCharging);
-                                return;
-                            }
-                        }
-                    }
-
-                    // =================================================================
-                    // METHOD 3: DER FALLBACK
-                    // Wenn XInput "Unknown" liefert UND WGI keine Prozente hat.
-                    // =================================================================
-                    if (isAnyControllerConnected)
-                    {
-                        UpdateControllerUI_Text("Connected", false);
-                    }
-                    else
+                    if (Windows.Gaming.Input.Gamepad.Gamepads.Count == 0)
                     {
                         ControllerStatusGroup.Visibility = Visibility.Collapsed;
+                        return;
                     }
+
+                    var modernGamepad = Windows.Gaming.Input.Gamepad.Gamepads[0];
+                    var report = modernGamepad.TryGetBatteryReport();
+
+                    if (report != null && report.Status != Windows.System.Power.BatteryStatus.NotPresent)
+                    {
+                        bool isCharging = report.Status == Windows.System.Power.BatteryStatus.Charging;
+
+                        if (report.FullChargeCapacityInMilliwattHours.HasValue &&
+                            report.RemainingCapacityInMilliwattHours.HasValue &&
+                            report.FullChargeCapacityInMilliwattHours.Value > 0)
+                        {
+                            int exactPercentage = (int)(((double)report.RemainingCapacityInMilliwattHours.Value / report.FullChargeCapacityInMilliwattHours.Value) * 100);
+                            UpdateControllerUI_Exact(exactPercentage, isCharging);
+                            return;
+                        }
+
+                        if (isCharging)
+                        {
+                            UpdateControllerUI_Text("Charging...", true);
+                            return;
+                        }
+                    }
+
+                    UpdateControllerUI_Text("Connected", false);
                 }
                 catch (Exception ex)
                 {
@@ -817,37 +774,7 @@ namespace gcmloader
             }
         }
 
-        // Helper 2: Hardware-Status (XInput)
-        private void UpdateControllerUI_State(BatteryLevel level)
-        {
-            ControllerStatusGroup.Visibility = Visibility.Visible;
-
-            switch (level)
-            {
-                case BatteryLevel.Empty:
-                    ControllerBatteryText.Text = "Critical";
-                    ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red);
-                    break;
-                case BatteryLevel.Low:
-                    ControllerBatteryText.Text = "Low";
-                    ControllerBatteryText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 165, 0));
-                    break;
-                case BatteryLevel.Medium:
-                    ControllerBatteryText.Text = "Medium";
-                    ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
-                    break;
-                case BatteryLevel.Full:
-                    ControllerBatteryText.Text = "Full";
-                    ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
-                    break;
-                default:
-                    ControllerBatteryText.Text = "Connected";
-                    ControllerBatteryText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
-                    break;
-            }
-        }
-
-        // Helper 3: Generischer Text
+        // Helper 2: Generischer Text
         private void UpdateControllerUI_Text(string text, bool isCharging)
         {
             ControllerStatusGroup.Visibility = Visibility.Visible;
@@ -2253,6 +2180,10 @@ namespace gcmloader
         private int _selectedQuickLauncherIndex = 0;
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
+        /// <summary>When <c>false</c>, <see cref="TryLoadControllerNavigationEnabled"/> is true (gamepad shell path).</summary>
+        private bool _keyboardNavigationEnabled = true;
+        private bool _suppressControllerNavigationToggle;
+
         // Index und Liste für die oberen Buttons
         private int _selectedTopButtonIndex = 0;
         private List<Button> _topButtons;
@@ -2436,6 +2367,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
            // Logger.Initialize();
             this.InitializeComponent();
 
+            _keyboardNavigationEnabled = !TryLoadControllerNavigationEnabled();
+            _suppressControllerNavigationToggle = true;
+            if (ControllerNavigationToggle != null)
+                ControllerNavigationToggle.IsOn = TryLoadControllerNavigationEnabled();
+            _suppressControllerNavigationToggle = false;
+
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (s, e) =>
             {
                 TriggerAutomaticResync();
@@ -2533,6 +2470,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             LoadDynamicLauncherCards();
             _quickLauncherButtons = new List<Border> { QuickSteam, QuickPlaynite, QuickXbox, QuickGfn };
             QuickLauncherPanel.Visibility = Visibility.Visible; // Damit es Layout-Platz einnimmt
+            foreach (var qb in _quickLauncherButtons)
+            {
+                qb.PointerPressed += QuickLauncherBorder_PointerPressed;
+            }
 
             _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { SleepMenuItem, RestartMenuItem, ShutdownMenuItem, LogOffMenuItem };
@@ -2544,7 +2485,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             this.Activated += (s, e) => this.Content.Focus(FocusState.Programmatic);
 
             LoadShortcutsFromSettings();
-            SetupGamepad();
+            if (TryLoadControllerNavigationEnabled())
+                SetupGamepad();
             SetupStatusTimer();
             Start();
 
@@ -7493,11 +7435,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // --- EFFEKTE AKTIVIEREN ---
             cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
+            cardBorder.PointerPressed += ProgramCard_PointerPressed;
 
             // FIX: Hier übergeben wir jetzt 'proc' als letzten Parameter!
             LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath, proc);
 
             return cardBorder;
+        }
+
+        private void ProgramCard_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not Border b) return;
+            int idx = _cardCache.FindIndex(c => c.Card == b);
+            if (idx < 0) return;
+            _selectedCardIndex = idx;
+            _currentFocusArea = FocusArea.Cards;
+            UpdateVisualFocus();
         }
 
         private void ApplyNativeWinUI3Blur(Border target)
@@ -8232,7 +8185,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
 
                     // 1. Fenster erstellen
-                    _globalShortcutOverlay = new BlankWindow1(displayList);
+                    _globalShortcutOverlay = new BlankWindow1(displayList, CloseGlobalShortcutOverlay);
 
                     // 2. NEU: Handle des neuen Fensters abrufen und aus Alt+Tab entfernen
                     IntPtr overlayHwnd = WinRT.Interop.WindowNative.GetWindowHandle(_globalShortcutOverlay);
@@ -8701,6 +8654,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const byte VK_CONTROL = 0x11;
         // The virtual key code for the 'O' key.
         private const byte O_KEY = 0x47;
+
+        /// <summary>DeckTop: controller nav, gamepad loops, and gamepad shortcuts are opt-in (<c>use_controller_navigation</c> in settings.toml).</summary>
+        private static bool TryLoadControllerNavigationEnabled()
+        {
+            try
+            {
+                return AppSettings.Load<bool>("use_controller_navigation");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void SetupGamepad()
         {
             // Wir erhöhen auf 10, dann haben wir massig Platz für alle
@@ -10261,10 +10228,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private int[] _lastStickXDirections = new int[4];
         private int[] _lastStickYDirections = new int[4];
 
-
-        private Windows.Gaming.Input.Gamepad _rawXboxGamepad = null;
-        private bool _lastGuideButtonPressed = false;
-
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
             if (PowerMenu.Visibility == Visibility.Visible)
@@ -10407,6 +10370,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         AnimateBorderColor(selectedQuick, true);
                     }
                     break;
+
+                case FocusArea.AppLauncher:
+                    AnimateInfoPanelFocus(false);
+                    if (AppGridView.SelectedIndex >= 0 && AppGridView.Items.Count > 0)
+                        AppGridView.ScrollIntoView(AppGridView.SelectedItem);
+                    break;
             }
         }
 
@@ -10511,37 +10480,694 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
-        private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
+
+        private void VolumeButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!IsWindowInForeground()) return;
+            ToggleAudioFlyout();
+        }
+
+        private void QuickLauncherBorder_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not Border b || b.Tag is not string tag) return;
+            int idx = _quickLauncherButtons.IndexOf(b);
+            if (idx >= 0) _selectedQuickLauncherIndex = idx;
+            _currentFocusArea = FocusArea.QuickLaunchers;
+            SwitchToSpecificLauncher(tag);
+            UpdateVisualFocus();
+        }
+
+        private void ControllerNavigationToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_suppressControllerNavigationToggle || ControllerNavigationToggle == null) return;
+            bool on = ControllerNavigationToggle.IsOn;
+            AppSettings.Save("use_controller_navigation", on);
+            _keyboardNavigationEnabled = !on;
+            if (on)
+                SendOverlayNotification("Restart DeckTop to enable gamepad input polling.");
+        }
+
+        private bool IsShellEditableFocused()
+        {
+            try
+            {
+                var root = MainContent?.XamlRoot ?? this.Content.XamlRoot;
+                if (root == null) return false;
+                var o = FocusManager.GetFocusedElement(root);
+                return o is TextBox || o is PasswordBox || o is AutoSuggestBox;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryGetPrintableKey(VirtualKey key, out char ch)
+        {
+            if (key >= VirtualKey.A && key <= VirtualKey.Z)
+            {
+                ch = (char)('a' + (key - VirtualKey.A));
+                return true;
+            }
+            if (key >= VirtualKey.Number0 && key <= VirtualKey.Number9)
+            {
+                ch = (char)('0' + (key - VirtualKey.Number0));
+                return true;
+            }
+            if (key >= VirtualKey.NumberPad0 && key <= VirtualKey.NumberPad9)
+            {
+                ch = (char)('0' + (key - VirtualKey.NumberPad0));
+                return true;
+            }
+            if (key == VirtualKey.Space)
+            {
+                ch = ' ';
+                return true;
+            }
+            ch = default;
+            return false;
+        }
+
+        private async void CompleteTypeToSearchAppendAsync(string append)
+        {
+            if (AppLauncher.Visibility != Visibility.Visible)
+                await OpenAppLauncherAsync();
+            else
+                _currentFocusArea = FocusArea.AppLauncher;
+
+            AppSearchBox.Text = (AppSearchBox.Text ?? string.Empty) + append;
+            AppSearchBox.Focus(FocusState.Programmatic);
+            AppSearchBox.Select(AppSearchBox.Text.Length, 0);
+            UpdateVisualFocus();
+        }
+
+        private bool TryHandleTypeToSearch(KeyRoutedEventArgs e)
+        {
+            if (IsShellEditableFocused()) return false;
+            if (!TryGetPrintableKey(e.Key, out char ch)) return false;
+            if (GameOptionsOverlay.Visibility == Visibility.Visible) return false;
+            if (AudioOverlay.Visibility == Visibility.Visible) return false;
+            if (PowerMenu.Visibility == Visibility.Visible) return false;
+            if (_currentFocusArea == FocusArea.StartupVideo) return false;
+            if (AppLauncher.Visibility == Visibility.Visible && _currentFocusArea == FocusArea.AppLauncher)
+            {
+                CompleteTypeToSearchAppendAsync(ch.ToString());
+                e.Handled = true;
+                return true;
+            }
+            if (AppLauncher.Visibility != Visibility.Visible)
+            {
+                CompleteTypeToSearchAppendAsync(ch.ToString());
+                e.Handled = true;
+                return true;
+            }
+            return false;
+        }
+
+        private bool HandleKeyboardGameOptions(KeyRoutedEventArgs e)
+        {
+            if (ArtworkSearchPanel.Visibility == Visibility.Visible)
+            {
+                if (e.Key == VirtualKey.Escape)
+                {
+                    BtnBackToOptions_Click(null, null);
+                    PlaydeactivationSound();
+                    e.Handled = true;
+                    return true;
+                }
+
+                var fo = FocusManager.GetFocusedElement(MainContent.XamlRoot);
+                if (fo != ImageSearchBox && TryGetPrintableKey(e.Key, out char pch))
+                {
+                    ImageSearchBox.Text = (ImageSearchBox.Text ?? string.Empty) + pch;
+                    ImageSearchBox.Focus(FocusState.Programmatic);
+                    e.Handled = true;
+                    return true;
+                }
+
+                if (ImageResultsGrid.Items.Count == 0) return false;
+
+                int columns = 5;
+                bool navigated = false;
+                switch (e.Key)
+                {
+                    case VirtualKey.Left:
+                        _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - 1);
+                        navigated = true;
+                        break;
+                    case VirtualKey.Right:
+                        _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + 1);
+                        navigated = true;
+                        break;
+                    case VirtualKey.Down:
+                        _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + columns);
+                        navigated = true;
+                        break;
+                    case VirtualKey.Up:
+                        _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - columns);
+                        navigated = true;
+                        break;
+                    case VirtualKey.Enter:
+                        if (_selectedImageGridIndex >= 0 && _selectedImageGridIndex < _currentImageSearchResults.Count)
+                        {
+                            DownloadAndApplyImage(_currentImageSearchResults[_selectedImageGridIndex]);
+                            PlayActivationSound();
+                        }
+                        e.Handled = true;
+                        return true;
+                }
+                if (navigated)
+                {
+                    ImageResultsGrid.SelectedIndex = _selectedImageGridIndex;
+                    ImageResultsGrid.ScrollIntoView(ImageResultsGrid.SelectedItem);
+                    PlayNavigationSound();
+                    e.Handled = true;
+                    return true;
+                }
+                return false;
+            }
 
             switch (e.Key)
             {
-                case VirtualKey.Left:
-                    _selectedCardIndex--;
-                    if (_selectedCardIndex < 0)
-                        _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
-                    HighlightSelectedCard();
-                    PlayNavigationSound();
-                    break;
-
-                case VirtualKey.Right:
-                    _selectedCardIndex++;
-                    if (_selectedCardIndex >= ProgramCardPanel.Children.Count)
-                        _selectedCardIndex = 0;
-                    HighlightSelectedCard();
-                    PlayNavigationSound();
-                    break;
-
-                case VirtualKey.Enter:
-                    TriggerCardAction(_selectedCardIndex, true);
-                    PlayActivationSound();
-                    break;
-
                 case VirtualKey.Escape:
-                    TriggerCardAction(_selectedCardIndex, false);
+                    CloseGameOptions();
                     PlaydeactivationSound();
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Up:
+                    _selectedGameOptionIndex = 0;
+                    UpdateGameOptionsFocus();
+                    PlayNavigationSound();
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Down:
+                    _selectedGameOptionIndex = 1;
+                    UpdateGameOptionsFocus();
+                    PlayNavigationSound();
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Enter:
+                    if (_selectedGameOptionIndex == 0) BtnSuspendGame_Click(null, null);
+                    else BtnChangeArtwork_Click(null, null);
+                    PlayActivationSound();
+                    e.Handled = true;
+                    return true;
+            }
+            return false;
+        }
+
+        private bool HandleKeyboardAppLauncher(KeyRoutedEventArgs e)
+        {
+            if (e.Key == VirtualKey.Escape)
+            {
+                if (!string.IsNullOrEmpty(AppSearchBox.Text))
+                {
+                    AppSearchBox.Text = string.Empty;
+                }
+                else
+                {
+                    ToggleAppLauncher_Click(null, null);
+                }
+                PlaydeactivationSound();
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == VirtualKey.Enter)
+            {
+                if (AppGridView.SelectedItem is AppInfo app)
+                    LaunchApp(app);
+                e.Handled = true;
+                return true;
+            }
+            switch (e.Key)
+            {
+                case VirtualKey.Up:
+                    HandleAppLauncherNavigation(0, 1);
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Down:
+                    HandleAppLauncherNavigation(0, -1);
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Left:
+                    HandleAppLauncherNavigation(-1, 0);
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Right:
+                    HandleAppLauncherNavigation(1, 0);
+                    e.Handled = true;
+                    return true;
+            }
+            return false;
+        }
+
+        private bool HandleKeyboardPowerMenu(KeyRoutedEventArgs e)
+        {
+            if (!_powerMenuItems.Any()) return false;
+            switch (e.Key)
+            {
+                case VirtualKey.Down:
+                    _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex + 1) % _powerMenuItems.Count;
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Up:
+                    _selectedPowerMenuItemIndex = (_selectedPowerMenuItemIndex - 1 + _powerMenuItems.Count) % _powerMenuItems.Count;
+                    UpdateVisualFocus();
+                    PlayNavigationSound();
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Enter:
+                    if (_powerMenuItems.Count > _selectedPowerMenuItemIndex)
+                    {
+                        var btn = _powerMenuItems[_selectedPowerMenuItemIndex];
+                        if (btn == SleepMenuItem) SleepMenuItem_Click(null, null);
+                        else if (btn == RestartMenuItem) RestartMenuItem_Click(null, null);
+                        else if (btn == ShutdownMenuItem) ShutdownMenuItem_Click(null, null);
+                        else if (btn == LogOffMenuItem) LogOffMenuItem_Click(null, null);
+                        PlayActivationSound();
+                    }
+                    e.Handled = true;
+                    return true;
+                case VirtualKey.Escape:
+                    PowerMenu.Visibility = Visibility.Collapsed;
+                    _currentFocusArea = FocusArea.TopButtons;
+                    UpdateVisualFocus();
+                    PlaydeactivationSound();
+                    e.Handled = true;
+                    return true;
+            }
+            return false;
+        }
+
+        private bool HandleKeyboardAudioMenu(KeyRoutedEventArgs e)
+        {
+            bool navigated = false;
+
+            if (e.Key == VirtualKey.Escape)
+            {
+                CloseAudioFlyout();
+                PlaydeactivationSound();
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == VirtualKey.Tab)
+            {
+                ToggleAudioTab(!_isAudioMixerMode);
+                PlayNavigationSound();
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == (VirtualKey)0xC004) // GamepadLeftShoulder
+            {
+                if (_isAudioMixerMode) ToggleAudioTab(false);
+                PlayNavigationSound();
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == (VirtualKey)0xC005) // GamepadRightShoulder
+            {
+                if (!_isAudioMixerMode) ToggleAudioTab(true);
+                PlayNavigationSound();
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == VirtualKey.Y)
+            {
+                _isMasterVolumeFocused = !_isMasterVolumeFocused;
+                UpdateAudioVisualFocus();
+                PlayNavigationSound();
+                e.Handled = true;
+                return true;
+            }
+
+            if (_isMasterVolumeFocused)
+            {
+                if (e.Key == VirtualKey.Right && MasterVolumeSlider.Value < 100) { MasterVolumeSlider.Value += 5; e.Handled = true; return true; }
+                if (e.Key == VirtualKey.Left && MasterVolumeSlider.Value > 0) { MasterVolumeSlider.Value -= 5; e.Handled = true; return true; }
+                if (e.Key == VirtualKey.Down)
+                {
+                    _isMasterVolumeFocused = false;
+                    if (!_isAudioMixerMode) _selectedAudioDeviceIndex = 0;
+                    else _selectedMixerIndex = 0;
+                    UpdateAudioVisualFocus();
+                    PlayNavigationSound();
+                    e.Handled = true;
+                    return true;
+                }
+            }
+            else if (!_isAudioMixerMode && _audioDeviceButtons.Any())
+            {
+                if (e.Key == VirtualKey.Down)
+                {
+                    _selectedAudioDeviceIndex = (_selectedAudioDeviceIndex + 1) % _audioDeviceButtons.Count;
+                    navigated = true;
+                }
+                else if (e.Key == VirtualKey.Up)
+                {
+                    if (_selectedAudioDeviceIndex == 0)
+                        _isMasterVolumeFocused = true;
+                    else
+                        _selectedAudioDeviceIndex--;
+                    navigated = true;
+                }
+                else if (e.Key == VirtualKey.Enter)
+                {
+                    if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                        SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                    e.Handled = true;
+                    return true;
+                }
+            }
+            else if (_isAudioMixerMode && _audioMixerRows.Any())
+            {
+                if (e.Key == VirtualKey.Down)
+                {
+                    _selectedMixerIndex = (_selectedMixerIndex + 1) % _audioMixerRows.Count;
+                    navigated = true;
+                }
+                else if (e.Key == VirtualKey.Up)
+                {
+                    if (_selectedMixerIndex == 0)
+                        _isMasterVolumeFocused = true;
+                    else
+                        _selectedMixerIndex--;
+                    navigated = true;
+                }
+                else if (e.Key == VirtualKey.Left)
+                {
+                    AdjustSessionVolume(_selectedMixerIndex, -0.05f);
+                    e.Handled = true;
+                    return true;
+                }
+                else if (e.Key == VirtualKey.Right)
+                {
+                    AdjustSessionVolume(_selectedMixerIndex, 0.05f);
+                    e.Handled = true;
+                    return true;
+                }
+            }
+
+            if (navigated)
+            {
+                UpdateAudioVisualFocus();
+                PlayNavigationSound();
+                if (_isAudioMixerMode && _audioMixerRows.Count > _selectedMixerIndex)
+                    ScrollToAudioItemAnimated(_audioMixerRows[_selectedMixerIndex], AudioMixerScrollViewer, MixerListStackPanel);
+                else if (!_isAudioMixerMode && _audioDeviceButtons.Count > _selectedAudioDeviceIndex)
+                    ScrollToAudioItemAnimated(_audioDeviceButtons[_selectedAudioDeviceIndex], AudioDevicesScrollViewer, SimpleAudioList);
+                e.Handled = true;
+                return true;
+            }
+            return false;
+        }
+
+        private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (!_keyboardNavigationEnabled) return;
+            if (!IsWindowInForeground()) return;
+
+            if (_globalShortcutOverlay != null || _isOverlayClosing)
+            {
+                if (e.Key == VirtualKey.Escape && !_isOverlayClosing)
+                    DispatcherQueue.TryEnqueue(CloseGlobalShortcutOverlay);
+                e.Handled = true;
+                return;
+            }
+
+            if (GameOptionsOverlay.Visibility == Visibility.Visible)
+            {
+                HandleKeyboardGameOptions(e);
+                return;
+            }
+
+            if (_currentFocusArea == FocusArea.StartupVideo)
+            {
+                if (e.Key == VirtualKey.Escape || e.Key == VirtualKey.Enter || e.Key == VirtualKey.Space)
+                {
+                    TransitionToMainUI();
+                    e.Handled = true;
+                }
+                return;
+            }
+
+            if (AudioOverlay.Visibility == Visibility.Visible && _currentFocusArea == FocusArea.AudioMenu)
+            {
+                if (HandleKeyboardAudioMenu(e)) return;
+            }
+
+            if (PowerMenu.Visibility == Visibility.Visible && _currentFocusArea == FocusArea.PowerMenu)
+            {
+                if (HandleKeyboardPowerMenu(e)) return;
+            }
+
+            if (AppLauncher.Visibility == Visibility.Visible && _currentFocusArea == FocusArea.AppLauncher)
+            {
+                if (HandleKeyboardAppLauncher(e)) return;
+            }
+
+            if (MainContent.Visibility != Visibility.Visible) return;
+
+            if (TryHandleTypeToSearch(e)) return;
+
+            bool navigated = false;
+
+            switch (_currentFocusArea)
+            {
+                case FocusArea.TopButtons:
+                    switch (e.Key)
+                    {
+                        case VirtualKey.Down:
+                            _currentFocusArea = _previousFocusArea;
+                            _previousTopButtonIndex = _selectedTopButtonIndex;
+                            if (_currentFocusArea == FocusArea.Cards)
+                                _selectedCardIndex = _previousCardIndex != -1 ? _previousCardIndex : 0;
+                            else if (_currentFocusArea == FocusArea.Launcher)
+                                _selectedLauncherAreaIndex = _previousLauncherAreaIndex != -1 ? _previousLauncherAreaIndex : 0;
+                            navigated = true;
+                            break;
+                        case VirtualKey.Right:
+                            if (_topButtons.Any())
+                            {
+                                _selectedTopButtonIndex = (_selectedTopButtonIndex + 1) % _topButtons.Count;
+                                navigated = true;
+                            }
+                            break;
+                        case VirtualKey.Left:
+                            if (_topButtons.Any())
+                            {
+                                _selectedTopButtonIndex = (_selectedTopButtonIndex - 1 + _topButtons.Count) % _topButtons.Count;
+                                navigated = true;
+                            }
+                            break;
+                        case VirtualKey.Enter:
+                            ClickSelectedTopButton();
+                            PlayActivationSound();
+                            e.Handled = true;
+                            return;
+                        case VirtualKey.X:
+                            OpenAudioFlyout();
+                            PlayActivationSound();
+                            e.Handled = true;
+                            return;
+                    }
                     break;
+
+                case FocusArea.Cards:
+                    if (e.Key == VirtualKey.Up)
+                    {
+                        _previousFocusArea = FocusArea.Cards;
+                        _previousCardIndex = _selectedCardIndex;
+                        _currentFocusArea = FocusArea.TopButtons;
+                        _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Right && ProgramCardPanel.Children.Any())
+                    {
+                        _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Left)
+                    {
+                        if (ProgramCardPanel.Children.Any() && _selectedCardIndex > 0)
+                        {
+                            _selectedCardIndex--;
+                            navigated = true;
+                        }
+                        else if (ProgramCardPanel.Children.Any())
+                        {
+                            _previousFocusArea = FocusArea.Cards;
+                            _currentFocusArea = FocusArea.Launcher;
+                            _selectedLauncherAreaIndex = _launcherAreaButtons.Any() ? _launcherAreaButtons.Count - 1 : 0;
+                            navigated = true;
+                        }
+                    }
+                    else if (e.Key == VirtualKey.Enter)
+                    {
+                        TriggerCardAction(_selectedCardIndex, true);
+                        PlayActivationSound();
+                        e.Handled = true;
+                        return;
+                    }
+                    else if (e.Key == VirtualKey.Escape)
+                    {
+                        TriggerCardAction(_selectedCardIndex, false);
+                        PlaydeactivationSound();
+                        e.Handled = true;
+                        return;
+                    }
+                    else if (e.Key == (VirtualKey)0x5D) // VK_APPS — context / game options (Start on some keyboards)
+                    {
+                        if (_cardCache != null && _cardCache.Count > _selectedCardIndex && _selectedCardIndex >= 0)
+                        {
+                            OpenGameOptions(_cardCache[_selectedCardIndex]);
+                            PlayActivationSound();
+                        }
+                        e.Handled = true;
+                        return;
+                    }
+                    break;
+
+                case FocusArea.QuickLaunchers:
+                    if (e.Key == VirtualKey.Up)
+                    {
+                        _previousFocusArea = FocusArea.QuickLaunchers;
+                        _currentFocusArea = FocusArea.TopButtons;
+                        _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Down)
+                    {
+                        _currentFocusArea = FocusArea.Launcher;
+                        _selectedLauncherAreaIndex = 0;
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Right && _quickLauncherButtons.Any())
+                    {
+                        _selectedQuickLauncherIndex = Math.Min(_quickLauncherButtons.Count - 1, _selectedQuickLauncherIndex + 1);
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Left)
+                    {
+                        _selectedQuickLauncherIndex = Math.Max(0, _selectedQuickLauncherIndex - 1);
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Enter)
+                    {
+                        if (_quickLauncherButtons.Count > _selectedQuickLauncherIndex)
+                        {
+                            string targetLauncher = _quickLauncherButtons[_selectedQuickLauncherIndex].Tag.ToString();
+                            SwitchToSpecificLauncher(targetLauncher);
+                            PlayActivationSound();
+                        }
+                        e.Handled = true;
+                        return;
+                    }
+                    break;
+
+                case FocusArea.Launcher:
+                    if (e.Key == VirtualKey.Up)
+                    {
+                        if (_selectedLauncherAreaIndex == 0)
+                        {
+                            _currentFocusArea = FocusArea.QuickLaunchers;
+                            _selectedQuickLauncherIndex = 0;
+                        }
+                        else
+                        {
+                            _previousFocusArea = FocusArea.Launcher;
+                            _previousLauncherAreaIndex = _selectedLauncherAreaIndex;
+                            _currentFocusArea = FocusArea.TopButtons;
+                            _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
+                        }
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Right && _launcherAreaButtons.Any())
+                    {
+                        if (_selectedLauncherAreaIndex == _launcherAreaButtons.Count - 1)
+                        {
+                            _currentFocusArea = FocusArea.Cards;
+                            _selectedCardIndex = 0;
+                        }
+                        else
+                            _selectedLauncherAreaIndex++;
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Left && _selectedLauncherAreaIndex > 0)
+                    {
+                        _selectedLauncherAreaIndex--;
+                        navigated = true;
+                    }
+                    else if (e.Key == VirtualKey.Enter)
+                    {
+                        if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count)
+                        {
+                            var item = _launcherAreaButtons[_selectedLauncherAreaIndex].Tag as LauncherCardItem;
+                            item?.TapAction?.Invoke(null, null);
+                            PlayActivationSound();
+                        }
+                        e.Handled = true;
+                        return;
+                    }
+                    break;
+
+                case FocusArea.ImageSelection:
+                    if (ImageResultsGrid.Items.Count > 0)
+                    {
+                        int columns = 5;
+                        bool imgNav = false;
+                        if (e.Key == VirtualKey.Right)
+                        {
+                            _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + 1);
+                            imgNav = true;
+                        }
+                        else if (e.Key == VirtualKey.Left)
+                        {
+                            _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - 1);
+                            imgNav = true;
+                        }
+                        else if (e.Key == VirtualKey.Down)
+                        {
+                            _selectedImageGridIndex = Math.Min(ImageResultsGrid.Items.Count - 1, _selectedImageGridIndex + columns);
+                            imgNav = true;
+                        }
+                        else if (e.Key == VirtualKey.Up)
+                        {
+                            _selectedImageGridIndex = Math.Max(0, _selectedImageGridIndex - columns);
+                            imgNav = true;
+                        }
+                        else if (e.Key == VirtualKey.Enter)
+                        {
+                            if (_selectedImageGridIndex >= 0 && _selectedImageGridIndex < _currentImageSearchResults.Count)
+                                DownloadAndApplyImage(_currentImageSearchResults[_selectedImageGridIndex]);
+                            PlayActivationSound();
+                            e.Handled = true;
+                            return;
+                        }
+                        else if (e.Key == VirtualKey.Escape)
+                        {
+                            CloseImageSelectorButton_Click(null, null);
+                            PlaydeactivationSound();
+                            e.Handled = true;
+                            return;
+                        }
+                        if (imgNav)
+                        {
+                            ImageResultsGrid.SelectedIndex = _selectedImageGridIndex;
+                            ImageResultsGrid.ScrollIntoView(ImageResultsGrid.SelectedItem);
+                            PlayNavigationSound();
+                            e.Handled = true;
+                            return;
+                        }
+                    }
+                    break;
+            }
+
+            if (navigated)
+            {
+                UpdateVisualFocus();
+                PlayNavigationSound();
+                e.Handled = true;
             }
         }
         private void RestoreUwpAppWindow(IntPtr hwnd)
@@ -10913,6 +11539,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // NEU: Fokus-Status auf Video setzen, um Controller-Eingaben abzufangen
                 _currentFocusArea = FocusArea.StartupVideo;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    try { RootGrid?.Focus(FocusState.Programmatic); } catch { }
+                });
             }
             catch (Exception ex)
             {
@@ -10959,6 +11589,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             SetWindowPos(myHwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
             startupVideoFinished = true;
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                try { RootGrid?.Focus(FocusState.Programmatic); } catch { /* focus not critical */ }
+            });
         }
 
         // --- STEAM INJECTION ---
@@ -11135,6 +11770,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         // In MainWindow.xaml.cs
 
 
+        private async Task OpenAppLauncherAsync()
+        {
+            AppLauncher.Visibility = Visibility.Visible;
+            _currentFocusArea = FocusArea.AppLauncher;
+
+            if (AllInstalledApps.Count == 0)
+                await LoadInstalledAppsAsync();
+
+            if (AppGridView.Items.Count > 0)
+                AppGridView.SelectedIndex = 0;
+        }
+
         private async void ToggleAppLauncher_Click(object sender, RoutedEventArgs e)
         {
             if (AppLauncher.Visibility == Visibility.Visible)
@@ -11144,19 +11791,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             else
             {
-                AppLauncher.Visibility = Visibility.Visible;
-                _currentFocusArea = FocusArea.AppLauncher;
-
-                // WICHTIG: Apps nur laden, wenn die Liste noch leer ist
-                if (AllInstalledApps.Count == 0)
-                {
-                    await LoadInstalledAppsAsync();
-                }
-
-                if (AppGridView.Items.Count > 0)
-                {
-                    AppGridView.SelectedIndex = 0;
-                }
+                await OpenAppLauncherAsync();
             }
             UpdateVisualFocus();
         }

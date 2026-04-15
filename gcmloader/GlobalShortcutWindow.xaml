@@ -5,11 +5,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Active Shortcuts">
 
-    <Grid x:Name="RootBackground" Opacity="0" Loaded="RootBackground_Loaded">
+    <Grid x:Name="RootBackground" Opacity="0" Loaded="RootBackground_Loaded" KeyDown="RootBackground_KeyDown" IsTabStop="True">
 
         <Image x:Name="WallpaperImage" Stretch="UniformToFill" />
 
-        <Border Background="#CC000000" />
+        <Border x:Name="BackdropDismissLayer" Background="#CC000000" PointerPressed="BackdropDismissLayer_PointerPressed" />
 
         <Border x:Name="MainPopupCard" 
                 HorizontalAlignment="Center"
@@ -37,7 +37,7 @@
                     <TextBlock Text="ACTIVE SHORTCUTS" FontSize="22" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Grid.Row="1" Text="Press B / O or combo again to close" FontSize="12" Foreground="#FFAAAAAA" HorizontalAlignment="Center" Margin="0,0,0,30"/>
+                <TextBlock Grid.Row="1" Text="Escape, click outside the card, or toggle the overlay again to close" FontSize="12" Foreground="#FFAAAAAA" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,30"/>
 
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden">
                     <ItemsControl x:Name="ShortcutItemsControl">

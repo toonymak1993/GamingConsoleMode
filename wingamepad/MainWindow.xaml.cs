@@ -11,6 +11,8 @@ using Tomlyn.Model;
 using Notification.Wpf;
 using System.Windows.Media.Imaging;
 
+// DeckTop (2026): Standalone WPF gamepad hotkey helper; not in main solution. Quarantined — use gcmloader + use_controller_navigation instead.
+
 namespace wingamepad
 {
     public partial class App : Application

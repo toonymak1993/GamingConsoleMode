@@ -17,6 +17,8 @@ using System.Globalization;
 using System.Windows.Data;
 using Tomlyn.Model;
 
+// DeckTop (2026): Legacy WPF overlay; not in GAMINGCONSOLEMODE.sln. SharpDX/XInput kept for reference — prefer gcmloader optional controller path.
+
 namespace OverlayWindow
 {
     public partial class MainWindow : Window
