@@ -9,7 +9,7 @@
     Title="GAMINGCONSOLEMODE">
 
     <!-- Root Grid -->
-    <Grid Background="#2a475e">
+    <Grid Background="#2a475e" XYFocusKeyboardNavigation="Enabled">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <!-- Topbar -->
@@ -38,6 +38,8 @@
                 Margin="10"
                 Spacing="12">
                 <Button x:Name="DiscordButton"
+        TabIndex="0"
+        UseSystemFocusVisuals="True"
         Click="DiscordImageButton_Click"
         Background="Transparent"
         BorderBrush="Transparent"
@@ -77,6 +79,8 @@
                 </Button>
 
                 <Button x:Name="patreonButton"
+        TabIndex="1"
+        UseSystemFocusVisuals="True"
 Click="patreonButton_Click"
 Background="Transparent"
 BorderBrush="Transparent"
@@ -122,6 +126,8 @@ Margin="0,0,20,0">
 
                 <!-- START GCM Button mit mehrfarbigem Verlauf -->
                 <Button x:Name="MenuButton"
+        TabIndex="2"
+        UseSystemFocusVisuals="True"
         Content="START GCM"
         CornerRadius="10"
         BorderBrush="SlateGray"
@@ -143,7 +149,7 @@ Margin="0,0,20,0">
                         </LinearGradientBrush>
                     </Button.Background>
 
-                    <!-- Hover- und Klickzustände -->
+                    <!-- Hover- und Klickzustnde -->
                     <VisualStateManager.VisualStateGroups>
                         <VisualStateGroup x:Name="CommonStates">
                             <VisualState x:Name="Normal" />

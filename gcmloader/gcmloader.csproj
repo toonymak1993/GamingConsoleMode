@@ -145,6 +145,9 @@
     <ProjectCapability Include="Msix" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\DeckTop.Settings\DeckTop.Settings.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="ClickableTransparentOverlay" Version="11.1.0" />
     <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
     <PackageReference Include="Discord.Net" Version="3.17.1" />

@@ -1,5 +1,13 @@
 # Handoff to Qwen Code — DeckTop Priority Work Plan
 
+## Update (post–pre-UI backlog)
+
+The following landed in-repo: **`DeckTop.Settings`** shared library; **`ILauncherService` / `LauncherService`** extraction; **`BackToWindows`** timer/taskbar/steam-injection cleanup; companion hub **`GAMINGCONSOLEMODE/README.md`**; hub baseline **MKB** (focus/navigation attributes on main chrome); **`AGENTS.md`** refresh; optional **`github_update_check`** + deferred post–first-paint work in **gcmloader**; **`FocusNavigationHelper`** stub for future shared nav parity; satellite **`README.md`** for **wingamepad** / **OverlayWindow** + **TaskHelper** audit comment; **wingamepad** `.csproj` deprecation note.
+
+The step-by-step sections below are the **original** priority handoff; use them only where they still match `docs/PRIORITY.md` and the current tree.
+
+---
+
 ## Context
 
 You are picking up a C# / WinUI 3 project called **DeckTop** — a fork of GameConsoleMode, a Windows shell-replacement gaming launcher. The previous agent (Claude) performed a full architectural audit and defined a priority work plan. Your job is to execute that plan in order.

@@ -1,4 +1,5 @@
-﻿using Microsoft.Win32.TaskScheduler;
+﻿// Admin-only scheduled-task helper. Launcher orchestration lives in gcmloader (LauncherService); keep this tool scoped to tasks.
+using Microsoft.Win32.TaskScheduler;
 using System;
 using System.Diagnostics;
 using System.IO;

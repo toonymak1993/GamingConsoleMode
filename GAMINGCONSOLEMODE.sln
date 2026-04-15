@@ -12,6 +12,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "innosetup", "innosetup", "{
 		..\..\..\Desktop\gcmrelease\innnosetupconfig.iss = ..\..\..\Desktop\gcmrelease\innnosetupconfig.iss
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeckTop.Settings", "DeckTop.Settings\DeckTop.Settings.csproj", "{0EFDD7C4-5259-42BE-8923-8159374496AF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM64 = Debug|ARM64
@@ -58,6 +60,18 @@ Global
 		{CA93A8F3-C821-4B98-A6D2-F4878974E4F4}.Release|x86.ActiveCfg = Release|x86
 		{CA93A8F3-C821-4B98-A6D2-F4878974E4F4}.Release|x86.Build.0 = Release|x86
 		{CA93A8F3-C821-4B98-A6D2-F4878974E4F4}.Release|x86.Deploy.0 = Release|x86
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Debug|x64.Build.0 = Debug|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Debug|x86.Build.0 = Debug|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Release|ARM64.Build.0 = Release|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Release|x64.ActiveCfg = Release|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Release|x64.Build.0 = Release|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Release|x86.ActiveCfg = Release|Any CPU
+		{0EFDD7C4-5259-42BE-8923-8159374496AF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
