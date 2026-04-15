@@ -5,3 +5,80 @@
 /.vs
 bin/
 obj/
+
+################################################################################
+# DeckTop — local-only / machine-specific (do not commit)
+################################################################################
+
+# Claude Code local overrides
+.claude/
+
+# Cursor hook runtime state (not shareable rules; those live elsewhere)
+.cursor/hooks/state/
+
+# VS Code — workspace settings are often personal; commit tasks/launch if you add them later
+.vscode/settings.json
+
+# Workspace MCP config (paths/commands vary per machine). Use docs or an *.example.json if you need a template.
+/mcp_config.json
+
+################################################################################
+# Build outputs & caches (common .NET / VS)
+################################################################################
+
+[Ll]og/
+[Ll]ogs/
+artifacts/
+*.log
+*.tlog
+*.cache
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*_wpftmp.csproj
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+################################################################################
+# Visual Studio / Rider user-specific
+################################################################################
+
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+
+################################################################################
+# Windows junk
+################################################################################
+
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+################################################################################
+# Misc
+################################################################################
+
+# Windows shell shortcut next to solution (local path)
+*.sln.lnk
