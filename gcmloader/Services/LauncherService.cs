@@ -215,14 +215,12 @@ public sealed class LauncherService : ILauncherService
 
     private static bool IsGcmVideoEnabled()
     {
-        try { return AppSettings.Load<bool>("usestartupvideo"); }
-        catch { return false; }
+        return TryLoadSetting("usestartupvideo", false);
     }
 
     private static bool IsSteamInjectionEnabled()
     {
-        try { return AppSettings.Load<bool>("usesteamstartupvideo"); }
-        catch { return false; }
+        return TryLoadSetting("usesteamstartupvideo", false);
     }
 
     public async Task SwitchToSpecificLauncherAsync(string launcherId, CancellationToken cancellationToken = default)
@@ -262,8 +260,7 @@ public sealed class LauncherService : ILauncherService
 
     public async Task StartConfiguredLauncherAsync(bool forceSteamRestart = false, bool forceXboxRestart = false, CancellationToken cancellationToken = default)
     {
-        string launcher = "steam";
-        try { launcher = AppSettings.Load<string>("launcher"); } catch { }
+        string launcher = TryLoadSetting("launcher", "steam");
         Debug.WriteLine($"[GCM] Wechsle zu konfiguriertem Launcher: '{launcher}'...");
 
         try
@@ -353,7 +350,14 @@ public sealed class LauncherService : ILauncherService
                 {
                     foreach (Process proc in allSteamProcs)
                     {
-                        try { if (!proc.HasExited) proc.Kill(); } catch { }
+                        try
+                        {
+                            if (!proc.HasExited) proc.Kill();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[GCM] Failed to kill process '{proc.ProcessName}' (PID {proc.Id}): {ex.Message}");
+                        }
                     }
                 }
 
@@ -362,7 +366,14 @@ public sealed class LauncherService : ILauncherService
                 {
                     foreach (Process proc in deckyProcs)
                     {
-                        try { if (!proc.HasExited) proc.Kill(); } catch { }
+                        try
+                        {
+                            if (!proc.HasExited) proc.Kill();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[GCM] Failed to kill decky process '{proc.ProcessName}' (PID {proc.Id}): {ex.Message}");
+                        }
                     }
                 }
 
@@ -403,7 +414,17 @@ public sealed class LauncherService : ILauncherService
                         .ToList();
                     if (steamProcs.Any())
                     {
-                        foreach (Process proc in steamProcs) { try { if (!proc.HasExited) proc.Kill(); } catch { } }
+                        foreach (Process proc in steamProcs)
+                        {
+                            try
+                            {
+                                if (!proc.HasExited) proc.Kill();
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[GCM] Failed to kill process '{proc.ProcessName}' (PID {proc.Id}): {ex.Message}");
+                            }
+                        }
                         await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
                     }
                 }
@@ -474,7 +495,10 @@ public sealed class LauncherService : ILauncherService
                     dp.Kill();
                     await Task.Delay(200, cancellationToken).ConfigureAwait(false);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GCM] Failed to kill Playnite desktop process (PID {dp.Id}): {ex.Message}");
+                }
             }
 
             string? playnitePath = AutoDetectLauncherPath("playnite");
@@ -676,8 +700,24 @@ public sealed class LauncherService : ILauncherService
             if (OpenProcessToken(proc.Handle, TOKEN_DUPLICATE_ACCESS, out IntPtr token))
                 return token;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GCM] Could not open token from process '{processName}': {ex.Message}");
+        }
 
         return IntPtr.Zero;
+    }
+
+    private static T TryLoadSetting<T>(string key, T fallback)
+    {
+        try
+        {
+            return AppSettings.Load<T>(key);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GCM] Failed to load setting '{key}', using fallback: {ex.Message}");
+            return fallback;
+        }
     }
 }

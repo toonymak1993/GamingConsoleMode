@@ -50,17 +50,7 @@ public sealed class ServiceManagementService : IServiceManager
 
     public void DisableServiceStartup(string serviceName)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "sc.exe",
-            Arguments = $"config \"{serviceName}\" start= disabled",
-            CreateNoWindow = true,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            Verb = "runas"
-        };
-
-        using var process = Process.Start(psi);
+        using var process = Process.Start(CreateScConfigStartInfo(serviceName, "disabled"));
         WaitForExitWithTimeout(process, $"sc config {serviceName} disabled");
     }
 
@@ -68,15 +58,7 @@ public sealed class ServiceManagementService : IServiceManager
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "sc.exe",
-                Arguments = $"config \"{serviceName}\" start= auto",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                Verb = "runas"
-            });
+            using var process = Process.Start(CreateScConfigStartInfo(serviceName, "auto"));
             WaitForExitWithTimeout(process, $"sc config {serviceName} auto");
 
             Debug.WriteLine($"[✓] Service {serviceName} set to automatic startup.");
@@ -100,15 +82,7 @@ public sealed class ServiceManagementService : IServiceManager
                     service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(5));
                 }
 
-                using var process = Process.Start(new ProcessStartInfo
-                {
-                    FileName = "sc.exe",
-                    Arguments = $"config \"{serviceName}\" start= disabled",
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    Verb = "runas"
-                });
+                using var process = Process.Start(CreateScConfigStartInfo(serviceName, "disabled"));
                 WaitForExitWithTimeout(process, $"sc config {serviceName} disabled");
             }
 
@@ -208,4 +182,14 @@ public sealed class ServiceManagementService : IServiceManager
             Debug.WriteLine($"[!] Timeout waiting for operation: {operationName}");
         }
     }
+
+    private static ProcessStartInfo CreateScConfigStartInfo(string serviceName, string startMode) => new()
+    {
+        FileName = "sc.exe",
+        Arguments = $"config \"{serviceName}\" start= {startMode}",
+        CreateNoWindow = true,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        Verb = "runas"
+    };
 }

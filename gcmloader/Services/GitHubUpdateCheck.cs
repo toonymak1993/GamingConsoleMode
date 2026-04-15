@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
@@ -25,8 +26,9 @@ public static class GitHubUpdateCheck
             if (!AppSettings.Load<bool>("github_update_check"))
                 return;
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"[UpdateCheck] Disabled due to settings read error: {ex.Message}");
             return;
         }
 
@@ -47,6 +49,18 @@ public static class GitHubUpdateCheck
                 else
                     Debug.WriteLine($"[UpdateCheck] Up to date (latest tag {latest}).");
             }
+            catch (OperationCanceledException)
+            {
+                Debug.WriteLine("[UpdateCheck] Request timed out.");
+            }
+            catch (JsonException ex)
+            {
+                Debug.WriteLine($"[UpdateCheck] Invalid JSON response: {ex.Message}");
+            }
+            catch (HttpRequestException ex)
+            {
+                Debug.WriteLine($"[UpdateCheck] HTTP error: {ex.Message}");
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[UpdateCheck] {ex.Message}");
@@ -59,7 +73,29 @@ public static class GitHubUpdateCheck
         string url = $"https://api.github.com/repos/{Owner}/{Repo}/releases/latest";
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         using var response = await Client.GetAsync(url, timeoutCts.Token).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+
+        if ((int)response.StatusCode == 403)
+        {
+            string? remaining = TryGetHeaderValue(response, "X-RateLimit-Remaining");
+            string? resetEpoch = TryGetHeaderValue(response, "X-RateLimit-Reset");
+            if (remaining == "0" && long.TryParse(resetEpoch, NumberStyles.Integer, CultureInfo.InvariantCulture, out long epoch))
+            {
+                DateTimeOffset resetTime = DateTimeOffset.FromUnixTimeSeconds(epoch).ToLocalTime();
+                Debug.WriteLine($"[UpdateCheck] GitHub API rate-limited. Reset at {resetTime:yyyy-MM-dd HH:mm:ss zzz}.");
+            }
+            else
+            {
+                Debug.WriteLine("[UpdateCheck] GitHub API request forbidden (403).");
+            }
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Debug.WriteLine($"[UpdateCheck] HTTP {(int)response.StatusCode} {response.ReasonPhrase} while checking releases.");
+            return null;
+        }
+
         string json = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
         using JsonDocument doc = JsonDocument.Parse(json);
         return doc.RootElement.GetProperty("tag_name").GetString();
@@ -81,5 +117,18 @@ public static class GitHubUpdateCheck
         };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("DeckTop-gcmloader");
         return client;
+    }
+
+    private static string? TryGetHeaderValue(HttpResponseMessage response, string headerName)
+    {
+        if (response.Headers.TryGetValues(headerName, out var values))
+        {
+            foreach (string value in values)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 }
