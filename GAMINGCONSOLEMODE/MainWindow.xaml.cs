@@ -102,7 +102,8 @@ namespace GAMINGCONSOLEMODE
                         "LinksPage" => typeof(Links),
                         "RogAllyPage" => typeof(rogally),
                         "TaskManagerPage" => typeof(taskmanager),
-                        _ => null   
+                        "RetroGamesPage" => typeof(RetroGames),
+                        _ => null
                     };
 
                     if (pageType != null && contentFrame.CurrentSourcePageType != pageType)
