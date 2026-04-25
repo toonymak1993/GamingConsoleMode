@@ -47,6 +47,8 @@ jobs:
           /p:WindowsAppSDKSelfContained=true
           /p:PublishReadyToRun=false
           /p:PublishSingleFile=false
+          /p:GenerateAppxPackageOnBuild=false
+          /p:AppxPackageSigningEnabled=false
           --no-restore
           -o ./publish/XlineGame
 
@@ -63,6 +65,8 @@ jobs:
           /p:Platform=x64
           /p:WindowsAppSDKSelfContained=true
           /p:PublishReadyToRun=false
+          /p:GenerateAppxPackageOnBuild=false
+          /p:AppxPackageSigningEnabled=false
           --no-restore
           -o ./publish/XlineGame/gcmloader
 

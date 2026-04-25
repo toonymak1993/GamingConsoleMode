@@ -82,6 +82,7 @@
         <!-- Loading overlay -->
         <Grid Grid.Row="2">
             <webview2:WebView2 x:Name="RetroWebView"
+                               Source="https://classicgamezone.com"
                                NavigationStarting="RetroWebView_NavigationStarting"
                                NavigationCompleted="RetroWebView_NavigationCompleted"
                                CoreWebView2Initialized="RetroWebView_CoreWebView2Initialized"/>

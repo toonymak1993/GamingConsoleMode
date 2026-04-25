@@ -11,17 +11,11 @@ namespace GAMINGCONSOLEMODE
         public RetroGames()
         {
             this.InitializeComponent();
-            InitializeWebView();
-        }
-
-        private async void InitializeWebView()
-        {
-            await RetroWebView.EnsureCoreWebView2Async();
-            RetroWebView.Source = new System.Uri(HomeUrl);
         }
 
         private void RetroWebView_CoreWebView2Initialized(WebView2 sender, CoreWebView2InitializedEventArgs args)
         {
+            if (args.Exception != null) return;
             sender.CoreWebView2.Settings.IsStatusBarEnabled = false;
             sender.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
             sender.CoreWebView2.Settings.IsZoomControlEnabled = true;
