@@ -1,0 +1,85 @@
+name: Build XlineGame EXE
+
+on:
+  push:
+    branches:
+      - claude/analyze-game-launcher-Basqi
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+
+jobs:
+  build:
+    name: Build & Publish (x64 Release)
+    runs-on: windows-2022
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # ── GAMINGCONSOLEMODE (XlineGame) ─────────────────────────────────────
+      - name: Restore GAMINGCONSOLEMODE
+        run: dotnet restore GAMINGCONSOLEMODE/GAMINGCONSOLEMODE.csproj -r win-x64 /p:Platform=x64
+
+      - name: Publish GAMINGCONSOLEMODE (win-x64)
+        run: >
+          dotnet publish GAMINGCONSOLEMODE/GAMINGCONSOLEMODE.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          /p:Platform=x64
+          /p:WindowsAppSDKSelfContained=true
+          /p:PublishReadyToRun=false
+          /p:PublishSingleFile=false
+          --no-restore
+          -o ./publish/XlineGame
+
+      # ── gcmloader ─────────────────────────────────────────────────────────
+      - name: Restore gcmloader
+        run: dotnet restore gcmloader/gcmloader.csproj -r win-x64 /p:Platform=x64
+
+      - name: Publish gcmloader (win-x64)
+        run: >
+          dotnet publish gcmloader/gcmloader.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          /p:Platform=x64
+          /p:WindowsAppSDKSelfContained=true
+          /p:PublishReadyToRun=false
+          --no-restore
+          -o ./publish/XlineGame/gcmloader
+
+      # ── Artifact ──────────────────────────────────────────────────────────
+      - name: List publish output
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path "./publish/XlineGame" -Recurse -File
+          Write-Host "Total files: $($files.Count)"
+          $exes = $files | Where-Object { $_.Extension -eq ".exe" }
+          Write-Host "EXE files:"
+          $exes | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+      - name: Upload XlineGame artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XlineGame-x64-${{ github.run_number }}
+          path: ./publish/XlineGame/
+          retention-days: 30
+          if-no-files-found: error
