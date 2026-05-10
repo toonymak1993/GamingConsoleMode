@@ -1,8 +1,7 @@
-# GameConsoleMode (GCM) 🎮
+# GMC - XBOX Mode Launcher 🎮
 
-![GCM GUI Demo](gui.gif)
 
-**GameConsoleMode** (GCM) is a powerful C# application built with **WinUI 3**, designed to transform your PC into a fully functional gaming console while retaining the flexibility of the Windows operating system. GCM temporarily replaces the Windows shell with a custom gaming environment, providing a seamless console-like experience.
+**GameModeCompanion** (GMC Launcher) is a powerful C# application built with **WinUI 3**, designed to transform your PC into a fully functional gaming console while retaining the flexibility of the Windows operating system. GCM temporarily replaces the Windows shell with a custom gaming environment, providing a seamless console-like experience.
 
 Whether you're a Steam enthusiast, a Playnite user, Xbox APP user, or prefer your own custom launcher, GCM offers a streamlined gaming experience without unnecessary Windows distractions.
 
@@ -12,14 +11,6 @@ Something like **SteamOS**, but powered by the **Windows engine**.
 
 ---
 
-## ⚠️ Important Notice
-
-- This software modifies critical parts of the Windows environment, including the registry.
-- Use it **at your own risk**, as improper use or unexpected issues could impact your system.
-- The developer assumes no responsibility for any damages or data loss resulting from the use of this software.
-- It disables **User Account Control (UAC)** for a smoother experience, though this reduces security. (Only inside the gamemode)
-
----
 
 ## ✨ Features
 
