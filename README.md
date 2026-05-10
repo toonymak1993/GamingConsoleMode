@@ -8,7 +8,7 @@ Whether you're a Steam enthusiast, a Playnite user, Xbox APP user, or prefer you
 
 Something like **SteamOS**, but powered by the **Windows engine**.
 
- ![start_gamemode](gcmgame.png) 
+ ![start_gamemode](gmc.png) 
 
 ---
 
