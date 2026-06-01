@@ -9,7 +9,7 @@ using System.Runtime.InteropServices; // Wichtig für die neuen DLL-Imports
 using HidSharp;
 using HidSharp.Reports;
 
-namespace GAMINGCONSOLEMODE
+namespace gcmloader
 {
     public static class AllyHardwareControl
     {

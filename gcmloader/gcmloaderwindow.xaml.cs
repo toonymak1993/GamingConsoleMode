@@ -1,7 +1,6 @@
 ﻿using Discord;
 using Discord.WebSocket;
 using DualSenseAPI;
-using GAMINGCONSOLEMODE;
 using HidSharp;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -28,6 +27,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Linq;
 using System.Media;
+using System.Management;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Numerics;
@@ -46,6 +46,7 @@ using Tomlyn.Model;
 using Vanara.PInvoke;
 using Windows.Devices.Power;
 using Windows.Gaming.Input;
+using Windows.Management.Deployment;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Networking.Connectivity;
@@ -92,6 +93,81 @@ namespace gcmloader
         private ProgramCardEntry _currentEditingCardEntry = null; // Stores the card we are currently editing
         private List<string> _currentImageSearchResults = new List<string>();
         private int _selectedImageGridIndex = 0;
+        private bool _hasCheckedForGithubReleaseUpdate;
+        private FocusArea _githubReleaseReturnFocusArea = FocusArea.Cards;
+        private GithubReleaseInfo _availableGithubReleaseUpdate;
+        private const string GithubLatestReleaseApiUrl = "https://api.github.com/repos/toonymak1993/GameConsoleMode/releases/latest";
+        private FocusArea _gameOptionsReturnFocusArea = FocusArea.Cards;
+        private Border _bottomLegendBar;
+        private StackPanel _bottomLegendItemsHost;
+        private Border _bottomStatusPopup;
+        private CompositeTransform _bottomStatusPopupTransform;
+        private TextBlock _bottomStatusText;
+        private DispatcherTimer _bottomStatusHideTimer;
+        private Storyboard _bottomStatusShowStoryboard;
+        private Storyboard _bottomStatusHideStoryboard;
+        private string _pendingStatusMessage = string.Empty;
+        private ControllerType _lastActiveControllerType = ControllerType.Xbox;
+        private double _currentShellLayoutScale = 1.0;
+        private double _currentTopPanelScale = 1.0;
+        private bool _isRebuildingResponsiveShell;
+        private string _lastLegendSignature = string.Empty;
+        private DispatcherTimer _audioOverlayRefreshTimer;
+        private bool _allowMasterVolumeSliderWrite;
+        private bool _suppressMasterVolumeWrite;
+        private bool _isShellUiReady;
+        private bool _isTransitioningToMainUi;
+        private bool _taskManagerStartupPending;
+        private bool _hasTaskManagerShellInitialized;
+        private bool _hasClockStarted;
+        private DispatcherTimer _controllerBatteryTimer;
+        private readonly Dictionary<string, ResolvedGameInfo> _resolvedGameInfoCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, SteamArtworkPaths> _steamArtworkPathCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _gameBackdropCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, SteamStoreBackdropInfo> _steamStoreBackdropCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _steamStoreSearchAppIdCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, IReadOnlyList<string>> _processLineageCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _gameArtworkRequestsInFlight = new(StringComparer.OrdinalIgnoreCase);
+        private string _featuredGameIdentity = string.Empty;
+        private string _activeGameBackdropIdentity = string.Empty;
+        private int _activeGameBackdropLoadVersion;
+        private int _backgroundImageLoadVersion;
+        private MediaPlayer _backgroundWallpaperPlayer;
+        private ProcessData _featuredGameProcessData;
+        private List<ProcessData> _deferredProcessData = new();
+
+        private sealed class ResolvedGameInfo
+        {
+            public bool IsGame { get; set; }
+            public int Score { get; set; }
+            public string CacheKey { get; set; }
+            public string DisplayName { get; set; }
+            public string SteamAppId { get; set; }
+            public string PosterImagePath { get; set; }
+            public string HeroImagePath { get; set; }
+            public string DetectionSummary { get; set; }
+        }
+
+        private sealed class SteamArtworkPaths
+        {
+            public string PosterPath { get; set; }
+            public string HeroPath { get; set; }
+        }
+
+        private sealed class SteamStoreBackdropInfo
+        {
+            public string BackgroundRawUrl { get; set; }
+            public string BackgroundUrl { get; set; }
+            public string ScreenshotUrl { get; set; }
+        }
+
+        private sealed class GithubReleaseInfo
+        {
+            public Version ReleaseVersion { get; set; }
+            public string VersionText { get; set; }
+            public string DisplayTitle { get; set; }
+            public string HtmlUrl { get; set; }
+        }
         #endregion
 
         #region soundcontrol
@@ -115,31 +191,48 @@ namespace gcmloader
         }
         private void UpdateMasterVolumeUI()
         {
+            if (MasterVolumeSlider == null || MasterVolumeText == null || MasterVolumeIcon == null)
+            {
+                return;
+            }
+
             try
             {
                 var enumerator = new MMDeviceEnumerator();
                 var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 int volume = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
 
-                // Event kurz abbestellen, damit wir keine Endlosschleife erzeugen
-                MasterVolumeSlider.ValueChanged -= MasterVolumeSlider_ValueChanged;
+                _suppressMasterVolumeWrite = true;
                 MasterVolumeSlider.Value = volume;
-                MasterVolumeSlider.ValueChanged += MasterVolumeSlider_ValueChanged;
+                _suppressMasterVolumeWrite = false;
 
                 MasterVolumeText.Text = $"{volume}%";
                 UpdateVolumeIcon(volume);
             }
-            catch { }
+            catch
+            {
+                _suppressMasterVolumeWrite = false;
+            }
         }
 
         // Wird aufgerufen, wenn der Slider bewegt wird
         private void MasterVolumeSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
         {
+            if (MasterVolumeText == null || MasterVolumeIcon == null)
+            {
+                return;
+            }
+
             try
             {
                 int newVolume = (int)e.NewValue;
-                //MasterVolumeText.Text = $"{newVolume}%";
+                MasterVolumeText.Text = $"{newVolume}%";
                 UpdateVolumeIcon(newVolume);
+
+                if (_suppressMasterVolumeWrite || !_allowMasterVolumeSliderWrite)
+                {
+                    return;
+                }
 
                 var enumerator = new MMDeviceEnumerator();
                 var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
@@ -150,10 +243,75 @@ namespace gcmloader
 
         private void UpdateVolumeIcon(int volume)
         {
+            if (MasterVolumeIcon == null)
+            {
+                return;
+            }
+
             if (volume == 0) MasterVolumeIcon.Glyph = "\uE74F"; // Mute
             else if (volume < 33) MasterVolumeIcon.Glyph = "\uE993"; // Low
             else if (volume < 66) MasterVolumeIcon.Glyph = "\uE994"; // Mid
             else MasterVolumeIcon.Glyph = "\uE995"; // High
+        }
+
+        private void EnsureAudioOverlayRefreshTimer()
+        {
+            if (_audioOverlayRefreshTimer != null)
+            {
+                return;
+            }
+
+            _audioOverlayRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+
+            _audioOverlayRefreshTimer.Tick += (s, e) => RefreshAudioOverlayLiveState();
+        }
+
+        private void StartAudioOverlayRefreshLoop()
+        {
+            EnsureAudioOverlayRefreshTimer();
+            _audioOverlayRefreshTimer?.Start();
+        }
+
+        private void StopAudioOverlayRefreshLoop()
+        {
+            _audioOverlayRefreshTimer?.Stop();
+        }
+
+        private void RefreshAudioOverlayLiveState()
+        {
+            if (AudioOverlay == null || AudioOverlay.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            UpdateMasterVolumeUI();
+
+            if (!_isAudioMixerMode)
+            {
+                return;
+            }
+
+            foreach (var row in _audioMixerRows)
+            {
+                if (row?.Tag is not AudioSessionControl session)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (session.State != AudioSessionState.AudioSessionStateExpired)
+                    {
+                        UpdateMixerRowVisuals(row, session.SimpleAudioVolume.Volume);
+                    }
+                }
+                catch
+                {
+                }
+            }
         }
         #region AudioMixerLogic
 
@@ -545,6 +703,7 @@ namespace gcmloader
         // 1. UI Reset
         ToggleAudioTab(false);
         _isMasterVolumeFocused = false;
+        _allowMasterVolumeSliderWrite = false;
         UpdateMasterVolumeUI();
         
         SimpleAudioList.Children.Clear();
@@ -631,6 +790,8 @@ namespace gcmloader
         sb.Children.Add(slideUp);
         sb.Begin();
 
+        _allowMasterVolumeSliderWrite = true;
+        StartAudioOverlayRefreshLoop();
         UpdateVisualFocus();
     }
     catch (Exception ex) 
@@ -641,6 +802,9 @@ namespace gcmloader
 
         private void CloseAudioFlyout()
         {
+            _allowMasterVolumeSliderWrite = false;
+            StopAudioOverlayRefreshLoop();
+
             var duration = TimeSpan.FromMilliseconds(300);
             var easing = new ExponentialEase { Exponent = 5, EasingMode = EasingMode.EaseIn };
             var sb = new Storyboard();
@@ -971,6 +1135,42 @@ namespace gcmloader
         private List<Button> _launcherResultButtons = new List<Button>();
         private int _selectedLauncherResultIndex = 0;
         private ObservableCollection<AppInfo> AllInstalledApps { get; } = new ObservableCollection<AppInfo>();
+        private ObservableCollection<AppInfo> VisibleAppLauncherApps { get; } = new ObservableCollection<AppInfo>();
+        private readonly HashSet<string> _favoriteAppIds = new(StringComparer.OrdinalIgnoreCase);
+        private AppLauncherFilter _appLauncherFilter = AppLauncherFilter.All;
+        private string _appLauncherSearchText = string.Empty;
+
+        private enum AppLauncherFilter
+        {
+            All,
+            Favorites,
+            Desktop,
+            Microsoft
+        }
+
+        private static readonly AppLauncherFilter[] AppLauncherFilterOrder =
+        {
+            AppLauncherFilter.All,
+            AppLauncherFilter.Favorites,
+            AppLauncherFilter.Desktop,
+            AppLauncherFilter.Microsoft
+        };
+
+        private sealed class AppDiscoveryInfo
+        {
+            public string Name { get; init; } = string.Empty;
+            public string LaunchTarget { get; init; } = string.Empty;
+            public string FilePath { get; init; } = string.Empty;
+            public string LaunchKind { get; init; } = "Executable";
+            public string SourceLabel { get; init; } = "DESKTOP";
+            public string IconPath { get; init; } = string.Empty;
+            public string StableId { get; init; } = string.Empty;
+        }
+
+        private string AppLauncherFavoritesPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "gcmsettings",
+            "appfavorites.json");
         #endregion
         #region playnite launcher window
         // Add these with your other window style constants
@@ -1187,6 +1387,7 @@ namespace gcmloader
                     SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040 | 0x0020);
                 }
                 UpdateScale();
+                ApplyResponsiveShellSizing(rebuildCards: true);
             }
             catch (Exception ex)
             {
@@ -1505,6 +1706,7 @@ namespace gcmloader
         private readonly Dictionary<string, SearchResult> _gameIdCache = new(); // Geändert von int? zu SearchResult
         public SteamGridDBHelper _steamGridHelper;
         private readonly string _imageCachePath = Path.Combine(SettingsFolder, "image_cache");
+        private readonly string _backdropCachePath = Path.Combine(SettingsFolder, "backdrop_cache");
 
         public class SteamGridDBHelper
         {
@@ -1572,6 +1774,41 @@ namespace gcmloader
                 return urls;
             }
 
+            public async Task<List<string>> GetHeroImagesForGameAsync(int gameId)
+            {
+                var urls = new List<string>();
+
+                if (!IsApiKeySet) return urls;
+
+                try
+                {
+                    var response = await _httpClient.GetAsync($"https://www.steamgriddb.com/api/v2/heroes/game/{gameId}");
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Debug.WriteLine($"[SteamGridDB Heroes] Error {response.StatusCode}");
+                        return urls;
+                    }
+
+                    var json = await response.Content.ReadAsStringAsync();
+                    var imageData = JsonSerializer.Deserialize<ImageResponse>(json, _jsonOptions);
+
+                    if (imageData != null && imageData.success && imageData.data != null)
+                    {
+                        foreach (var img in imageData.data.Take(20))
+                        {
+                            urls.Add(img.url);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SteamGridDB Hero Error] {ex.Message}");
+                }
+
+                return urls;
+            }
+
             public async Task<SearchResult> SearchForGameIdAsync(string gameName)
             {
                 // ÄNDERUNG: Prüfung auf API Key
@@ -1617,6 +1854,17 @@ namespace gcmloader
                 try
                 {
                     var list = await GetVerticalImagesForGameAsync(gameId);
+                    return list.FirstOrDefault();
+                }
+                catch { return null; }
+            }
+
+            public async Task<string> GetHeroImageUrlAsync(int gameId)
+            {
+                if (!IsApiKeySet) return null;
+                try
+                {
+                    var list = await GetHeroImagesForGameAsync(gameId);
                     return list.FirstOrDefault();
                 }
                 catch { return null; }
@@ -1682,7 +1930,7 @@ namespace gcmloader
                     using (var ms = new MemoryStream(imageBytes))
                     {
                         var bitmap = new BitmapImage();
-                        bitmap.DecodePixelWidth = 300; // Performance!
+                        bitmap.DecodePixelWidth = 512; // sharper cards without decoding full-size artwork
 
                         // WICHTIG: SetSourceAsync liest den Stream. Da ms im using ist, muss das await hier stehen.
                         await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
@@ -1906,52 +2154,127 @@ namespace gcmloader
             return null;
         }
 
+        private SteamArtworkPaths GetLocalSteamArtworkPaths(string steamAppId)
+        {
+            if (string.IsNullOrWhiteSpace(steamAppId))
+            {
+                return null;
+            }
+
+            if (_steamArtworkPathCache.TryGetValue(steamAppId, out SteamArtworkPaths cachedPaths))
+            {
+                return cachedPaths;
+            }
+
+            var artworkPaths = new SteamArtworkPaths();
+
+            try
+            {
+                string steamInstallPath = GetSteamInstallPath();
+                if (string.IsNullOrWhiteSpace(steamInstallPath))
+                {
+                    _steamArtworkPathCache[steamAppId] = artworkPaths;
+                    return artworkPaths;
+                }
+
+                string libraryCacheRoot = Path.Combine(steamInstallPath, "appcache", "librarycache");
+                if (!Directory.Exists(libraryCacheRoot))
+                {
+                    _steamArtworkPathCache[steamAppId] = artworkPaths;
+                    return artworkPaths;
+                }
+
+                string appFolder = Path.Combine(libraryCacheRoot, steamAppId);
+                string[] posterCandidates =
+                {
+                    Path.Combine(libraryCacheRoot, $"{steamAppId}_library_600x900.jpg"),
+                    Path.Combine(appFolder, "library_600x900.jpg")
+                };
+
+                artworkPaths.PosterPath = posterCandidates.FirstOrDefault(File.Exists);
+                if (string.IsNullOrWhiteSpace(artworkPaths.PosterPath) && Directory.Exists(appFolder))
+                {
+                    artworkPaths.PosterPath = Directory.EnumerateFiles(appFolder, "*600x900.jpg", SearchOption.AllDirectories).FirstOrDefault();
+                }
+
+                string[] heroCandidates =
+                {
+                    Path.Combine(appFolder, "library_hero.jpg"),
+                    Path.Combine(appFolder, "library_hero_blur.jpg"),
+                    Path.Combine(appFolder, "header.jpg"),
+                    Path.Combine(libraryCacheRoot, $"{steamAppId}_library_hero.jpg"),
+                    Path.Combine(libraryCacheRoot, $"{steamAppId}_hero.jpg"),
+                    Path.Combine(libraryCacheRoot, $"{steamAppId}_library_header.jpg"),
+                    Path.Combine(libraryCacheRoot, $"{steamAppId}_header.jpg")
+                };
+
+                artworkPaths.HeroPath = heroCandidates.FirstOrDefault(File.Exists);
+                if (string.IsNullOrWhiteSpace(artworkPaths.HeroPath) && Directory.Exists(appFolder))
+                {
+                    artworkPaths.HeroPath =
+                        Directory.EnumerateFiles(appFolder, "library_hero*.jpg", SearchOption.AllDirectories).FirstOrDefault() ??
+                        Directory.EnumerateFiles(appFolder, "header.jpg", SearchOption.AllDirectories).FirstOrDefault();
+                }
+
+                if (string.IsNullOrWhiteSpace(artworkPaths.HeroPath))
+                {
+                    artworkPaths.HeroPath = artworkPaths.PosterPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[DEBUG] GetLocalSteamArtworkPaths Error: {ex.Message}");
+            }
+
+            _steamArtworkPathCache[steamAppId] = artworkPaths;
+            return artworkPaths;
+        }
+
+        private void PopulateLocalSteamArtworkPaths(ResolvedGameInfo gameInfo)
+        {
+            if (gameInfo == null || string.IsNullOrWhiteSpace(gameInfo.SteamAppId))
+            {
+                return;
+            }
+
+            SteamArtworkPaths artworkPaths = GetLocalSteamArtworkPaths(gameInfo.SteamAppId);
+            if (artworkPaths == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(gameInfo.PosterImagePath))
+            {
+                gameInfo.PosterImagePath = artworkPaths.PosterPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(gameInfo.HeroImagePath))
+            {
+                gameInfo.HeroImagePath = artworkPaths.HeroPath;
+            }
+        }
+
 
         private async Task<string> FindLocalSteamImageAsync(string exePath)
         {
             Logger.Log($"[DEBUG] FindLocalSteamImageAsync: Searching strict vertical cover for: {exePath}");
             try
             {
-                // 1. AppID ermitteln (nötig für den Steam Cache)
                 string steamAppId = await Task.Run(() => GetSteamAppIdFromExePath(exePath));
-                string steamInstallPath = GetSteamInstallPath();
-
-                if (string.IsNullOrEmpty(steamInstallPath) || string.IsNullOrEmpty(steamAppId))
+                if (string.IsNullOrEmpty(steamAppId))
                 {
                     return null;
                 }
 
-                // 2. Der Pfad zum Steam Library Cache
-                // Hier liegen die von Steam selbst heruntergeladenen Cover
-                string appCacheDirectory = Path.Combine(steamInstallPath, "appcache", "librarycache");
-
-                // Steam speichert die Hochkant-Cover (600x900) meistens direkt in diesem Ordner
-                // Dateiname ist meistens: {AppID}_library_600x900.jpg
-                string directVerticalPath = Path.Combine(appCacheDirectory, $"{steamAppId}_library_600x900.jpg");
-
-                if (File.Exists(directVerticalPath))
+                SteamArtworkPaths artworkPaths = GetLocalSteamArtworkPaths(steamAppId);
+                if (!string.IsNullOrWhiteSpace(artworkPaths?.PosterPath))
                 {
-                    Logger.Log($"[DEBUG] Success! Found official Steam vertical cover: {directVerticalPath}");
-                    return directVerticalPath;
-                }
-
-                // 3. Fallback: Manchmal liegen sie in Unterordnern (alte Logik, aber strenger gefiltert)
-                // Wir suchen im Cache-Ordner, aber NUR nach Dateien, die "600x900" im Namen haben.
-                // Wir ignorieren "header.jpg", "hero.jpg", etc., da diese das Bild verzerren würden.
-                string strictSearchPath = Path.Combine(steamInstallPath, "appcache", "librarycache", steamAppId);
-                if (Directory.Exists(strictSearchPath))
-                {
-                    // Suche rekursiv nach der korrekten Auflösung
-                    var files = Directory.GetFiles(strictSearchPath, "*600x900.jpg", SearchOption.AllDirectories);
-                    if (files.Length > 0)
-                    {
-                        Logger.Log($"[DEBUG] Found vertical cover in subfolder: {files[0]}");
-                        return files[0];
-                    }
+                    Logger.Log($"[DEBUG] Success! Found official Steam vertical cover: {artworkPaths.PosterPath}");
+                    return artworkPaths.PosterPath;
                 }
 
                 Logger.Log("[DEBUG] No local VERTICAL image found. (Ignoring banners to prevent distortion)");
-                return null; // Zwingt das System, online bei SteamGridDB zu suchen
+                return null;
             }
             catch (Exception ex)
             {
@@ -1995,7 +2318,7 @@ namespace gcmloader
 
         #endregion trigger vibration
 
-        private List<Border> _launcherAreaButtons;
+        private List<Border> _launcherAreaButtons = new List<Border>();
         private List<ProcessData> _latestProcessData = new();
         private int _selectedLauncherAreaIndex = 0;
 
@@ -2026,6 +2349,13 @@ namespace gcmloader
                 Interval = TimeSpan.FromSeconds(3) // 3 Sekunden Gnadenfrist
             };
             _minimizeGracePeriodTimer.Tick += MinimizeWindowAfterGracePeriod;
+
+            _focusReturnWatchdogTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            _focusReturnWatchdogTimer.Tick += async (s, e) => await FocusReturnWatchdog_TickAsync();
+            _focusReturnWatchdogTimer.Start();
         }
 
         [DllImport("user32.dll")]
@@ -2116,11 +2446,230 @@ namespace gcmloader
                 }
             }
         }
+
+        private void ArmFocusReturnWatchdog(FocusReturnTarget target, TimeSpan holdDuration)
+        {
+            _focusReturnTarget = target;
+            _focusReturnHoldUntilUtc = DateTime.UtcNow.Add(holdDuration);
+            _shellFocusInterruptionArmed = false;
+        }
+
+        private void ClearFocusReturnWatchdog()
+        {
+            _focusReturnTarget = FocusReturnTarget.None;
+            _focusReturnHoldUntilUtc = DateTime.MinValue;
+            _shellFocusInterruptionArmed = false;
+            _lastShellInterruptionSeenUtc = DateTime.MinValue;
+        }
+
+        private string TryGetForegroundProcessName(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                if (pid == 0)
+                {
+                    return string.Empty;
+                }
+
+                return Process.GetProcessById((int)pid).ProcessName ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private IntPtr ResolveExpectedFocusHwnd(FocusReturnTarget target)
+        {
+            return target switch
+            {
+                FocusReturnTarget.GcmTaskManager => WinRT.Interop.WindowNative.GetWindowHandle(this),
+                FocusReturnTarget.SteamBigPicture => _lastKnownSteamBigPictureHwnd != IntPtr.Zero
+                    ? _lastKnownSteamBigPictureHwnd
+                    : FindSteamBigPictureWindow(),
+                FocusReturnTarget.GameWindow => _lastKnownGameHwnd,
+                _ => IntPtr.Zero
+            };
+        }
+
+        private bool HasExpectedForeground(FocusReturnTarget target, IntPtr expectedHwnd, IntPtr foregroundHwnd)
+        {
+            if (target == FocusReturnTarget.GcmTaskManager)
+            {
+                return IsWindowInForeground();
+            }
+
+            return expectedHwnd != IntPtr.Zero && foregroundHwnd == expectedHwnd;
+        }
+
+        private async Task<bool> RestoreExpectedFocusAsync()
+        {
+            if (_focusReturnTarget == FocusReturnTarget.GcmTaskManager)
+            {
+                await ForceGcmToFront();
+                return IsWindowInForeground();
+            }
+
+            if (_focusReturnTarget == FocusReturnTarget.SteamBigPicture)
+            {
+                if (_steamBigPictureWasParkedByTaskManager)
+                {
+                    return await RestoreParkedSteamBigPictureAsync();
+                }
+
+                IntPtr steamHwnd = ResolveExpectedFocusHwnd(FocusReturnTarget.SteamBigPicture);
+                if (steamHwnd == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                MakeSelfNonTopmost();
+                ShowWindow(steamHwnd, SW_SHOW);
+                ShowWindow(steamHwnd, SW_RESTORE);
+                ShowWindow(steamHwnd, SW_SHOWMAXIMIZED);
+                await Task.Delay(140);
+                await ForcefullyBringToForeground(steamHwnd);
+                return true;
+            }
+
+            if (_focusReturnTarget == FocusReturnTarget.GameWindow)
+            {
+                IntPtr gameHwnd = ResolveExpectedFocusHwnd(FocusReturnTarget.GameWindow);
+                if (gameHwnd == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                MakeSelfNonTopmost();
+                ShowWindow(gameHwnd, SW_SHOW);
+                if (IsIconic(gameHwnd))
+                {
+                    ShowWindow(gameHwnd, SW_RESTORE);
+                }
+                await Task.Delay(140);
+                await ForcefullyBringToForeground(gameHwnd);
+                return GetForegroundWindow() == gameHwnd;
+            }
+
+            return false;
+        }
+
+        private async Task FocusReturnWatchdog_TickAsync()
+        {
+            if (_isStartupGracePeriod || _isRecoveringExpectedFocus || _focusReturnTarget == FocusReturnTarget.None)
+            {
+                return;
+            }
+
+            bool keepGcmTargetAlive = _focusReturnTarget == FocusReturnTarget.GcmTaskManager && _steamBigPictureWasParkedByTaskManager;
+            if (!keepGcmTargetAlive && DateTime.UtcNow > _focusReturnHoldUntilUtc)
+            {
+                ClearFocusReturnWatchdog();
+                return;
+            }
+
+            IntPtr foregroundHwnd = GetForegroundWindow();
+            IntPtr expectedHwnd = ResolveExpectedFocusHwnd(_focusReturnTarget);
+
+            if (HasExpectedForeground(_focusReturnTarget, expectedHwnd, foregroundHwnd))
+            {
+                _shellFocusInterruptionArmed = false;
+                return;
+            }
+
+            string foregroundProcessName = TryGetForegroundProcessName(foregroundHwnd);
+            bool isShellInterruption = _shellInterruptionProcessNames.Contains(foregroundProcessName);
+            bool isNeutralReturnHost = string.IsNullOrWhiteSpace(foregroundProcessName) || _shellNeutralReturnHosts.Contains(foregroundProcessName);
+
+            if (isShellInterruption)
+            {
+                _shellFocusInterruptionArmed = true;
+                _lastShellInterruptionSeenUtc = DateTime.UtcNow;
+                return;
+            }
+
+            if (!_shellFocusInterruptionArmed)
+            {
+                return;
+            }
+
+            if (!isNeutralReturnHost)
+            {
+                _shellFocusInterruptionArmed = false;
+                return;
+            }
+
+            if (DateTime.UtcNow - _lastShellInterruptionSeenUtc < TimeSpan.FromMilliseconds(350))
+            {
+                return;
+            }
+
+            _shellFocusInterruptionArmed = false;
+            _isRecoveringExpectedFocus = true;
+
+            try
+            {
+                bool restored = await RestoreExpectedFocusAsync();
+                if (restored && _focusReturnTarget == FocusReturnTarget.SteamBigPicture)
+                {
+                    _focusReturnHoldUntilUtc = DateTime.UtcNow.AddSeconds(15);
+                }
+            }
+            finally
+            {
+                _isRecoveringExpectedFocus = false;
+            }
+        }
+
         private bool _lastFocusState = true;
 
+        private enum FocusReturnTarget
+        {
+            None,
+            GcmTaskManager,
+            SteamBigPicture,
+            GameWindow
+        }
+
         private DispatcherTimer _focusCheckTimer;
+        private DispatcherTimer _focusReturnWatchdogTimer;
         private DispatcherTimer _minimizeGracePeriodTimer;
         private bool _isOverlayActive = false;
+        private IntPtr _parkedSteamBigPictureHwnd = IntPtr.Zero;
+        private IntPtr _lastKnownSteamBigPictureHwnd = IntPtr.Zero;
+        private IntPtr _lastKnownGameHwnd = IntPtr.Zero;
+        private bool _steamBigPictureWasParkedByTaskManager = false;
+        private FocusReturnTarget _focusReturnTarget = FocusReturnTarget.None;
+        private DateTime _focusReturnHoldUntilUtc = DateTime.MinValue;
+        private bool _shellFocusInterruptionArmed = false;
+        private DateTime _lastShellInterruptionSeenUtc = DateTime.MinValue;
+        private bool _isRecoveringExpectedFocus = false;
+        private readonly HashSet<string> _shellInterruptionProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "StartMenuExperienceHost",
+            "SearchHost",
+            "SearchApp",
+            "ShellExperienceHost",
+            "TextInputHost",
+            "SystemSettings",
+            "GameBar",
+            "GameBarFTServer",
+            "Widgets",
+            "DisplaySwitch"
+        };
+
+        private readonly HashSet<string> _shellNeutralReturnHosts = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "explorer",
+            "sihost"
+        };
+
         [DllImport("user32.dll")]
         private static extern bool LockSetForegroundWindow(uint uLockCode);
         /// <summary>
@@ -2172,6 +2721,10 @@ namespace gcmloader
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool IsZoomed(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindow(IntPtr hWnd);
 
         /// <summary>
         /// Richtet den Timer und die Events ein, um den Cursor bei Inaktivität auszublenden.
@@ -2232,6 +2785,7 @@ namespace gcmloader
             public string ExePath { get; set; }
             public IntPtr Hwnd { get; set; }
             public Process Proc { get; set; }
+            public ResolvedGameInfo GameInfo { get; set; }
         }
         // NEU: Eine kleine Klasse, um die Shortcut-Daten zu halten
         private class ShortcutData
@@ -2283,15 +2837,15 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, QuickLaunchers, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu, ImageSelection, GameOptions, StartupVideo }
-        private List<Border> _quickLauncherButtons;
+        private enum FocusArea { Launcher, QuickLaunchers, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu, ImageSelection, GameOptions, StartupVideo, SettingsMenu, WindowsReturnConfirm, GithubReleasePrompt }
+        private List<Border> _quickLauncherButtons = new List<Border>();
         private int _selectedQuickLauncherIndex = 0;
         private FocusArea _currentFocusArea = FocusArea.Cards;
 
         // Index und Liste für die oberen Buttons
         private int _selectedTopButtonIndex = 0;
-        private List<Button> _topButtons;
-        private List<Button> _powerMenuItems; 
+        private List<Button> _topButtons = new List<Button>();
+        private List<Button> _powerMenuItems = new List<Button>(); 
         private int _selectedPowerMenuItemIndex = 0; 
 
 
@@ -2469,7 +3023,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         public MainWindow()
         {
            // Logger.Initialize();
+            App.StartupTrace("MainWindow ctor begin");
             this.InitializeComponent();
+            ApplySteamOnlyMode();
+            MigrateThemeDefaultsIfNeeded();
 
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (s, e) =>
             {
@@ -2492,19 +3049,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             FocusLossOverlay.Visibility = Visibility.Visible;
             _isOverlayActive = true;
 
-            // Safely load the launcher setting
-            string currentLauncher = "steam";
-            try { currentLauncher = AppSettings.Load<string>("launcher"); }
-            catch (Exception ex) { Debug.WriteLine($"[Startup] Could not load launcher setting: {ex.Message}"); }
-
-            string bootLogoPath = currentLauncher switch
-            {
-                "steam" => "ms-appx:///Assets/steam_logo.png",
-                "playnite" => "ms-appx:///Assets/playnite_logo.png",
-                "xbox" => "ms-appx:///Assets/xbox_logo.png",
-                "gfn" => "ms-appx:///Assets/geforcenow.png",
-                _ => "ms-appx:///Assets/gcm_ui_logo.png"
-            };
+            string bootLogoPath = "ms-appx:///Assets/steam_logo.png";
 
             if (FocusLossOverlay.Child is Image logoImage)
             {
@@ -2525,11 +3070,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 rootElement.Loaded += (s, e) =>
                 {
+                    App.StartupTrace("Root element loaded.");
                     FocusSink.Focus(FocusState.Programmatic);
 
                     if (!_isVideoPlaybackInitiated)
                     {
                         _isVideoPlaybackInitiated = true;
+                        App.StartupTrace("Starting startup video flow.");
                         PlayStartupVideo();
                     }
                 };
@@ -2547,6 +3094,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             try
             {
                 string apiKey = AppSettings.Load<string>("steamgriddb_api_key");
+                Directory.CreateDirectory(_imageCachePath);
+                Directory.CreateDirectory(_backdropCachePath);
                 if (string.IsNullOrWhiteSpace(apiKey))
                 {
                     _steamGridHelper = new SteamGridDBHelper(null);
@@ -2554,20 +3103,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 else
                 {
                     _steamGridHelper = new SteamGridDBHelper(apiKey);
-                    Directory.CreateDirectory(_imageCachePath);
                 }
             }
             catch { _steamGridHelper = new SteamGridDBHelper(null); }
 
-            var controllerBatteryTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
-            controllerBatteryTimer.Tick += (s, e) => UpdateControllerBatteryStatus();
-            controllerBatteryTimer.Start();
-            UpdateControllerBatteryStatus();
-
+            StartControllerBatteryMonitoring();
             MinimizeAllToDesktop();
             LoadDynamicLauncherCards();
-            _quickLauncherButtons = new List<Border> { QuickSteam, QuickPlaynite, QuickXbox, QuickGfn };
-            QuickLauncherPanel.Visibility = Visibility.Visible; // Damit es Layout-Platz einnimmt
+            ApplyResponsiveShellSizing();
+            _quickLauncherButtons = new List<Border>();
+            QuickLauncherPanel.Visibility = Visibility.Collapsed;
 
             _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { SleepMenuItem, RestartMenuItem, ShutdownMenuItem, LogOffMenuItem };
@@ -2586,7 +3131,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ShowTaskManager();
             SetupFocusWatcher();
             SetupMouseIdleBehavior();
+            StartStartupGracePeriodTimer();
 
+            StartAsynctasks();
+            _appStartTime = DateTime.UtcNow;
+            SetupWindowEngine();
+
+            ForceStartupVideoFullscreen();
+            this.Activate();
+            App.StartupTrace("MainWindow ctor completed.");
+        }
+
+        private void StartControllerBatteryMonitoring()
+        {
+            if (_controllerBatteryTimer != null)
+            {
+                return;
+            }
+
+            _controllerBatteryTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+            _controllerBatteryTimer.Tick += (s, e) => UpdateControllerBatteryStatus();
+            _controllerBatteryTimer.Start();
+            UpdateControllerBatteryStatus();
+        }
+
+        private void StartStartupGracePeriodTimer()
+        {
             var gracePeriodTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
             gracePeriodTimer.Tick += (s, e) =>
             {
@@ -2605,41 +3175,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             };
             gracePeriodTimer.Start();
-
-            StartAsynctasks();
-            _appStartTime = DateTime.UtcNow;
-            SetupWindowEngine();
-
-            // Wir rufen hier Activate auf, was wiederum MainWindow_Activated triggert
-            this.Activate();
         }
 
         #region App Launcher Logic
         private void AppSearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // Get the current search text
-            string searchText = AppSearchBox.Text;
-
-            // Create a new, filtered list from the master "AllInstalledApps" list
-            var filteredList = AllInstalledApps
-                .Where(app => app.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            // Assign the filtered list as the new data source for the GridView
-            AppGridView.ItemsSource = filteredList;
-
-            // Show the "No results" message only if the search is active but finds nothing
-            if (string.IsNullOrEmpty(searchText))
-            {
-                NoSearchResultsText.Visibility = Visibility.Collapsed;
-                // Show the original "No apps" message if the master list is empty
-                NoAppsFoundText.Visibility = (AllInstalledApps.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
-            }
-            else
-            {
-                NoSearchResultsText.Visibility = (filteredList.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
-                NoAppsFoundText.Visibility = Visibility.Collapsed;
-            }
+            _appLauncherSearchText = AppSearchBox?.Text ?? string.Empty;
+            RefreshAppLauncherView(keepSelection: true);
         }
 
 
@@ -2665,55 +3207,63 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private async Task LoadInstalledAppsAsync()
         {
-            Debug.WriteLine("[AppLauncher] Starting ROBUST HYBRID scan for all applications...");
+            Debug.WriteLine("[AppLauncher] Starting controller-first hybrid app scan...");
             isAppListLoaded = false;
             AllInstalledApps.Clear();
+            VisibleAppLauncherApps.Clear();
+            LoadAppLauncherFavorites();
 
             DispatcherQueue.TryEnqueue(() =>
             {
                 AppLoadingRing.IsActive = true;
                 AppLoadingRing.Visibility = Visibility.Visible;
                 NoAppsFoundText.Visibility = Visibility.Collapsed;
+                NoSearchResultsText.Visibility = Visibility.Collapsed;
+                AppLauncherCountText.Text = "Scanning...";
             });
 
             var appData = await Task.Run(() =>
             {
-                var discoveredApps = new List<(string Name, string FilePath)>();
-                var seenDisplayNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var discoveredApps = new List<AppDiscoveryInfo>();
+                var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                // =====================================================================
-                // TEIL 1: REGISTRY-SCAN (stabil und schnell)
-                // =====================================================================
-                // (Dieser Teil bleibt unverändert und funktioniert ja bei dir)
-                string[] registryPaths = { @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" };
-                RegistryKey[] rootKeys = { Registry.CurrentUser, Registry.LocalMachine };
-                foreach (var rootKey in rootKeys) { /* ... Deine komplette Registry-Logik von vorhin hier ... */ }
+                ScanPackagedApps(discoveredApps, seenIds, seenNames);
 
-                // =================================================================================
-                // TEIL 2: MANUELLER STARTMENÜ-SCAN (immun gegen "Access Denied")
-                // =================================================================================
-                Debug.WriteLine("[AppLauncher] ----- Starting Part 2: Manual & Robust Start Menu (.lnk) Scan -----");
                 string[] startMenuPaths = {
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
-            Environment.GetFolderPath(Environment.SpecialFolder.StartMenu)
-        };
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
+                    Environment.GetFolderPath(Environment.SpecialFolder.StartMenu)
+                };
 
                 foreach (var path in startMenuPaths)
                 {
-                    // Wir starten die neue, rekursive Suchfunktion
-                    ScanFolderForLnks(path, discoveredApps, seenDisplayNames);
+                    ScanFolderForLnks(path, discoveredApps, seenIds, seenNames);
                 }
 
-                return discoveredApps.OrderBy(a => a.Name).ToList();
+                ScanRegistryApps(discoveredApps, seenIds, seenNames);
+
+                return discoveredApps
+                    .Where(app => !string.IsNullOrWhiteSpace(app.Name) && !string.IsNullOrWhiteSpace(app.LaunchTarget))
+                    .OrderBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
             });
 
             foreach (var app in appData)
             {
+                string stableId = string.IsNullOrWhiteSpace(app.StableId)
+                    ? BuildAppStableId(app.LaunchKind, app.LaunchTarget, app.Name)
+                    : app.StableId;
+
                 AllInstalledApps.Add(new AppInfo
                 {
                     Name = app.Name,
                     FilePath = app.FilePath,
-                    Icon = GetAppIconAsBitmapImage(app.FilePath)
+                    LaunchTarget = app.LaunchTarget,
+                    LaunchKind = app.LaunchKind,
+                    SourceLabel = app.SourceLabel,
+                    StableId = stableId,
+                    IsFavorite = _favoriteAppIds.Contains(stableId),
+                    Icon = ResolveAppLauncherIcon(app)
                 });
             }
 
@@ -2724,58 +3274,487 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 AppLoadingRing.IsActive = false;
                 AppLoadingRing.Visibility = Visibility.Collapsed;
-                NoAppsFoundText.Visibility = AllInstalledApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-                if (AppLauncher.Visibility == Visibility.Visible && AppGridView.Items.Count > 0)
-                {
-                    if (AppGridView.SelectedIndex == -1) AppGridView.SelectedIndex = 0;
-                }
+                RefreshAppLauncherView();
             });
         }
 
-        private void ScanFolderForLnks(string folderPath, List<(string Name, string FilePath)> discoveredApps, HashSet<string> seenDisplayNames)
+        private void ScanPackagedApps(List<AppDiscoveryInfo> discoveredApps, HashSet<string> seenIds, HashSet<string> seenNames)
         {
             try
             {
-                // Schritt 1: Hole alle .lnk-Dateien NUR in der aktuellen Ordnerebene
+                var packageManager = new PackageManager();
+                foreach (var package in packageManager.FindPackagesForUser(string.Empty))
+                {
+                    IReadOnlyList<Windows.ApplicationModel.Core.AppListEntry> entries;
+                    try
+                    {
+                        entries = package.GetAppListEntries();
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    foreach (var entry in entries)
+                    {
+                        string aumid = entry.AppUserModelId;
+                        string name = entry.DisplayInfo?.DisplayName;
+                        if (string.IsNullOrWhiteSpace(name))
+                        {
+                            name = package.DisplayName;
+                        }
+                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(aumid))
+                        {
+                            continue;
+                        }
+
+                        string stableId = BuildAppStableId("Packaged", aumid, name);
+                        if (!seenIds.Add(stableId))
+                        {
+                            continue;
+                        }
+
+                        seenNames.Add(name);
+                        discoveredApps.Add(new AppDiscoveryInfo
+                        {
+                            Name = name,
+                            LaunchTarget = aumid,
+                            FilePath = package.InstalledLocation?.Path ?? string.Empty,
+                            LaunchKind = "Packaged",
+                            SourceLabel = "MICROSOFT",
+                            StableId = stableId
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AppLauncher] Packaged app scan failed: {ex.Message}");
+            }
+        }
+
+        private void ScanRegistryApps(List<AppDiscoveryInfo> discoveredApps, HashSet<string> seenIds, HashSet<string> seenNames)
+        {
+            string[] registryPaths =
+            {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+            };
+
+            RegistryKey[] rootKeys = { Registry.CurrentUser, Registry.LocalMachine };
+            foreach (RegistryKey rootKey in rootKeys)
+            {
+                foreach (string registryPath in registryPaths)
+                {
+                    try
+                    {
+                        using RegistryKey key = rootKey.OpenSubKey(registryPath);
+                        if (key == null)
+                        {
+                            continue;
+                        }
+
+                        foreach (string subKeyName in key.GetSubKeyNames())
+                        {
+                            using RegistryKey appKey = key.OpenSubKey(subKeyName);
+                            if (appKey == null)
+                            {
+                                continue;
+                            }
+
+                            string name = appKey.GetValue("DisplayName")?.ToString();
+                            if (string.IsNullOrWhiteSpace(name) || ShouldSkipRegistryApp(name))
+                            {
+                                continue;
+                            }
+
+                            string target = ResolveRegistryLaunchTarget(appKey);
+                            if (string.IsNullOrWhiteSpace(target))
+                            {
+                                continue;
+                            }
+
+                            string stableId = BuildAppStableId("Executable", target, name);
+                            if (!seenIds.Add(stableId))
+                            {
+                                continue;
+                            }
+
+                            discoveredApps.Add(new AppDiscoveryInfo
+                            {
+                                Name = name,
+                                LaunchTarget = target,
+                                FilePath = target,
+                                IconPath = target,
+                                LaunchKind = "Executable",
+                                SourceLabel = "DESKTOP",
+                                StableId = stableId
+                            });
+                            seenNames.Add(name);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[AppLauncher] Registry scan failed at {rootKey.Name}\\{registryPath}: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        private static bool ShouldSkipRegistryApp(string name)
+        {
+            string lowered = name.ToLowerInvariant();
+            return lowered.Contains("update") ||
+                   lowered.Contains("runtime") ||
+                   lowered.Contains("redistributable") ||
+                   lowered.Contains("driver") ||
+                   lowered.Contains("sdk") ||
+                   lowered.Contains("uninstall");
+        }
+
+        private static string ResolveRegistryLaunchTarget(RegistryKey appKey)
+        {
+            string displayIcon = appKey.GetValue("DisplayIcon")?.ToString();
+            string fromIcon = NormalizeExecutablePath(displayIcon);
+            if (!string.IsNullOrWhiteSpace(fromIcon) && File.Exists(fromIcon))
+            {
+                return fromIcon;
+            }
+
+            string installLocation = appKey.GetValue("InstallLocation")?.ToString();
+            if (!string.IsNullOrWhiteSpace(installLocation))
+            {
+                string normalizedLocation = Environment.ExpandEnvironmentVariables(installLocation.Trim('"'));
+                if (Directory.Exists(normalizedLocation))
+                {
+                    try
+                    {
+                        return Directory
+                            .EnumerateFiles(normalizedLocation, "*.exe", SearchOption.TopDirectoryOnly)
+                            .FirstOrDefault(file => !Path.GetFileName(file).Contains("unins", StringComparison.OrdinalIgnoreCase));
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string NormalizeExecutablePath(string rawPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                return string.Empty;
+            }
+
+            string path = Environment.ExpandEnvironmentVariables(rawPath.Trim());
+            if (path.StartsWith("\"", StringComparison.Ordinal))
+            {
+                int closingQuote = path.IndexOf('"', 1);
+                if (closingQuote > 1)
+                {
+                    path = path.Substring(1, closingQuote - 1);
+                }
+            }
+            else
+            {
+                int commaIndex = path.LastIndexOf(',');
+                if (commaIndex > 0)
+                {
+                    path = path[..commaIndex];
+                }
+            }
+
+            return path.Trim('"', ' ');
+        }
+
+        private void ScanFolderForLnks(string folderPath, List<AppDiscoveryInfo> discoveredApps, HashSet<string> seenIds, HashSet<string> seenNames)
+        {
+            try
+            {
                 foreach (var lnkFile in Directory.GetFiles(folderPath, "*.lnk", SearchOption.TopDirectoryOnly))
                 {
                     string name = Path.GetFileNameWithoutExtension(lnkFile);
-                    if (!string.IsNullOrWhiteSpace(name) && !name.ToLower().Contains("uninstall") && seenDisplayNames.Add(name))
+                    if (string.IsNullOrWhiteSpace(name) || name.Contains("uninstall", StringComparison.OrdinalIgnoreCase))
                     {
-                        discoveredApps.Add((name, lnkFile));
+                        continue;
                     }
+
+                    string resolvedTarget = ResolveLnkShortcut(lnkFile);
+                    string stableId = BuildAppStableId("Shortcut", lnkFile, name);
+                    if (!seenIds.Add(stableId))
+                    {
+                        continue;
+                    }
+
+                    discoveredApps.Add(new AppDiscoveryInfo
+                    {
+                        Name = name,
+                        LaunchTarget = lnkFile,
+                        FilePath = lnkFile,
+                        IconPath = !string.IsNullOrWhiteSpace(resolvedTarget) ? resolvedTarget : lnkFile,
+                        LaunchKind = "Shortcut",
+                        SourceLabel = "DESKTOP",
+                        StableId = stableId
+                    });
+                    seenNames.Add(name);
                 }
 
-                // Schritt 2: Gehe in jeden Unterordner und rufe diese Funktion für ihn erneut auf
                 foreach (var subFolderPath in Directory.GetDirectories(folderPath))
                 {
-                    ScanFolderForLnks(subFolderPath, discoveredApps, seenDisplayNames);
+                    ScanFolderForLnks(subFolderPath, discoveredApps, seenIds, seenNames);
                 }
             }
             catch (UnauthorizedAccessException)
             {
-                // Das ist der entscheidende Punkt: Wenn wir auf einen geschützten Ordner stoßen,
-                // protokollieren wir das und machen einfach weiter, anstatt abzubrechen.
                 Debug.WriteLine($"[AppLauncher] SKIPPED protected folder: {folderPath}");
             }
             catch (Exception ex)
             {
-                // Fange andere mögliche Dateisystemfehler ab
                 Debug.WriteLine($"[AppLauncher] Error scanning folder '{folderPath}': {ex.Message}");
             }
         }
 
-        // NEU: Unsere eigene Methode zum Auslesen von .lnk-Dateien
         private string ResolveLnkShortcut(string lnkPath)
         {
-            var shellLink = (IShellLinkW)new ShellLink();
-            var persistFile = (IPersistFile)shellLink;
-            persistFile.Load(lnkPath, 0); // STGM_READ
+            try
+            {
+                var shellLink = (IShellLinkW)new ShellLink();
+                var persistFile = (IPersistFile)shellLink;
+                persistFile.Load(lnkPath, 0);
 
-            var sb = new StringBuilder(1024);
-            shellLink.GetPath(sb, sb.Capacity, IntPtr.Zero, 0);
+                var sb = new StringBuilder(1024);
+                shellLink.GetPath(sb, sb.Capacity, IntPtr.Zero, 0);
 
-            return sb.ToString();
+                return sb.ToString();
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private BitmapImage ResolveAppLauncherIcon(AppDiscoveryInfo app)
+        {
+            if (!string.IsNullOrWhiteSpace(app.IconPath))
+            {
+                BitmapImage icon = GetAppIconAsBitmapImage(app.IconPath);
+                if (icon != null)
+                {
+                    return icon;
+                }
+            }
+
+            return app.LaunchKind.Equals("Packaged", StringComparison.OrdinalIgnoreCase)
+                ? new BitmapImage(new Uri("ms-appx:///Assets/windowsicon.png"))
+                : new BitmapImage(new Uri("ms-appx:///Assets/game.png"));
+        }
+
+        private static string BuildAppStableId(string kind, string target, string name)
+        {
+            string identity = !string.IsNullOrWhiteSpace(target) ? target : name;
+            return $"{kind}:{identity}".ToLowerInvariant();
+        }
+
+        private void LoadAppLauncherFavorites()
+        {
+            _favoriteAppIds.Clear();
+
+            try
+            {
+                if (!File.Exists(AppLauncherFavoritesPath))
+                {
+                    return;
+                }
+
+                string json = File.ReadAllText(AppLauncherFavoritesPath);
+                string[] ids = JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+                foreach (string id in ids)
+                {
+                    if (!string.IsNullOrWhiteSpace(id))
+                    {
+                        _favoriteAppIds.Add(id);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AppLauncher] Favorite load failed: {ex.Message}");
+            }
+        }
+
+        private void SaveAppLauncherFavorites()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(AppLauncherFavoritesPath));
+                File.WriteAllText(
+                    AppLauncherFavoritesPath,
+                    JsonSerializer.Serialize(_favoriteAppIds.OrderBy(id => id), new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AppLauncher] Favorite save failed: {ex.Message}");
+            }
+        }
+
+        private bool MatchesAppLauncherFilter(AppInfo app)
+        {
+            return _appLauncherFilter switch
+            {
+                AppLauncherFilter.Favorites => app.IsFavorite,
+                AppLauncherFilter.Desktop => !app.LaunchKind.Equals("Packaged", StringComparison.OrdinalIgnoreCase),
+                AppLauncherFilter.Microsoft => app.LaunchKind.Equals("Packaged", StringComparison.OrdinalIgnoreCase),
+                _ => true
+            };
+        }
+
+        private void AppLauncherTab_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button &&
+                button.Tag is string tag &&
+                Enum.TryParse(tag, true, out AppLauncherFilter filter))
+            {
+                SetAppLauncherFilter(filter);
+                PlayNavigationSound();
+            }
+        }
+
+        private void SetAppLauncherFilter(AppLauncherFilter filter, bool keepSelection = false)
+        {
+            if (_appLauncherFilter == filter)
+            {
+                UpdateAppLauncherStatus();
+                return;
+            }
+
+            _appLauncherFilter = filter;
+            RefreshAppLauncherView(keepSelection);
+        }
+
+        private void RefreshAppLauncherView(bool keepSelection = false)
+        {
+            if (VisibleAppLauncherApps == null)
+            {
+                return;
+            }
+
+            string selectedId = keepSelection && AppGridView?.SelectedItem is AppInfo selectedApp
+                ? selectedApp.StableId
+                : string.Empty;
+
+            string search = _appLauncherSearchText?.Trim() ?? string.Empty;
+            var filtered = AllInstalledApps
+                .Where(MatchesAppLauncherFilter)
+                .Where(app => string.IsNullOrWhiteSpace(search) || app.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(app => app.IsFavorite)
+                .ThenBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            VisibleAppLauncherApps.Clear();
+            foreach (AppInfo app in filtered)
+            {
+                VisibleAppLauncherApps.Add(app);
+            }
+
+            if (AppGridView != null)
+            {
+                if (VisibleAppLauncherApps.Count == 0)
+                {
+                    AppGridView.SelectedIndex = -1;
+                }
+                else
+                {
+                    int selectedIndex = !string.IsNullOrWhiteSpace(selectedId)
+                        ? VisibleAppLauncherApps.ToList().FindIndex(app => string.Equals(app.StableId, selectedId, StringComparison.OrdinalIgnoreCase))
+                        : -1;
+                    AppGridView.SelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+                    AppGridView.ScrollIntoView(AppGridView.SelectedItem);
+                }
+            }
+
+            UpdateAppLauncherStatus();
+        }
+
+        private void UpdateAppLauncherStatus()
+        {
+            StyleAppLauncherTab(AppLauncherTabAllButton, _appLauncherFilter == AppLauncherFilter.All);
+            StyleAppLauncherTab(AppLauncherTabFavoritesButton, _appLauncherFilter == AppLauncherFilter.Favorites);
+            StyleAppLauncherTab(AppLauncherTabDesktopButton, _appLauncherFilter == AppLauncherFilter.Desktop);
+            StyleAppLauncherTab(AppLauncherTabMicrosoftButton, _appLauncherFilter == AppLauncherFilter.Microsoft);
+
+            if (AppLauncherCountText != null)
+            {
+                AppLauncherCountText.Text = $"{VisibleAppLauncherApps.Count}/{AllInstalledApps.Count} apps";
+            }
+
+            if (NoAppsFoundText != null)
+            {
+                NoAppsFoundText.Visibility = AllInstalledApps.Count == 0 && AppLoadingRing.Visibility != Visibility.Visible
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (NoSearchResultsText != null)
+            {
+                NoSearchResultsText.Visibility = AllInstalledApps.Count > 0 && VisibleAppLauncherApps.Count == 0 && AppLoadingRing.Visibility != Visibility.Visible
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+
+        private void StyleAppLauncherTab(Button button, bool isSelected)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.Background = new SolidColorBrush(isSelected
+                ? Color.FromArgb(86, 255, 255, 255)
+                : Color.FromArgb(28, 255, 255, 255));
+            button.BorderBrush = new SolidColorBrush(isSelected
+                ? Color.FromArgb(210, 255, 255, 255)
+                : Color.FromArgb(42, 255, 255, 255));
+            button.BorderThickness = new Thickness(isSelected ? 2 : 1);
+            button.Foreground = new SolidColorBrush(isSelected
+                ? Microsoft.UI.Colors.White
+                : Color.FromArgb(210, 255, 255, 255));
+        }
+
+        private void CycleAppLauncherFilter(int direction = 1)
+        {
+            int currentIndex = Array.IndexOf(AppLauncherFilterOrder, _appLauncherFilter);
+            if (currentIndex < 0)
+            {
+                currentIndex = 0;
+            }
+
+            int nextIndex = (currentIndex + direction + AppLauncherFilterOrder.Length) % AppLauncherFilterOrder.Length;
+            SetAppLauncherFilter(AppLauncherFilterOrder[nextIndex]);
+        }
+
+        private void ToggleSelectedAppFavorite()
+        {
+            if (AppGridView?.SelectedItem is not AppInfo app || string.IsNullOrWhiteSpace(app.StableId))
+            {
+                return;
+            }
+
+            app.IsFavorite = !app.IsFavorite;
+            if (app.IsFavorite)
+            {
+                _favoriteAppIds.Add(app.StableId);
+            }
+            else
+            {
+                _favoriteAppIds.Remove(app.StableId);
+            }
+
+            SaveAppLauncherFavorites();
+            RefreshAppLauncherView(keepSelection: true);
         }
 
         #endregion
@@ -2800,10 +3779,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             try
             {
                 string exePath = proc.MainModule?.FileName;
-                if (!string.IsNullOrEmpty(exePath) && _gamePathKeywords.Any(keyword => exePath.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return true;
-                }
+                string windowTitle = proc.MainWindowTitle;
+                return ResolveGameInfo(proc, windowTitle, exePath, proc.MainWindowHandle).IsGame;
             }
             catch { /* Zugriff verweigert, ignorieren */ }
             return false;
@@ -2837,6 +3814,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private void WindowEngine_Tick(object sender, object e)
         {
+            if (!_isShellUiReady)
+            {
+                return;
+            }
+
             // Initialisierungs-Logik bleibt unverändert
             if (!_isEngineInitialized)
             {
@@ -3255,6 +4237,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private TimeSpan _elapsedTime;
         private void StartClock()
         {
+            if (_hasClockStarted)
+            {
+                return;
+            }
+
+            _hasClockStarted = true;
             _timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -3323,49 +4311,58 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
         private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
         {
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-
-            // VRR / Schwarzbild Fix: Erzwinge Standard-Desktop-Rendering (bleibt wie es ist)
-            int disableFullscreenTransform = 1;
-            DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, ref disableFullscreenTransform, sizeof(int));
-            int policy = DWMFLIP_NONE;
-            DwmSetWindowAttribute(hwnd, DWMWA_FLIP3D_POLICY, ref policy, sizeof(int));
-
-            // --- DEINE NEUE LOGIK: DER SMARTE SKALIERUNGS-CHECK ---
-            uint currentDpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
-            int currentWidth = Vanara.PInvoke.User32.GetSystemMetrics(Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
-            int currentHeight = Vanara.PInvoke.User32.GetSystemMetrics(Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
-
-            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
-            var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
-
-            // Hat sich die Skalierung oder Auflösung seit dem letzten Mal geändert? (Oder ist es der allererste Start?)
-            if (_lastCheckedDpi == 0 || _lastCheckedDpi != currentDpi || _lastCheckedWidth != currentWidth || _lastCheckedHeight != currentHeight)
+            try
             {
-                Debug.WriteLine("[GCM] Skalierungsänderung erkannt. Wende Fullscreen neu an...");
-
-                // Wenn er schon im Fullscreen ist, zwingen wir ihn kurz raus und wieder rein.
-                // Das sorgt dafür, dass sich die Skalierung repariert.
-                if (appWindow.Presenter.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen)
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                if (hwnd == IntPtr.Zero)
                 {
-                    appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+                    return;
                 }
-                appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
 
-                // Neue Werte speichern, damit er beim nächsten Mal nicht mehr zuckt
-                _lastCheckedDpi = currentDpi;
-                _lastCheckedWidth = currentWidth;
-                _lastCheckedHeight = currentHeight;
-            }
-            else
-            {
-                // Skalierung ist exakt gleich geblieben!
-                // Wir setzen Fullscreen NUR, wenn das Fenster (warum auch immer) nicht mehr im Fullscreen sein sollte.
-                // -> KEIN BLINDES NEU-SETZEN MEHR = KEIN ZUCKEN MEHR!
+                // VRR / Schwarzbild Fix: Erzwinge Standard-Desktop-Rendering.
+                int disableFullscreenTransform = 1;
+                DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, ref disableFullscreenTransform, sizeof(int));
+                int policy = DWMFLIP_NONE;
+                DwmSetWindowAttribute(hwnd, DWMWA_FLIP3D_POLICY, ref policy, sizeof(int));
+
+                uint currentDpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
+                int currentWidth = Vanara.PInvoke.User32.GetSystemMetrics(Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
+                int currentHeight = Vanara.PInvoke.User32.GetSystemMetrics(Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
+
+                if (!_isShellUiReady || MainContent == null || MainContent.Visibility != Visibility.Visible)
+                {
+                    _lastCheckedDpi = currentDpi;
+                    _lastCheckedWidth = currentWidth;
+                    _lastCheckedHeight = currentHeight;
+                    App.StartupTrace("Fullscreen activation deferred until shell is ready.");
+                    return;
+                }
+
+                var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+                var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+                bool scaleChanged = _lastCheckedDpi == 0 ||
+                                    _lastCheckedDpi != currentDpi ||
+                                    _lastCheckedWidth != currentWidth ||
+                                    _lastCheckedHeight != currentHeight;
+
+                if (scaleChanged)
+                {
+                    Debug.WriteLine("[GCM] Skalierungsänderung erkannt. Aktualisiere Layout ohne Presenter-Reset...");
+                    ApplyResponsiveShellSizing(rebuildCards: true);
+                    _lastCheckedDpi = currentDpi;
+                    _lastCheckedWidth = currentWidth;
+                    _lastCheckedHeight = currentHeight;
+                }
+
                 if (appWindow.Presenter.Kind != Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen)
                 {
                     appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Activation/fullscreen handling failed: {ex.Message}");
+                App.StartupTrace($"Activation/fullscreen handling failed: {ex}");
             }
         }
 
@@ -3471,6 +4468,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             if (entry == null) return;
 
+            _gameOptionsReturnFocusArea = _currentFocusArea == FocusArea.GameOptions
+                ? FocusArea.Cards
+                : _currentFocusArea;
             _currentEditingCardEntry = entry;
             _currentFocusArea = FocusArea.GameOptions;
 
@@ -3487,7 +4487,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             GameOptionsSubtitle.Text = $"Selected: {entry.ProductName}";
 
             // Suspend-Status prüfen und Button anpassen
-            bool isSuspended = ProcessSuspender.IsProcessSuspended(entry.Proc.Id);
+            bool canControlProcess = entry.Proc != null && !entry.Proc.HasExited;
+            BtnSuspendGame.IsEnabled = canControlProcess;
+            BtnSuspendGame.Opacity = canControlProcess ? 1.0 : 0.45;
+            bool isSuspended = canControlProcess && ProcessSuspender.IsProcessSuspended(entry.Proc.Id);
             if (isSuspended)
             {
                 TxtSuspendTitle.Text = "Resume Game";
@@ -3497,7 +4500,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             else
             {
                 TxtSuspendTitle.Text = "Suspend Game";
-                TxtSuspendDesc.Text = "Freezes the game to save resources";
+                TxtSuspendDesc.Text = canControlProcess ? "Freezes the game to save resources" : "Process is not available anymore";
                 IconSuspend.Glyph = "\uE769"; // Pause Icon
             }
 
@@ -3508,7 +4511,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void BtnSuspendGame_Click(object sender, RoutedEventArgs e)
         {
-            if (_currentEditingCardEntry == null) return;
+            if (_currentEditingCardEntry?.Proc == null || _currentEditingCardEntry.Proc.HasExited) return;
 
             // Logik abrufen: Schläft er schon?
             bool isSuspended = ProcessSuspender.IsProcessSuspended(_currentEditingCardEntry.Proc.Id);
@@ -3536,7 +4539,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             GameOptionsMenuBorder.Height = 700;
 
             // Suche starten
-            ImageSearchBox.Text = _currentEditingCardEntry.ProductName;
+            ImageSearchBox.Text = _currentEditingCardEntry.GameInfo?.DisplayName ?? _currentEditingCardEntry.ProductName;
             ImageSearchButton_Click(null, null);
         }
 
@@ -3555,7 +4558,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private void CloseGameOptions()
         {
             GameOptionsOverlay.Visibility = Visibility.Collapsed;
-            _currentFocusArea = FocusArea.Cards;
+            _currentFocusArea = _gameOptionsReturnFocusArea;
             _currentEditingCardEntry = null;
             UpdateVisualFocus();
         }
@@ -3567,18 +4570,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
 
         /// <summary>
-        /// Handles the search button click. Fetches vertical covers from SteamGridDB.
+        /// Handles the search button click. Fetches covers from SteamGridDB, Steam, and open fallbacks.
         /// </summary>
         private async void ImageSearchButton_Click(object sender, RoutedEventArgs e)
         {
             if (this.Content.XamlRoot == null) return;
-
-            if (_steamGridHelper == null || !_steamGridHelper.IsApiKeySet)
-            {
-                NoImagesFoundText.Text = "Error: API Key is missing in settings.toml";
-                NoImagesFoundText.Visibility = Visibility.Visible;
-                return;
-            }
 
             string searchTerm = ImageSearchBox.Text;
             if (string.IsNullOrWhiteSpace(searchTerm)) return;
@@ -3592,46 +4588,245 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 string cleanedName = CleanGameNameForSearch(searchTerm);
 
                 // Debug-Text während der Suche
-                NoImagesFoundText.Text = $"Searching ID for '{cleanedName}'...";
+                NoImagesFoundText.Text = $"Searching artwork for '{cleanedName}'...";
                 NoImagesFoundText.Visibility = Visibility.Visible;
 
-                var searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedName);
+                var urls = await SearchArtworkUrlsAsync(cleanedName, _currentEditingCardEntry?.GameInfo);
+                _currentImageSearchResults = urls;
 
-                if (searchResult != null)
+                if (urls.Count > 0)
                 {
-                    var urls = await _steamGridHelper.GetVerticalImagesForGameAsync(searchResult.id);
-                    _currentImageSearchResults = urls;
+                    ImageResultsGrid.ItemsSource = urls;
+                    _selectedImageGridIndex = 0;
+                    ImageResultsGrid.SelectedIndex = 0;
+                    ImageResultsGrid.Focus(FocusState.Programmatic);
+                    NoImagesFoundText.Visibility = Visibility.Collapsed;
+                    return;
+                }
 
-                    if (urls.Count > 0)
-                    {
-                        ImageResultsGrid.ItemsSource = urls;
-                        _selectedImageGridIndex = 0;
-                        ImageResultsGrid.SelectedIndex = 0;
-                        ImageResultsGrid.Focus(FocusState.Programmatic);
-                        NoImagesFoundText.Visibility = Visibility.Collapsed;
-                    }
-                    else
-                    {
-                        NoImagesFoundText.Text = $"Game found (ID: {searchResult.id}), but no vertical images.";
-                        NoImagesFoundText.Visibility = Visibility.Visible;
-                    }
-                }
-                else
-                {
-                    NoImagesFoundText.Text = $"Game '{cleanedName}' not found on SteamGridDB.";
-                    NoImagesFoundText.Visibility = Visibility.Visible;
-                }
+                NoImagesFoundText.Text = $"No artwork found for '{cleanedName}'.";
+                NoImagesFoundText.Visibility = Visibility.Visible;
             }
             catch (Exception ex)
             {
                 // HIER wird der echte Fehler angezeigt!
-                NoImagesFoundText.Text = $"API Error: {ex.Message}";
+                NoImagesFoundText.Text = $"Artwork search error: {ex.Message}";
                 NoImagesFoundText.Visibility = Visibility.Visible;
             }
             finally
             {
                 ImageSearchProgress.Visibility = Visibility.Collapsed;
             }
+        }
+
+        private async Task<List<string>> SearchArtworkUrlsAsync(string searchTerm, ResolvedGameInfo gameInfo)
+        {
+            var urls = new List<string>();
+
+            void AddUrl(string url)
+            {
+                if (!string.IsNullOrWhiteSpace(url) &&
+                    !urls.Any(existing => existing.Equals(url, StringComparison.OrdinalIgnoreCase)))
+                {
+                    urls.Add(url);
+                }
+            }
+
+            string cleanedName = CleanGameNameForSearch(searchTerm);
+            if (string.IsNullOrWhiteSpace(cleanedName))
+            {
+                return urls;
+            }
+
+            if (!string.IsNullOrWhiteSpace(gameInfo?.SteamAppId))
+            {
+                foreach (string url in GetSteamArtworkCandidateUrls(gameInfo.SteamAppId))
+                {
+                    AddUrl(url);
+                }
+            }
+
+            if (_steamGridHelper?.IsApiKeySet == true)
+            {
+                try
+                {
+                    var searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedName);
+                    if (searchResult != null)
+                    {
+                        foreach (string url in await _steamGridHelper.GetVerticalImagesForGameAsync(searchResult.id))
+                        {
+                            AddUrl(url);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ArtworkSearch] SteamGridDB failed: {ex.Message}");
+                }
+            }
+
+            string steamStoreAppId = !string.IsNullOrWhiteSpace(gameInfo?.SteamAppId)
+                ? gameInfo.SteamAppId
+                : await TryFindSteamStoreAppIdAsync(cleanedName);
+
+            if (!string.IsNullOrWhiteSpace(steamStoreAppId))
+            {
+                foreach (string url in GetSteamArtworkCandidateUrls(steamStoreAppId))
+                {
+                    AddUrl(url);
+                }
+            }
+
+            foreach (string url in await SearchCheapSharkArtworkUrlsAsync(cleanedName))
+            {
+                AddUrl(url);
+            }
+
+            return urls.Take(30).ToList();
+        }
+
+        private IEnumerable<string> GetSteamArtworkCandidateUrls(string steamAppId)
+        {
+            if (string.IsNullOrWhiteSpace(steamAppId))
+            {
+                yield break;
+            }
+
+            string appId = steamAppId.Trim();
+            string[] cdnRoots =
+            {
+                "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps",
+                "https://cdn.cloudflare.steamstatic.com/steam/apps",
+                "https://cdn.akamai.steamstatic.com/steam/apps"
+            };
+
+            foreach (string root in cdnRoots)
+            {
+                yield return $"{root}/{appId}/library_600x900.jpg";
+                yield return $"{root}/{appId}/library_600x900_2x.jpg";
+                yield return $"{root}/{appId}/portrait.png";
+                yield return $"{root}/{appId}/capsule_616x353.jpg";
+                yield return $"{root}/{appId}/header.jpg";
+            }
+        }
+
+        private async Task<string> TryFindSteamStoreAppIdAsync(string gameName)
+        {
+            string cleanedName = CleanGameNameForSearch(gameName);
+            if (string.IsNullOrWhiteSpace(cleanedName))
+            {
+                return null;
+            }
+
+            if (_steamStoreSearchAppIdCache.TryGetValue(cleanedName, out string cachedAppId))
+            {
+                return cachedAppId;
+            }
+
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
+
+                string url = $"https://store.steampowered.com/api/storesearch/?term={Uri.EscapeDataString(cleanedName)}&l=en&cc=US";
+                string json = await client.GetStringAsync(url);
+                using JsonDocument doc = JsonDocument.Parse(json);
+
+                if (!doc.RootElement.TryGetProperty("items", out JsonElement itemsElement) ||
+                    itemsElement.ValueKind != JsonValueKind.Array)
+                {
+                    _steamStoreSearchAppIdCache[cleanedName] = null;
+                    return null;
+                }
+
+                string bestAppId = null;
+                double bestSimilarity = 0.0;
+
+                foreach (JsonElement item in itemsElement.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("id", out JsonElement idElement) ||
+                        !item.TryGetProperty("name", out JsonElement nameElement))
+                    {
+                        continue;
+                    }
+
+                    string itemName = nameElement.GetString();
+                    double similarity = CalculateSimilarity(
+                        CleanGameNameForSearch(cleanedName),
+                        CleanGameNameForSearch(itemName));
+
+                    if (similarity > bestSimilarity)
+                    {
+                        bestSimilarity = similarity;
+                        bestAppId = idElement.ToString();
+                    }
+                }
+
+                if (bestSimilarity < 0.45)
+                {
+                    bestAppId = null;
+                }
+
+                _steamStoreSearchAppIdCache[cleanedName] = bestAppId;
+                return bestAppId;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ArtworkSearch] Steam store search failed: {ex.Message}");
+                _steamStoreSearchAppIdCache[cleanedName] = null;
+                return null;
+            }
+        }
+
+        private async Task<List<string>> SearchCheapSharkArtworkUrlsAsync(string gameName)
+        {
+            var urls = new List<string>();
+            string cleanedName = CleanGameNameForSearch(gameName);
+            if (string.IsNullOrWhiteSpace(cleanedName))
+            {
+                return urls;
+            }
+
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
+
+                string url = $"https://www.cheapshark.com/api/1.0/games?title={Uri.EscapeDataString(cleanedName)}&limit=10";
+                string json = await client.GetStringAsync(url);
+                using JsonDocument doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    return urls;
+                }
+
+                foreach (JsonElement item in doc.RootElement.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("external", out JsonElement titleElement) ||
+                        !item.TryGetProperty("thumb", out JsonElement thumbElement))
+                    {
+                        continue;
+                    }
+
+                    string title = titleElement.GetString();
+                    string thumb = thumbElement.GetString();
+                    double similarity = CalculateSimilarity(
+                        CleanGameNameForSearch(cleanedName),
+                        CleanGameNameForSearch(title));
+
+                    if (similarity >= 0.45 && !string.IsNullOrWhiteSpace(thumb))
+                    {
+                        urls.Add(thumb);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ArtworkSearch] CheapShark fallback failed: {ex.Message}");
+            }
+
+            return urls;
         }
 
         /// <summary>
@@ -3671,6 +4866,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         var data = await client.GetByteArrayAsync(url);
                         await File.WriteAllBytesAsync(cachePath, data);
                     }
+                    InvalidateArtworkCacheLookup();
 
                     this.DispatcherQueue.TryEnqueue(() =>
                     {
@@ -3738,6 +4934,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             byte[] data = memoryStream.ToArray();
                             await File.WriteAllBytesAsync(cachePath, data);
                         }
+                        InvalidateArtworkCacheLookup();
 
                         // C. UI aktualisieren
                         this.DispatcherQueue.TryEnqueue(() =>
@@ -3847,7 +5044,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private void CloseImageSelectorButton_Click(object sender, RoutedEventArgs e)
         {
             GameOptionsOverlay.Visibility = Visibility.Collapsed;
-            _currentFocusArea = FocusArea.Cards; // Return focus to cards
+            _currentFocusArea = _gameOptionsReturnFocusArea;
             _currentEditingCardEntry = null;
             UpdateVisualFocus(); // Refresh highlights
         }
@@ -3859,11 +5056,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                bool shortcutpopup = AppSettings.Load<bool>("shortcutpopup");
+                bool shortcutpopup = true;
+                try { shortcutpopup = AppSettings.Load<bool>("shortcutpopup"); } catch { }
 
                 if (shortcutpopup)
                 {
-                    // 1. Sound abspielen
                     try
                     {
                         string soundPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "shortcut.wav");
@@ -3873,13 +5070,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         }
                     }
                     catch { }
+                }
 
-                    // 2. Das neue Popup-Fenster erstellen und anzeigen
-                    // WICHTIG: Wir nutzen App.m_window.DispatcherQueue, um auf den UI-Thread zu kommen.
-                    if (App.m_window != null)
-                    {
-                        App.m_window.ShowInAppNotification(message);
-                    }
+                if (App.m_window != null)
+                {
+                    App.m_window.ShowInAppNotification(message);
                 }
             }
             catch
@@ -3890,22 +5085,137 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         public void ShowInAppNotification(string message)
         {
-            // Wir müssen sicherstellen, dass wir auf dem UI-Thread sind
             this.DispatcherQueue.TryEnqueue(() =>
             {
-                // 1. Das neue Notification-Control erstellen
-                var notification = new InAppNotification(message);
+                string cleanMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message.Trim();
+                _pendingStatusMessage = cleanMessage;
 
-                // 2. Event abonnieren: Wenn die Animation fertig ist...
-                notification.AnimationFinished += (s, args) =>
+                EnsureSelectionSurfaceReferences();
+                if (string.IsNullOrWhiteSpace(cleanMessage))
                 {
-                    // ...entfernen wir das Element wieder aus der Liste (Speicher freigeben)
-                    NotificationStack.Children.Remove(notification);
-                };
+                    HideBottomStatusPopup();
+                    return;
+                }
 
-                // 3. Zum StackPanel hinzufügen (erscheint sofort und animiert sich rein)
-                NotificationStack.Children.Add(notification);
+                if (_bottomStatusText == null || _bottomStatusPopup == null)
+                {
+                    return;
+                }
+
+                _bottomStatusText.Text = $"[{DateTime.Now:HH:mm:ss}] {cleanMessage}";
+                ShowBottomStatusPopup();
             });
+        }
+
+        private void EnsureBottomStatusTimer()
+        {
+            if (_bottomStatusHideTimer != null)
+            {
+                return;
+            }
+
+            _bottomStatusHideTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(4.5)
+            };
+            _bottomStatusHideTimer.Tick += (_, _) =>
+            {
+                _bottomStatusHideTimer.Stop();
+                HideBottomStatusPopup();
+            };
+        }
+
+        private void ShowBottomStatusPopup()
+        {
+            if (_bottomStatusPopup == null)
+            {
+                return;
+            }
+
+            EnsureBottomStatusTimer();
+            _bottomStatusHideTimer.Stop();
+            StopBottomStatusAnimations();
+
+            _bottomStatusPopup.Visibility = Visibility.Visible;
+            _bottomStatusPopup.Opacity = Math.Max(_bottomStatusPopup.Opacity, 0.05);
+
+            if (_bottomStatusPopupTransform != null)
+            {
+                _bottomStatusPopupTransform.TranslateY = 14;
+                _bottomStatusPopupTransform.ScaleX = 0.98;
+                _bottomStatusPopupTransform.ScaleY = 0.98;
+            }
+
+            _bottomStatusShowStoryboard = CreateBottomStatusStoryboard(1.0, 0.0, 1.0, TimeSpan.FromMilliseconds(260), EasingMode.EaseOut);
+            _bottomStatusShowStoryboard.Begin();
+            _bottomStatusHideTimer.Start();
+        }
+
+        private void HideBottomStatusPopup()
+        {
+            if (_bottomStatusPopup == null || _bottomStatusPopup.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            _bottomStatusHideTimer?.Stop();
+            StopBottomStatusAnimations();
+
+            _bottomStatusHideStoryboard = CreateBottomStatusStoryboard(0.0, 12.0, 0.98, TimeSpan.FromMilliseconds(220), EasingMode.EaseIn);
+            _bottomStatusHideStoryboard.Completed += (_, _) =>
+            {
+                if (_bottomStatusPopup != null && _bottomStatusPopup.Opacity <= 0.02)
+                {
+                    _bottomStatusPopup.Visibility = Visibility.Collapsed;
+                }
+            };
+            _bottomStatusHideStoryboard.Begin();
+        }
+
+        private Storyboard CreateBottomStatusStoryboard(double opacity, double translateY, double scale, TimeSpan duration, EasingMode easingMode)
+        {
+            var storyboard = new Storyboard();
+            var easing = new ExponentialEase
+            {
+                Exponent = 4,
+                EasingMode = easingMode
+            };
+
+            AddBottomStatusAnimation(storyboard, _bottomStatusPopup, "Opacity", opacity, duration, easing);
+
+            if (_bottomStatusPopupTransform != null)
+            {
+                AddBottomStatusAnimation(storyboard, _bottomStatusPopupTransform, "TranslateY", translateY, duration, easing);
+                AddBottomStatusAnimation(storyboard, _bottomStatusPopupTransform, "ScaleX", scale, duration, easing);
+                AddBottomStatusAnimation(storyboard, _bottomStatusPopupTransform, "ScaleY", scale, duration, easing);
+            }
+
+            return storyboard;
+        }
+
+        private void AddBottomStatusAnimation(Storyboard storyboard, DependencyObject target, string propertyPath, double to, TimeSpan duration, EasingFunctionBase easing)
+        {
+            if (storyboard == null || target == null)
+            {
+                return;
+            }
+
+            var animation = new DoubleAnimation
+            {
+                To = to,
+                Duration = new Duration(duration),
+                EasingFunction = easing
+            };
+
+            Storyboard.SetTarget(animation, target);
+            Storyboard.SetTargetProperty(animation, propertyPath);
+            storyboard.Children.Add(animation);
+        }
+
+        private void StopBottomStatusAnimations()
+        {
+            try { _bottomStatusShowStoryboard?.Stop(); } catch { }
+            try { _bottomStatusHideStoryboard?.Stop(); } catch { }
         }
 
 
@@ -3950,69 +5260,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #endregion methodes for code
         #region functions
-        #region lossless
-        private const int SW_MINIMIZEE = 6;
-
-        // NOTE: This method is now 'async Task'
-        public static async Task StartLosslessScaling()
-        {
-            try
-            {
-                // 1. Your existing checks remain the same - this is good practice.
-                if (!AppSettings.Load<bool>("lossless"))
-                {
-                    Console.WriteLine("Lossless Scaling auto-start is disabled. Skipping.");
-                    return;
-                }
-
-                string losslessPath = AppSettings.Load<string>("losslesspath");
-                if (string.IsNullOrEmpty(losslessPath) || !File.Exists(losslessPath))
-                {
-                    Console.WriteLine($"Error: The path to Lossless Scaling is invalid: {losslessPath}");
-                    return;
-                }
-
-                string processName = Path.GetFileNameWithoutExtension(losslessPath);
-                if (Process.GetProcessesByName(processName).Any())
-                {
-                    Console.WriteLine("Lossless Scaling is already running.");
-                    return;
-                }
-
-                // 2. Start the process WITHOUT the WindowStyle suggestion.
-                Console.WriteLine("Starting Lossless Scaling...");
-                Process process = Process.Start(losslessPath);
-
-                // 3. Wait for the process to create its main window.
-                // We give it up to 5 seconds to appear.
-                for (int i = 0; i < 50; i++)
-                {
-                    // The Refresh() is important to get the latest process details.
-                    process.Refresh();
-                    if (process.MainWindowHandle != IntPtr.Zero)
-                    {
-                        break; // Window found, exit the loop.
-                    }
-                    await Task.Delay(100);
-                }
-
-                // 4. Forcefully minimize the window.
-                if (process.MainWindowHandle != IntPtr.Zero)
-                {
-                    Console.WriteLine("Lossless Scaling window found. Forcing it to minimize.");
-                    ShowWindow(process.MainWindowHandle, SW_MINIMIZEE);
-                }
-                else
-                {
-                    Console.WriteLine("Could not find the main window for Lossless Scaling after starting it.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"An unexpected error occurred while starting Lossless Scaling: {ex.Message}");
-            }
-        }
-        #endregion lossless
         #region boilr gamysync
 
         public string RunBoilrNoUI()
@@ -4356,7 +5603,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     Debug.WriteLine("[Wallpaper] Kein Wallpaper gefunden. Nutze leeren Hintergrund.");
                     StopLiveWallpaper();
-                    BackgroundImage.Source = null;
+                    if (BackgroundImage != null)
+                    {
+                        BackgroundImage.Source = null;
+                    }
                     return;
                 }
 
@@ -4382,28 +5632,80 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     Debug.WriteLine("[Wallpaper] Setze statisches Bild: " + cleanPath);
                     StopLiveWallpaper();
-
-                    // Sicherer Bild-Ladevorgang
-                    try
-                    {
-                        var bitmap = new BitmapImage();
-                        bitmap.UriSource = new Uri(cleanPath, UriKind.Absolute);
-                        BackgroundImage.Source = bitmap;
-                        BackgroundImage.Visibility = Visibility.Visible;
-                        BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine("[Wallpaper] Fehler beim Laden des Bildes: " + ex.Message);
-                        // Letzter Notnagel: Hintergrund schwarz/leer lassen statt Absturz
-                        BackgroundImage.Source = null;
-                    }
+                    _ = ApplyStaticBackgroundImageAsync(cleanPath, Math.Max(width, height));
                 }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Wallpaper Critical Error] {ex.Message}");
+                App.StartupTrace($"Wallpaper critical error: {ex}");
             }
+        }
+
+        private async Task ApplyStaticBackgroundImageAsync(string cleanPath, int targetDecodeSize)
+        {
+            int loadVersion = Interlocked.Increment(ref _backgroundImageLoadVersion);
+            byte[] imageBytes;
+
+            try
+            {
+                var info = new FileInfo(cleanPath);
+                if (!info.Exists || info.Length <= 0)
+                {
+                    App.StartupTrace($"Wallpaper skipped because file is empty or missing: {cleanPath}");
+                    return;
+                }
+
+                imageBytes = await File.ReadAllBytesAsync(cleanPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Wallpaper] Fehler beim Lesen des Bildes: " + ex.Message);
+                App.StartupTrace($"Wallpaper read failed: {ex}");
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                if (loadVersion != _backgroundImageLoadVersion || BackgroundImage == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var bitmap = new BitmapImage
+                    {
+                        DecodePixelWidth = Math.Clamp(targetDecodeSize, 1920, 4096)
+                    };
+
+                    using (var ms = new MemoryStream(imageBytes))
+                    {
+                        await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
+                    }
+
+                    if (loadVersion != _backgroundImageLoadVersion)
+                    {
+                        return;
+                    }
+
+                    BackgroundImage.Source = bitmap;
+                    BackgroundImage.Visibility = Visibility.Visible;
+
+                    if (BackgroundVideoPlayer != null)
+                    {
+                        BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                    }
+
+                    App.StartupTrace("Wallpaper static image applied.");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("[Wallpaper] Fehler beim Laden des Bildes: " + ex.Message);
+                    App.StartupTrace($"Wallpaper static image failed: {ex}");
+                    try { BackgroundImage.Source = null; } catch { }
+                }
+            });
         }
 
         private void SetupLiveWallpaper(string videoPath)
@@ -4413,6 +5715,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 StopLiveWallpaper();
 
                 var player = new Windows.Media.Playback.MediaPlayer();
+                _backgroundWallpaperPlayer = player;
 
                 // OPTIMIERUNG 1: Video-Eigenschaften für Performance setzen
                 player.IsVideoFrameServerEnabled = false; // Wir brauchen keinen Zugriff auf einzelne Frames
@@ -4425,10 +5728,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 player.IsLoopingEnabled = true;
                 player.IsMuted = true;
 
-                BackgroundVideoPlayer.SetMediaPlayer(player);
+                if (BackgroundVideoPlayer != null)
+                {
+                    BackgroundVideoPlayer.SetMediaPlayer(player);
+                    BackgroundVideoPlayer.Visibility = Visibility.Visible;
+                }
 
                 // WICHTIG: Den Player-Typ auf 'Hardware' zwingen (über das UI Element)
-                BackgroundVideoPlayer.Opacity = 1.0;
+                if (BackgroundVideoPlayer != null)
+                {
+                    BackgroundVideoPlayer.Opacity = 1.0;
+                }
 
                 player.Play();
             }
@@ -4439,11 +5749,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-                var player = BackgroundVideoPlayer.MediaPlayer;
+                var player = _backgroundWallpaperPlayer;
                 if (player != null)
                 {
                     player.Pause();
-                    BackgroundVideoPlayer.SetMediaPlayer(null);
+                    if (BackgroundVideoPlayer != null)
+                    {
+                        BackgroundVideoPlayer.SetMediaPlayer(null);
+                        BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                    }
+                    player.Dispose();
+                    _backgroundWallpaperPlayer = null;
                 }
             }
             catch { }
@@ -4493,97 +5809,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     // Log if something goes wrong
                     Console.WriteLine($"Could not terminate process {proc.ProcessName}: {ex.Message}");
                 }
-            }
-        }
-        public static void displayfusion(string art)
-        {
-
-            try
-            {
-                // Function
-                // Full path to DisplayFusionCommand.exe
-                string displayFusionCommandPath = @"C:\Program Files\DisplayFusion\DisplayFusionCommand.exe";
-
-                // Check if DisplayFusionCommand.exe exists
-                if (!File.Exists(displayFusionCommandPath))
-                {
-                    Console.WriteLine("DisplayFusionCommand.exe not found at the expected location or not set");
-                    return;
-                }
-                // Check if action is "start"
-                if (art == "start")
-                {
-                    bool usedisplayfusion = AppSettings.Load<bool>("usedisplayfusion");
-
-                    if (usedisplayfusion == true)
-                    {
-                        // Get start profile
-                        string startprofil = AppSettings.Load<string>("usedisplayfusion_start");
-
-                        if (!string.IsNullOrEmpty(startprofil))
-                        {
-                            // Command to load the profile using DisplayFusion Command Line
-                            Process.Start(new ProcessStartInfo
-                            {
-                                FileName = displayFusionCommandPath,
-                                Arguments = $"-monitorloadprofile \"{startprofil}\"",
-                                UseShellExecute = false,
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true
-                            });
-
-                            Console.WriteLine($"Loaded DisplayFusion profile: {startprofil}");
-                            // sleep 
-                        }
-                        else
-                        {
-                            Console.WriteLine("No start profile configured. Skipping...");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine("DisplayFusion integration is disabled.");
-                    }
-                }
-                else
-                {
-                    // Action is "end"
-                    bool usedisplayfusion = AppSettings.Load<bool>("usedisplayfusion");
-
-                    if (usedisplayfusion == true)
-                    {
-                        // Get end profile
-                        string endprofil = AppSettings.Load<string>("usedisplayfusion_end");
-
-                        if (!string.IsNullOrEmpty(endprofil))
-                        {
-                            // Command to load the profile using DisplayFusion Command Line
-                            Process.Start(new ProcessStartInfo
-                            {
-                                FileName = displayFusionCommandPath,
-                                Arguments = $"-monitorloadprofile \"{endprofil}\"",
-                                UseShellExecute = false,
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true
-                            });
-
-                            Console.WriteLine($"Loaded DisplayFusion profile: {endprofil}");
-
-                        }
-                        else
-                        {
-                            Console.WriteLine("No end profile configured. Skipping...");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine("DisplayFusion integration is disabled.");
-                    }
-                }
-            }
-            catch
-            {
-                Console.WriteLine("DisplayFusion problem-");
             }
         }
         static void cssloader()
@@ -4793,7 +6018,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
             // Remaining cleanup tasks
-            displayfusion("end");
             KillProcess("PluginLoader_noconsole.exe");
             Console.WriteLine("PluginLoader_noconsole killed");
             CleanupLogging();
@@ -4931,6 +6155,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     if (width > 100 && height > 100)
                     {
                         steamHwnd = hWnd;
+                        _lastKnownSteamBigPictureHwnd = hWnd;
                         Debug.WriteLine($"[GCM] Reliable Steam BP window found (Handle: {hWnd}, Size: {width}x{height})");
                         return false; // Stop searching, we found it!
                     }
@@ -5095,6 +6320,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             switch (launcher)
             {
                 case "steam":
+                    try
+                    {
+                        string configuredSteamPath = AppSettings.Load<string>("steamlauncherpath");
+                        if (!string.IsNullOrWhiteSpace(configuredSteamPath) && File.Exists(configuredSteamPath))
+                        {
+                            return configuredSteamPath;
+                        }
+                    }
+                    catch
+                    {
+                        // Fall back to registry-based auto-detection below.
+                    }
+
                     using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam") ??
                                      Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam"))
                     {
@@ -5171,26 +6409,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private async void SwitchToSpecificLauncher(string launcherId)
         {
             MakeSelfNonTopmost();
+            launcherId = "steam";
             Debug.WriteLine($"[GCM] Quick-Launch ausgelöst für: '{launcherId}'...");
 
             try
             {
-                switch (launcherId)
+                if (await TryReturnToSteamViaTaskViewAsync())
                 {
-                    case "steam":
-                        await StartSteam(false); // <--- false: Sanfter Wechsel!
-                        break;
-                    case "gfn":
-                        await StartGfn();
-                        break;
-                    case "xbox":
-                        await StartXbox();
-                        break;
-                    case "playnite":
-                        // FIX: Kein Protokoll-Befehl mehr! Direkt unsere Fullscreen-Methode aufrufen.
-                        await StartPlaynite();
-                        break;
+                    return;
                 }
+
+                await StartSteam(false);
             }
             catch (Exception ex)
             {
@@ -5201,50 +6430,72 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private async void SwitchToConfiguredLauncher()
         {
             MakeSelfNonTopmost();
-
-            string launcher = AppSettings.Load<string>("launcher");
-            Debug.WriteLine($"[GCM] Wechsle zu konfiguriertem Launcher: '{launcher}'...");
+            ApplySteamOnlyMode();
+            Debug.WriteLine("[GCM] Wechsle zu konfiguriertem Launcher: 'steam'...");
 
             try
             {
-                switch (launcher)
+                if (await TryReturnToSteamViaTaskViewAsync())
                 {
-                    case "steam":
-                        await StartSteam(false); 
-                        return;
-
-                    case "gfn":
-                        await StartGfn();
-                        return;
-
-                    case "playnite":
-                        // FIX: Auch hier jeden Protokoll-Befehl entfernt!
-                        await StartPlaynite();
-                        return;
-
-                    case "custom":
-                        string customPath = AppSettings.Load<string>("customlauncherpath");
-                        string customProcessName = Path.GetFileNameWithoutExtension(customPath);
-                        Process customProc = Process.GetProcessesByName(customProcessName).FirstOrDefault();
-                        if (customProc != null && customProc.MainWindowHandle != IntPtr.Zero)
-                        {
-                            await ForcefullyBringToForeground(customProc.MainWindowHandle);
-                        }
-                        else
-                        {
-                            await StartOtherLauncher();
-                        }
-                        return;
-
-                    case "xbox":
-                        await StartXbox(false);
-                        return;
+                    return;
                 }
+
+                await StartSteam(false);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[GCM] Fehler während des Launcher-Wechsels: {ex.Message}");
             }
+        }
+
+        private async void SwitchToFeaturedGame()
+        {
+            var gameData = _featuredGameProcessData;
+            if (gameData?.Proc == null || gameData.Proc.HasExited)
+            {
+                return;
+            }
+
+            try
+            {
+                if (ProcessSuspender.IsProcessSuspended(gameData.Proc.Id))
+                {
+                    SendOverlayNotification($"Waking up: {gameData.Proc.ProcessName}...");
+                    await Task.Delay(1200);
+                    ToggleGameSuspend(gameData.Proc, false);
+                    _suspendedGamePid = 0;
+                    await Task.Delay(400);
+                }
+
+                MakeSelfNonTopmost();
+                IntPtr targetHwnd = gameData.Hwnd != IntPtr.Zero ? gameData.Hwnd : gameData.Proc.MainWindowHandle;
+                if (targetHwnd == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (!await TrySwitchToWindowViaTaskViewAsync(
+                        targetHwnd,
+                        FocusReturnTarget.GameWindow))
+                {
+                    Debug.WriteLine("[GCM] Game handoff did not report focus; skipping fallback by design.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Fehler beim Wechsel zum Spiel: {ex.Message}");
+            }
+        }
+
+        private async void CloseFeaturedGame()
+        {
+            var gameData = _featuredGameProcessData;
+            if (gameData == null)
+            {
+                return;
+            }
+
+            await CloseProcessWindowAsync(gameData.Proc, gameData.Hwnd);
         }
         private static void MaximizeXboxWindow(IntPtr hwnd)
         {
@@ -5434,47 +6685,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     Debug.WriteLine("[Settings] Verification returned false, but proceeding with application startup to prevent immediate exit.");
                 }
 
-                string launcher = "steam"; // Fallback
-                try { launcher = AppSettings.Load<string>("launcher"); } catch { }
+                ApplySteamOnlyMode();
 
-                switch (launcher)
-                {
-                    case "steam":
-                        string steamPath = "";
-                        try { steamPath = AppSettings.Load<string>("steamlauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(steamPath) && !File.Exists(steamPath))
-                            Debug.WriteLine("[Settings] The Steam path in settings is invalid, but continuing startup.");
-                        break;
-
-                    case "playnite":
-                        string playnitePath = "";
-                        try { playnitePath = AppSettings.Load<string>("playnitelauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(playnitePath) && !File.Exists(playnitePath))
-                            Debug.WriteLine("[Settings] The Playnite path in settings is invalid, but continuing startup.");
-                        break;
-
-                    case "custom":
-                        string customPath = "";
-                        try { customPath = AppSettings.Load<string>("customlauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(customPath) && !File.Exists(customPath))
-                            Debug.WriteLine("[Settings] The Custom Launcher path is invalid, but continuing startup.");
-                        break;
-
-                    case "xbox":
-                        // Xbox needs no path, started via protocol
-                        break;
-
-                    case "gfn":
-                        string gfnPath = "";
-                        try { gfnPath = AppSettings.Load<string>("gfnlauncherpath"); } catch { }
-                        if (!string.IsNullOrEmpty(gfnPath) && !File.Exists(gfnPath))
-                            Debug.WriteLine("[Settings] The GeForce Now path is invalid, but continuing startup.");
-                        break;
-
-                    default:
-                        Debug.WriteLine($"[Settings] Unknown launcher '{launcher}', continuing with default behavior.");
-                        break;
-                }
+                string steamPath = "";
+                try { steamPath = AppSettings.Load<string>("steamlauncherpath"); } catch { }
+                if (!string.IsNullOrEmpty(steamPath) && !File.Exists(steamPath))
+                    Debug.WriteLine("[Settings] The Steam path in settings is invalid, but continuing with auto-detect.");
 
                 Console.WriteLine("Settings verified successfully.");
             }
@@ -5511,12 +6727,167 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
-
+                await Task.Delay(5000);
+                await WaitForShellUiReadyAsync();
+                await CheckForGithubReleaseUpdateAsync();
             }
             catch (Exception ex)
             {
-
+                Debug.WriteLine($"[Update] Startup async tasks failed: {ex.Message}");
             }
+        }
+
+        private async Task WaitForShellUiReadyAsync(int timeoutMs = 15000)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            while (!_isShellUiReady && stopwatch.ElapsedMilliseconds < timeoutMs)
+            {
+                await Task.Delay(250);
+            }
+        }
+
+        private async Task CheckForGithubReleaseUpdateAsync()
+        {
+            if (_hasCheckedForGithubReleaseUpdate)
+            {
+                return;
+            }
+
+            _hasCheckedForGithubReleaseUpdate = true;
+
+            Version currentVersion = GetCurrentApplicationVersion();
+
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd($"GCMLoader/{FormatVersion(currentVersion)}");
+                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+
+                using var response = await client.GetAsync(GithubLatestReleaseApiUrl, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var releaseStream = await response.Content.ReadAsStreamAsync();
+                using var releaseDocument = await JsonDocument.ParseAsync(releaseStream);
+                JsonElement root = releaseDocument.RootElement;
+
+                string releaseTag = root.TryGetProperty("tag_name", out JsonElement tagElement)
+                    ? tagElement.GetString()
+                    : string.Empty;
+
+                if (!TryParseReleaseVersion(releaseTag, out Version latestReleaseVersion))
+                {
+                    return;
+                }
+
+                if (latestReleaseVersion <= currentVersion)
+                {
+                    Debug.WriteLine($"[Update] No newer GitHub release. Current={FormatVersion(currentVersion)} Latest={FormatVersion(latestReleaseVersion)}");
+                    return;
+                }
+
+                string releaseName = root.TryGetProperty("name", out JsonElement nameElement)
+                    ? nameElement.GetString()
+                    : string.Empty;
+
+                string releaseUrl = root.TryGetProperty("html_url", out JsonElement urlElement)
+                    ? urlElement.GetString()
+                    : "https://github.com/toonymak1993/GameConsoleMode/releases/latest";
+
+                _availableGithubReleaseUpdate = new GithubReleaseInfo
+                {
+                    ReleaseVersion = latestReleaseVersion,
+                    VersionText = string.IsNullOrWhiteSpace(releaseTag) ? FormatVersion(latestReleaseVersion) : releaseTag.Trim(),
+                    DisplayTitle = string.IsNullOrWhiteSpace(releaseName) ? $"GitHub Release {FormatVersion(latestReleaseVersion)}" : releaseName.Trim(),
+                    HtmlUrl = string.IsNullOrWhiteSpace(releaseUrl) ? "https://github.com/toonymak1993/GameConsoleMode/releases/latest" : releaseUrl.Trim()
+                };
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_availableGithubReleaseUpdate == null || MainContent == null || MainContent.Visibility != Visibility.Visible)
+                    {
+                        return;
+                    }
+
+                    ShowGithubReleasePrompt(currentVersion);
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Update] GitHub release check failed: {ex.Message}");
+            }
+        }
+
+        private Version GetCurrentApplicationVersion()
+        {
+            Version version = Assembly.GetExecutingAssembly().GetName().Version;
+            if (version != null)
+            {
+                return version;
+            }
+
+            try
+            {
+                string currentExe = Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(currentExe))
+                {
+                    string fileVersion = FileVersionInfo.GetVersionInfo(currentExe).FileVersion;
+                    if (TryParseReleaseVersion(fileVersion, out Version parsedFileVersion))
+                    {
+                        return parsedFileVersion;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return new Version(0, 0, 0, 0);
+        }
+
+        private static bool TryParseReleaseVersion(string rawVersion, out Version version)
+        {
+            version = null;
+
+            if (string.IsNullOrWhiteSpace(rawVersion))
+            {
+                return false;
+            }
+
+            Match versionMatch = Regex.Match(rawVersion, @"\d+(?:\.\d+){0,3}");
+            if (!versionMatch.Success)
+            {
+                return false;
+            }
+
+            string[] parts = versionMatch.Value.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            string normalizedVersion = parts.Length switch
+            {
+                1 => $"{parts[0]}.0.0",
+                2 => $"{parts[0]}.{parts[1]}.0",
+                _ => string.Join('.', parts.Take(4))
+            };
+
+            return Version.TryParse(normalizedVersion, out version);
+        }
+
+        private static string FormatVersion(Version version)
+        {
+            if (version == null)
+            {
+                return "0.0.0";
+            }
+
+            if (version.Revision > 0)
+            {
+                return version.ToString(4);
+            }
+
+            if (version.Build >= 0)
+            {
+                return version.ToString(3);
+            }
+
+            return version.ToString(2);
         }
 
         #region winparts
@@ -5961,31 +7332,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             await Task.Delay(1000);
 
             // 3. ERST JETZT starten wir den eigentlichen Launcher (nach Video und nach Desktop!)
-            string launcher = AppSettings.Load<string>("launcher");
-            Debug.WriteLine($"WinPart abgeschlossen. Starte nun Launcher: {launcher}");
-
-            switch (launcher)
-            {
-                case "steam":
-                    await StartSteam();
-                    break;
-                case "playnite":
-                    await StartPlaynite();
-                    break;
-                case "custom":
-                    await StartOtherLauncher();
-                    break;
-                case "gfn":
-                    await StartGfn();
-                    break;
-                case "xbox":
-                    await StartXbox(true);
-                    break;
-                default:
-                    AppSettings.Save("launcher", "steam");
-                    await StartSteam();
-                    break;
-            }
+            Debug.WriteLine("WinPart abgeschlossen. Starte nun Launcher: steam");
+            ApplySteamOnlyMode();
+            await StartSteam();
 
             // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
             ConsoleModeToShell();
@@ -6161,9 +7510,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
+                ClearFocusReturnWatchdog();
+                ResetParkedSteamState();
+                ShowInAppNotification("Preparing Steam...");
+
                 string steamExePath = AutoDetectLauncherPath("steam");
                 if (string.IsNullOrWhiteSpace(steamExePath))
+                {
+                    ShowInAppNotification("Steam executable not found.");
                     throw new FileNotFoundException("Steam could not be found automatically on this system.");
+                }
 
                 // Push GCM to the background to make room for Steam
                 IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -6195,6 +7551,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (useDeckyLoader && isColdStart)
                 {
                     Debug.WriteLine("[GCM] Decky Loader enabled & Cold Boot required. Preparing environment...");
+                    ShowInAppNotification("Preparing Decky Loader...");
 
                     // Make sure Steam is completely dead before doing anything with Decky
                     var allSteamProcs = Process.GetProcessesByName("steam")
@@ -6229,6 +7586,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     if (File.Exists(deckyPath))
                     {
                         Debug.WriteLine("[GCM] Launching PluginLoader...");
+                        ShowInAppNotification("Starting Decky Loader...");
                         Process.Start(new ProcessStartInfo
                         {
                             FileName = deckyPath,
@@ -6254,6 +7612,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (forceRestart || !isSteamRunning)
                 {
                     Debug.WriteLine("[GCM] Steam Cold Boot into Big Picture Mode...");
+                    ShowInAppNotification("Launching Steam Big Picture...");
 
                     // If Decky was OFF, but we still need a force restart, ensure Steam is dead
                     if (!useDeckyLoader && forceRestart)
@@ -6275,6 +7634,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 else
                 {
                     Debug.WriteLine("[GCM] Steam is already running. Triggering Big Picture switch (Warmstart)...");
+                    ShowInAppNotification("Switching to Steam Big Picture...");
                     Process.Start(new ProcessStartInfo("steam://open/gamepadui") { UseShellExecute = true });
                     steamLiefSchon = true;
                 }
@@ -6301,17 +7661,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (steamHwnd != IntPtr.Zero)
                 {
                     Debug.WriteLine($"[GCM] Steam BP window ready. Applying Nuclear-Focus...");
+                    ShowInAppNotification("Steam Big Picture ready.");
+                    _lastKnownSteamBigPictureHwnd = steamHwnd;
                     await ForcefullyBringToForeground(steamHwnd);
                     ShowWindow(steamHwnd, 3); // SW_SHOWMAXIMIZED
+                    ArmFocusReturnWatchdog(FocusReturnTarget.SteamBigPicture, TimeSpan.FromSeconds(15));
                 }
                 else
                 {
                     Debug.WriteLine("[GCM] Timeout! Steam BP window was not found.");
+                    ShowInAppNotification("Steam Big Picture not found.");
                 }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[GCM] Error in StartSteam: {ex.Message}");
+                ShowInAppNotification("Steam start failed.");
             }
         }
 
@@ -6463,6 +7828,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             try
             {
+                App.StartupTrace("Start() begin.");
+                await Task.Yield();
+                ShowInAppNotification("GCM starting...");
+
                 // --- 1. INSTANT BLACKOUT & LOCKDOWN ---
                 // Versteckt die Taskleiste sofort, noch bevor das Fenster überhaupt gezeichnet ist
                 TaskbarManager.EnableAutoHide();
@@ -6475,6 +7844,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 SetWindowPos(myHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
                 // die gesamte Desktop- und Service-Vorbereitung im Hintergrund ab.
+                ShowInAppNotification("Preparing desktop shell...");
                 Task backgroundSetupTask = SetupSystemAndDesktopAsync();
 
                 // 1. Warten, bis das Video zu 100% fertig ist
@@ -6494,10 +7864,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // 2. Sicherstellen, dass das Setup im Hintergrund WIRKLICH fertig ist.
                 // (Meistens ist es das schon längst, da das Video in der Regel länger dauert als der Explorer-Start).
                 await backgroundSetupTask;
+                App.StartupTrace("Background setup finished.");
+                ShowInAppNotification("Desktop preparation complete.");
 
                 // 3. ERST JETZT, wo das Video weg ist und der Desktop 100% bereit ist,
                 // starten wir den eigentlichen Launcher. Er poppt jetzt nahezu sofort auf!
+                ShowInAppNotification("Preparing Steam Big Picture...");
                 await StartConfiguredLauncherAsync();
+                App.StartupTrace("Configured launcher start finished.");
+                ShowInAppNotification("Steam handoff complete.");
 
                 // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
                 ConsoleModeToShell();
@@ -6506,6 +7881,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
+                App.StartupTrace($"Start() failed: {ex.Message}");
                 Debug.WriteLine($"[Start Error] A critical error occurred during startup: {ex.Message}");
                 DispatcherQueue.TryEnqueue(() => TransitionToMainUI());
             }
@@ -6515,6 +7891,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         // ohne dass der User es sieht.
         private async Task SetupSystemAndDesktopAsync()
         {
+            App.StartupTrace("SetupSystemAndDesktopAsync begin.");
+            ShowInAppNotification("Loading system services...");
             // System-Hooks und Hintergrunddienste aktivieren
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SetupLogging();
@@ -6529,11 +7907,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Hintergrund-Tools asynchron starten
             _ = Task.Run(() => RunBoilrNoUI());
-            displayfusion("start");
             EnsureTouchKeyboardServiceIsRunning();
             cssloader();
             preaudio(true, false);
-            await StartLosslessScaling();
 
             // Autostart-Apps deaktivieren, falls gewünscht
             try
@@ -6547,39 +7923,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // JETZT laden wir den Desktop (explorer.exe) und verstecken die Taskleiste.
             Debug.WriteLine("Starte WinPart-Modus (Desktop laden) im Hintergrund...");
+            ShowInAppNotification("Preparing Windows shell...");
             await winpart();
+            App.StartupTrace("SetupSystemAndDesktopAsync complete.");
         }
 
         // Diese Methode kümmert sich am Ende NUR noch um das reine Öffnen des Launchers.
         private async Task StartConfiguredLauncherAsync()
         {
-            string launcher = "steam"; // Fallback
-            try { launcher = AppSettings.Load<string>("launcher"); } catch { }
-
-            Debug.WriteLine($"Desktop ist bereit. Starte nun Launcher: {launcher}");
-
-            switch (launcher)
-            {
-                case "steam":
-                    await StartSteam(true); // <--- HIER: true für Kaltstart beim Boot!
-                    break;
-                case "playnite":
-                    await StartPlaynite();
-                    break;
-                case "custom":
-                    await StartOtherLauncher();
-                    break;
-                case "gfn":
-                    await StartGfn();
-                    break;
-                case "xbox":
-                    await StartXbox(true);
-                    break;
-                default:
-                    AppSettings.Save("launcher", "steam");
-                    await StartSteam(true); // <--- HIER AUCH: true
-                    break;
-            }
+            ApplySteamOnlyMode();
+            Debug.WriteLine("Desktop ist bereit. Starte nun Launcher: steam");
+            ShowInAppNotification("Starting Steam Big Picture...");
+            await StartSteam(true);
         }
 
         #endregion start
@@ -6724,20 +8079,37 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         // We still show the window if it passed the Taskbar checks above.
                     }
 
+                    ResolvedGameInfo resolvedGameInfo = ResolveGameInfo(proc, windowTitle, exePath, hWnd);
+
                     // 5. Check against your custom process blacklist
-                    if (!string.IsNullOrEmpty(exeName) && _excludedProcessNames.Contains(exeName)) return true;
+                    if (!string.IsNullOrEmpty(exeName) && ShouldExcludeProcessWindow(exeName, resolvedGameInfo)) return true;
 
                     // Prevent duplicates
                     if (!seenHwnds.Add(hWnd)) return true;
 
                     // SUCCESS: Add to our list
-                    dataList.Add(new ProcessData { ProductName = windowTitle, Hwnd = hWnd, Proc = proc, ExePath = exePath });
+                    dataList.Add(new ProcessData
+                    {
+                        ProductName = windowTitle,
+                        Hwnd = hWnd,
+                        Proc = proc,
+                        ExePath = exePath,
+                        GameInfo = resolvedGameInfo
+                    });
                     return true;
 
                 }, IntPtr.Zero);
 
                 return dataList;
             });
+
+            _latestProcessData = processDataList.ToList();
+
+            if (!_isShellUiReady || MainContent == null || MainContent.Visibility != Visibility.Visible)
+            {
+                _deferredProcessData = processDataList.ToList();
+                return;
+            }
 
             UpdateUiFromData(processDataList);
         }
@@ -6749,7 +8121,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void UpdateLayoutForFocus()
         {
-            if (_currentFocusArea == FocusArea.Launcher || _currentFocusArea == FocusArea.QuickLaunchers)
+            bool isLauncherRailFocused = _currentFocusArea == FocusArea.Launcher || _currentFocusArea == FocusArea.QuickLaunchers;
+
+            if (isLauncherRailFocused)
             {
                 AnimateOverlayOpacity(QuickLauncherPanel, 1.0, false);
             }
@@ -6758,52 +8132,152 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 AnimateOverlayOpacity(QuickLauncherPanel, 0.0, false);
             }
 
-            if (_currentFocusArea == FocusArea.Launcher)
-            {
-                // This part for the Launcher focus remains unchanged.
-                LauncherColumn.Width = new GridLength(1, GridUnitType.Star);
-                CardsColumn.Width = new GridLength(0);
-                ColumnSeparator.Visibility = Visibility.Collapsed;
+            LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
+            CardsColumn.Width = new GridLength(1, GridUnitType.Auto);
+            ColumnSeparator.Visibility = Visibility.Visible;
 
-                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+            foreach (var card in _launcherAreaButtons)
+            {
+                card.Opacity = 1.0;
+                card.Visibility = Visibility.Visible;
+            }
+
+            _ = RefreshAppListAsync();
+        }
+
+        private double GetShellLayoutScale()
+        {
+            GetPhysicalResolution(out int width, out int height);
+            return width >= 3400 || height >= 1900 ? 1.25 : 1.0;
+        }
+
+        private void ApplyResponsiveShellSizing(bool rebuildCards = false)
+        {
+            if (ShellStage == null || LauncherAreaPanel == null || ProgramCardPanel == null || BottomLegendBar == null)
+            {
+                return;
+            }
+
+            double layoutScale = GetShellLayoutScale();
+            double scale = layoutScale * GetThemeCardScaleMultiplier();
+            double dockScale = layoutScale * GetThemeDockScaleMultiplier();
+            double topDockScale = layoutScale * GetThemeTopDockScaleMultiplier();
+            bool scaleChanged = Math.Abs(_currentShellLayoutScale - scale) > 0.01;
+            _currentShellLayoutScale = scale;
+            _currentTopPanelScale = topDockScale;
+
+            ShellStage.Margin = new Thickness(32 * scale, 0, 32 * scale, 72 * scale);
+            ShellStage.MaxWidth = 1700 * scale;
+
+            LauncherAreaPanel.Spacing = 18 * scale;
+            LauncherAreaPanel.Margin = new Thickness(14 * scale, 0, 0, 0);
+            ProgramCardPanel.Spacing = 18 * scale;
+            ProgramCardPanel.Padding = new Thickness(18 * scale, 10 * scale, 20 * scale, 10 * scale);
+
+            ColumnSeparator.Height = 210 * scale;
+            ColumnSeparator.Margin = new Thickness(0, 0, 28 * scale, 0);
+
+            NoCardsMessage.FontSize = 22 * scale;
+            NoCardsMessage.Margin = new Thickness(48 * scale, 0, 48 * scale, 0);
+
+            double processRailWidth = 1100 * scale;
+            ProgramScrollViewer.Margin = new Thickness(6 * scale, 0, 0, 0);
+            ProgramScrollViewer.Width = processRailWidth;
+            ProgramScrollViewer.MaxWidth = processRailWidth;
+
+            ApplyThemeToBottomLegend(layoutScale, dockScale);
+            ApplyThemeToTopDock(layoutScale, topDockScale);
+
+            if (InfoPanelTransform != null)
+            {
+                double focusedScale = _currentFocusArea == FocusArea.TopButtons ? topDockScale * 1.05 : topDockScale;
+                InfoPanelTransform.ScaleX = focusedScale;
+                InfoPanelTransform.ScaleY = focusedScale;
+            }
+
+            ApplyTopBarButtonScale(ExitGcmButton, topDockScale);
+            ApplyTopBarButtonScale(VolumeButton, topDockScale);
+            ApplyTopBarButtonScale(SettingsButton, topDockScale);
+            ApplyTopBarButtonScale(AppLauncherButton, topDockScale);
+            ApplyTopBarButtonScale(ShutdownButton, topDockScale);
+
+            if (NetworkStatusIcon != null) NetworkStatusIcon.FontSize = 16 * topDockScale;
+            if (BatteryIcon != null) BatteryIcon.FontSize = 16 * topDockScale;
+            if (BatteryPercentageText != null) BatteryPercentageText.FontSize = 14 * topDockScale;
+            if (ControllerBatteryText != null) ControllerBatteryText.FontSize = 14 * topDockScale;
+            if (ClockText != null)
+            {
+                ClockText.FontSize = 20 * topDockScale;
+
+                if (ClockText.Parent is Border clockBorder)
                 {
-                    var card = _launcherAreaButtons[i];
-                    if (i > 1)
-                    {
-                        AnimateCardVisibility(card, 1.0f, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(50 * (i - 1)));
-                    }
+                    clockBorder.CornerRadius = new CornerRadius(10 * topDockScale);
+                    clockBorder.Padding = new Thickness(10 * topDockScale, 4 * topDockScale, 10 * topDockScale, 4 * topDockScale);
+                    clockBorder.Background = new SolidColorBrush(GetThemeCardTintColor(GetThemeGlassAlpha(28, 46, 70)));
                 }
             }
-            else
+
+            if ((rebuildCards || scaleChanged) && !_isRebuildingResponsiveShell)
             {
-                // This part for Cards/TopButtons focus is now updated.
-                LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
-                CardsColumn.Width = new GridLength(1, GridUnitType.Star);
-                ColumnSeparator.Visibility = Visibility.Visible;
-
-                // *** THIS IS THE KEY CHANGE ***
-                // Instead of using potentially stale data, we trigger a fresh UI refresh.
-                // We use "_ = " to call the async method without waiting for it, keeping the UI responsive.
-                _ = RefreshAppListAsync();
-
-                // This loop for hiding extra launcher cards remains unchanged.
-                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+                _isRebuildingResponsiveShell = true;
+                try
                 {
-                    var card = _launcherAreaButtons[i];
-                    if (i > 1)
+                    LoadDynamicLauncherCards();
+
+                    ProgramCardPanel.Children.Clear();
+                    _cardCache.Clear();
+
+                    if (_latestProcessData != null && _latestProcessData.Count > 0)
                     {
-                        AnimateCardVisibility(card, 0.0f, TimeSpan.FromMilliseconds(150));
+                        UpdateUiFromData(_latestProcessData);
                     }
+                    else
+                    {
+                        NoCardsMessage.Visibility = Visibility.Visible;
+                        ColumnSeparator.Visibility = Visibility.Visible;
+                    }
+                }
+                finally
+                {
+                    _isRebuildingResponsiveShell = false;
                 }
             }
         }
 
-        public class LauncherCardItem
+        private static void ApplyTopBarButtonScale(Button button, double scale)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.Width = 50 * scale;
+            button.Height = 40 * scale;
+            button.CornerRadius = new CornerRadius(10 * scale);
+
+            if (button.Content is FontIcon fontIcon)
+            {
+                fontIcon.FontSize = 18 * scale;
+            }
+            else if (button.Content is Image image)
+            {
+                image.Width = 20 * scale;
+                image.Height = 20 * scale;
+            }
+        }
+
+        private class LauncherCardItem
         {
             public string Name { get; set; }
+            public string Subtitle { get; set; }
+            public string Description { get; set; }
             public string ImagePath { get; set; }
             public string ExePath { get; set; }
             public string Arguments { get; set; }
+            public bool IsPrimary { get; set; }
+            public IntPtr Hwnd { get; set; }
+            public Process Proc { get; set; }
+            public ResolvedGameInfo GameInfo { get; set; }
             // We use Action<...> to pass click methods directly.
             public Action<object, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs> TapAction { get; set; }
         }
@@ -6816,91 +8290,52 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _launcherAreaButtons = new List<Border>();
             LauncherAreaPanel.Children.Clear();
 
-            string launcher = AppSettings.Load<string>("launcher");
-            string mainLauncherIconPath = launcher switch
-            {
-                "steam" => "ms-appx:///Assets/steam_logo.png",
-                "playnite" => "ms-appx:///Assets/playnite_logo.png",
-                "xbox" => "ms-appx:///Assets/xbox_logo.png",
-                "gfn" => "ms-appx:///Assets/geforcenow.png", 
-                _ => "ms-appx:///Assets/ownlauncher.png"
-            };
+            ApplySteamOnlyMode();
+            string mainLauncherIconPath = "ms-appx:///Assets/steam_logo.png";
 
             // 1. MAIN LAUNCHER (Wird groß erstellt: 250x250)
             var mainLauncherItem = new LauncherCardItem
             {
-                Name = "Main Launcher",
+                Name = "Steam",
+                Subtitle = "Launcher",
+                Description = "Zuruck in Steam Big Picture und direkt wieder in die Hauptoberflache springen.",
                 ImagePath = mainLauncherIconPath,
+                IsPrimary = true,
                 TapAction = (s, e) => SwitchToConfiguredLauncher()
             };
             var mainCard = CreateLauncherCard(mainLauncherItem);
             LauncherAreaPanel.Children.Add(mainCard);
             _launcherAreaButtons.Add(mainCard);
 
-            try
+            if (_featuredGameProcessData?.GameInfo?.IsGame == true &&
+                _featuredGameProcessData.Proc != null &&
+                !_featuredGameProcessData.Proc.HasExited)
             {
-                bool exePath = AppSettings.Load<bool>("show_discord");
-                if (exePath == true)
+                var gameLauncherItem = new LauncherCardItem
                 {
-                    // 2. DISCORD (Wird klein erstellt: 170x170)
-                   var discordItem = new LauncherCardItem
-                    {
-                      Name = "Discord",
-                    ImagePath = "ms-appx:///Assets/discord.png",
-                     TapAction = (s, e) => { MakeSelfNonTopmost(); StartDiscord(); PlayActivationSound(); }
-                    };
-                    var discordCard = CreateLauncherCard(discordItem);
-                   LauncherAreaPanel.Children.Add(discordCard);
-                   _launcherAreaButtons.Add(discordCard);
-                }
-                else
-                {
-                   
-
-                }
-            }
-            catch
-            {
-                var discordItem = new LauncherCardItem
-                {
-                    Name = "Discord",
-                    ImagePath = "ms-appx:///Assets/discord.png",
-                    TapAction = (s, e) => { MakeSelfNonTopmost(); StartDiscord(); PlayActivationSound(); }
+                    Name = _featuredGameProcessData.GameInfo.DisplayName ?? _featuredGameProcessData.ProductName ?? "Game",
+                    Subtitle = "Game",
+                    Description = "Aktives Spiel direkt nach vorne holen.",
+                    ImagePath = null,
+                    ExePath = _featuredGameProcessData.ExePath,
+                    Hwnd = _featuredGameProcessData.Hwnd,
+                    Proc = _featuredGameProcessData.Proc,
+                    GameInfo = _featuredGameProcessData.GameInfo,
+                    TapAction = (s, e) => SwitchToFeaturedGame()
                 };
-                var discordCard = CreateLauncherCard(discordItem);
-                LauncherAreaPanel.Children.Add(discordCard);
-                _launcherAreaButtons.Add(discordCard);
 
-                AppSettings.Save("show_discord", true);
+                var gameCard = CreateLauncherCard(gameLauncherItem);
+                LauncherAreaPanel.Children.Add(gameCard);
+                _launcherAreaButtons.Add(gameCard);
             }
-            // 3. DIE 5 CUSTOM CARDS (Alle klein: 170x170)
-            for (int i = 1; i <= 5; i++)
-            {
-                try
-                {
-                    string exePath = AppSettings.Load<string>($"button{i}link");
-                    string imagePath = AppSettings.Load<string>($"button{i}image");
-                    string args = AppSettings.Load<string>($"button{i}args") ?? "";
 
-                    if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
-                    {
-                        var customItem = new LauncherCardItem
-                        {
-                            Name = $"App {i}",
-                            ImagePath = imagePath,
-                            TapAction = (s, e) =>
-                            {
-                                MakeSelfNonTopmost();
-                                Process.Start(new ProcessStartInfo(exePath) { Arguments = args, UseShellExecute = true });
-                                PlayActivationSound();
-                            }
-                        };
-                        var customCard = CreateLauncherCard(customItem);
-                        LauncherAreaPanel.Children.Add(customCard);
-                        _launcherAreaButtons.Add(customCard);
-                    }
-                }
-                catch { }
+            if (_launcherAreaButtons.Count == 0)
+            {
+                _selectedLauncherAreaIndex = 0;
+            }
+            else if (_selectedLauncherAreaIndex >= _launcherAreaButtons.Count)
+            {
+                _selectedLauncherAreaIndex = _launcherAreaButtons.Count - 1;
             }
         }
 
@@ -6912,75 +8347,395 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// </summary>
         private Border CreateLauncherCard(LauncherCardItem item)
         {
+            double scale = _currentShellLayoutScale;
             var contentGrid = new Grid();
 
-            // LOGIK: Ist es der Haupt-Launcher?
-            bool isMainLauncher = (item.Name == "Main Launcher");
+            bool isMainLauncher = item.IsPrimary;
+            bool isGameCard = item.GameInfo?.IsGame == true;
+            var launcherBackgroundSource = isMainLauncher
+                ? new BitmapImage(new Uri("ms-appx:///Assets/steam_launcher_background.jpg"))
+                : null;
 
-            // 1. DIE GLASS-SCHICHT (Clear Glass Look)
-            var glassEffect = new Border
+            var loadedImage = new Image
             {
-                Name = "GlassBase",
-                CornerRadius = new CornerRadius(15),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
-                BorderThickness = new Thickness(1.0),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255))
-            };
-
-            // 2. TITEL-BEREICH (Oben)
-            var titleBlurLayer = new Border
-            {
-                VerticalAlignment = VerticalAlignment.Top,
-                Height = isMainLauncher ? 55 : 40, // Kleinerer Balken für Apps
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(130, 20, 20, 20)),
-                CornerRadius = new CornerRadius(15, 15, 0, 0),
-                Child = new TextBlock
-                {
-                    Text = item.Name.ToUpper(),
-                    FontSize = isMainLauncher ? 12 : 10, // Kleinere Schrift für Apps
-                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                    TextAlignment = TextAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(8, 0, 8, 0),
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    MaxLines = 1
-                }
-            };
-
-            // 3. ICON (Zentral)
-            var iconImage = new Image
-            {
-                Source = new BitmapImage(new Uri(item.ImagePath ?? "ms-appx:///Assets/game.png")),
-                Width = isMainLauncher ? 95 : 65,  // Deutlicher Größenunterschied
-                Height = isMainLauncher ? 95 : 65,
-                Stretch = Stretch.Uniform,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, isMainLauncher ? 20 : 10, 0, 0),
+                Name = "LoadedImage",
+                Stretch = Stretch.UniformToFill,
+                Opacity = 0.0,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
                 RenderTransform = new CompositeTransform()
             };
 
+            var launcherBackgroundImage = isMainLauncher
+                ? new Image
+                {
+                    Source = launcherBackgroundSource,
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    IsHitTestVisible = false
+                }
+                : null;
+
+            var artworkFrame = new Border
+            {
+                Margin = new Thickness(5 * scale),
+                CornerRadius = new CornerRadius(21 * scale),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 0, 0, 0)),
+                Child = isMainLauncher ? launcherBackgroundImage : loadedImage
+            };
+
+            var ambientGlow = new Border
+            {
+                CornerRadius = new CornerRadius(24 * scale),
+                Background = new SolidColorBrush(GetThemeAccentColor((byte)(isMainLauncher ? 72 : 44)))
+            };
+
+            var glassEffect = new Border
+            {
+                Name = "GlassBase",
+                CornerRadius = new CornerRadius(24 * scale),
+                BorderBrush = new SolidColorBrush(GetThemeAccentColor(58)),
+                BorderThickness = new Thickness(0.9),
+                Background = new SolidColorBrush(GetThemeCardTintColor(GetThemeGlassAlpha(
+                    (byte)(isMainLauncher ? 8 : 20),
+                    (byte)(isMainLauncher ? 14 : 28),
+                    (byte)(isMainLauncher ? 22 : 48))))
+            };
+
+            var tileSection = new TextBlock
+            {
+                Text = (item.Subtitle ?? (isMainLauncher ? "Launcher" : "Pinned App")).ToUpperInvariant(),
+                FontSize = 12 * scale,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(190, 230, 242, 255)),
+                CharacterSpacing = (int)(80 * scale),
+                Margin = new Thickness(20 * scale, 28 * scale, 20 * scale, 0),
+                VerticalAlignment = VerticalAlignment.Top
+            };
+
+            var titleText = new TextBlock
+            {
+                Text = item.Name.ToUpperInvariant(),
+                FontSize = (isMainLauncher ? 20 : 15) * scale,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Bahnschrift"),
+                TextAlignment = TextAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1
+            };
+
+            var titlePlate = new Border
+            {
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Height = (isMainLauncher ? 58 : 54) * scale,
+                Margin = new Thickness(16 * scale, 0, 16 * scale, 14 * scale),
+                Padding = new Thickness(16 * scale, 10 * scale, 16 * scale, 10 * scale),
+                Background = new SolidColorBrush(GetThemeCardTintColor(176)),
+                CornerRadius = new CornerRadius(18 * scale),
+                Child = titleText
+            };
+
+            BitmapImage defaultIcon = !string.IsNullOrWhiteSpace(item.ImagePath)
+                ? new BitmapImage(new Uri(item.ImagePath))
+                : GetAppIconAsBitmapImage(item.ExePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png"));
+
+            var iconImage = new Image
+            {
+                Source = defaultIcon,
+                Width = (isMainLauncher ? 104 : 72) * scale,
+                Height = (isMainLauncher ? 104 : 72) * scale,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, (isMainLauncher ? 10 : 4) * scale, 0, (isMainLauncher ? 12 : 10) * scale),
+                RenderTransform = new CompositeTransform()
+            };
+
+            contentGrid.Children.Add(ambientGlow);
+            contentGrid.Children.Add(artworkFrame);
             contentGrid.Children.Add(glassEffect);
-            contentGrid.Children.Add(titleBlurLayer);
-            contentGrid.Children.Add(iconImage);
+            AddBubbleReflectionLayers(contentGrid, scale, isMainLauncher);
+            contentGrid.Children.Add(tileSection);
+            if (!isMainLauncher)
+            {
+                contentGrid.Children.Add(iconImage);
+            }
+            if (!isMainLauncher && !isGameCard)
+            {
+                contentGrid.Children.Add(titlePlate);
+            }
 
             var cardBorder = new Border
             {
-                // MASSE: Launcher groß, Rest klein
-                Width = isMainLauncher ? 250 : 170,
-                Height = isMainLauncher ? 250 : 170,
-                CornerRadius = new CornerRadius(15),
-                Margin = new Thickness(6, 0, 6, 0), // Näher zusammenrücken
+                Width = (isMainLauncher ? 232 : 176) * scale,
+                Height = (isMainLauncher ? 256 : 188) * scale,
+                CornerRadius = new CornerRadius(24 * scale),
+                Margin = new Thickness(6 * scale, 0, 12 * scale, 0),
+                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(2),
                 Child = contentGrid,
                 Tag = item,
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
                 RenderTransform = new CompositeTransform()
             };
 
-            cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
+            if (!isMainLauncher)
+            {
+                cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
+            }
             if (item.TapAction != null) cardBorder.Tapped += (s, e) => item.TapAction(s, e);
 
+            if (item.GameInfo?.IsGame == true || (!item.IsPrimary && !string.IsNullOrWhiteSpace(item.ExePath)))
+            {
+                LoadCardImageAsync(cardBorder, loadedImage, iconImage, titleText, item.Name, item.ExePath, item.Proc, item.GameInfo);
+            }
+
             return cardBorder;
+        }
+
+        private void AddBubbleReflectionLayers(Grid contentGrid, double scale, bool isPrimary)
+        {
+            double innerRadius = 21 * scale;
+
+            var sheen = new Border
+            {
+                Name = "BubbleSheen",
+                Margin = new Thickness(5 * scale),
+                CornerRadius = new CornerRadius(innerRadius),
+                Background = CreateBubbleSheenBrush(0, true, false),
+                Opacity = 0,
+                IsHitTestVisible = false,
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new CompositeTransform()
+            };
+
+            var edgeLight = new Border
+            {
+                Name = "BubbleEdgeLight",
+                Margin = new Thickness(8 * scale),
+                CornerRadius = new CornerRadius(innerRadius),
+                BorderThickness = new Thickness(0),
+                Background = CreateBubbleEdgeBrush(0, true, false),
+                Opacity = 0,
+                IsHitTestVisible = false
+            };
+
+            var lowerReflection = new Border
+            {
+                Name = "BubbleLowerReflection",
+                Margin = new Thickness(14 * scale, 0, 14 * scale, 8 * scale),
+                Height = (isPrimary ? 44 : 34) * scale,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                CornerRadius = new CornerRadius(innerRadius),
+                Background = new LinearGradientBrush
+                {
+                    StartPoint = new Windows.Foundation.Point(0, 0),
+                    EndPoint = new Windows.Foundation.Point(0, 1),
+                    GradientStops =
+                    {
+                        new GradientStop { Offset = 0.0, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                        new GradientStop { Offset = 0.28, Color = Windows.UI.Color.FromArgb(6, 255, 255, 255) },
+                        new GradientStop { Offset = 0.64, Color = Windows.UI.Color.FromArgb(28, 255, 255, 255) },
+                        new GradientStop { Offset = 1.0, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                    }
+                },
+                Opacity = 0,
+                IsHitTestVisible = false
+            };
+
+            var sideGlint = new Border
+            {
+                Name = "BubbleSideGlint",
+                Width = Math.Max(2.0, (isPrimary ? 3.4 : 2.6) * scale),
+                Height = (isPrimary ? 154 : 112) * scale,
+                Margin = new Thickness(10 * scale, 18 * scale, 10 * scale, 18 * scale),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                CornerRadius = new CornerRadius(3 * scale),
+                Background = CreateBubbleSideGlintBrush(1, false),
+                Opacity = 0,
+                IsHitTestVisible = false,
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new CompositeTransform()
+            };
+
+            var topGlint = new Border
+            {
+                Name = "BubbleTopGlint",
+                Height = Math.Max(2.0, (isPrimary ? 3.6 : 3.0) * scale),
+                Margin = new Thickness(25 * scale, 15 * scale, 25 * scale, 0),
+                VerticalAlignment = VerticalAlignment.Top,
+                CornerRadius = new CornerRadius(3 * scale),
+                Background = CreateBubbleTopGlintBrush(0, false),
+                Opacity = 0,
+                IsHitTestVisible = false,
+                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                RenderTransform = new CompositeTransform()
+            };
+
+            var cornerGlint = new Border
+            {
+                Name = "BubbleCornerGlint",
+                Width = (isPrimary ? 40 : 30) * scale,
+                Height = Math.Max(2.0, 3 * scale),
+                Margin = new Thickness(12 * scale, 18 * scale, 12 * scale, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                CornerRadius = new CornerRadius(3 * scale),
+                Background = CreateBubbleCornerGlintBrush(1, false),
+                Opacity = 0,
+                IsHitTestVisible = false,
+                RenderTransformOrigin = new Windows.Foundation.Point(0.0, 0.5),
+                RenderTransform = new CompositeTransform { Rotation = 10 }
+            };
+
+            contentGrid.Children.Add(sheen);
+            contentGrid.Children.Add(lowerReflection);
+            contentGrid.Children.Add(edgeLight);
+            contentGrid.Children.Add(sideGlint);
+            contentGrid.Children.Add(cornerGlint);
+            contentGrid.Children.Add(topGlint);
+        }
+
+        private LinearGradientBrush CreateBubbleEdgeBrush(int lightDirection, bool isSelected, bool isNeighborHighlight)
+        {
+            byte hotAlpha = (byte)(isNeighborHighlight ? 82 : isSelected ? 36 : 46);
+            byte midAlpha = (byte)(isNeighborHighlight ? 54 : isSelected ? 22 : 30);
+            byte accentAlpha = (byte)(isNeighborHighlight ? 62 : isSelected ? 26 : 34);
+
+            Windows.Foundation.Point start;
+            Windows.Foundation.Point end;
+
+            if (lightDirection > 0)
+            {
+                start = new Windows.Foundation.Point(0, 0.15);
+                end = new Windows.Foundation.Point(1, 0.85);
+            }
+            else if (lightDirection < 0)
+            {
+                start = new Windows.Foundation.Point(1, 0.15);
+                end = new Windows.Foundation.Point(0, 0.85);
+            }
+            else
+            {
+                start = new Windows.Foundation.Point(0, 0);
+                end = new Windows.Foundation.Point(1, 1);
+            }
+
+            return new LinearGradientBrush
+            {
+                StartPoint = start,
+                EndPoint = end,
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.20, Color = Windows.UI.Color.FromArgb(6, 255, 255, 255) },
+                    new GradientStop { Offset = 0.40, Color = Windows.UI.Color.FromArgb(hotAlpha, 255, 255, 255) },
+                    new GradientStop { Offset = 0.56, Color = GetThemeAccentColor(accentAlpha) },
+                    new GradientStop { Offset = 0.76, Color = Windows.UI.Color.FromArgb(midAlpha, 235, 248, 255) },
+                    new GradientStop { Offset = 0.92, Color = Windows.UI.Color.FromArgb(4, 255, 255, 255) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateBubbleSheenBrush(int lightDirection, bool isSelected, bool isNeighborHighlight)
+        {
+            byte bright = (byte)(isNeighborHighlight ? 74 : isSelected ? 30 : 40);
+            byte accent = (byte)(isNeighborHighlight ? 58 : isSelected ? 22 : 28);
+
+            Windows.Foundation.Point start = lightDirection < 0
+                ? new Windows.Foundation.Point(1, 0)
+                : new Windows.Foundation.Point(0, 0);
+            Windows.Foundation.Point end = lightDirection < 0
+                ? new Windows.Foundation.Point(0, 1)
+                : new Windows.Foundation.Point(1, 1);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = start,
+                EndPoint = end,
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.22, Color = Windows.UI.Color.FromArgb(4, 255, 255, 255) },
+                    new GradientStop { Offset = 0.43, Color = Windows.UI.Color.FromArgb(bright, 255, 255, 255) },
+                    new GradientStop { Offset = 0.58, Color = GetThemeAccentColor(accent) },
+                    new GradientStop { Offset = 0.82, Color = Windows.UI.Color.FromArgb(4, 255, 255, 255) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateBubbleSideGlintBrush(int lightDirection, bool isNeighborHighlight)
+        {
+            byte hot = (byte)(isNeighborHighlight ? 210 : 118);
+            byte soft = (byte)(isNeighborHighlight ? 72 : 38);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(0, 1),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.18, Color = Windows.UI.Color.FromArgb(8, 255, 255, 255) },
+                    new GradientStop { Offset = 0.38, Color = Windows.UI.Color.FromArgb(soft, 255, 255, 255) },
+                    new GradientStop { Offset = 0.50, Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = 0.62, Color = GetThemeAccentColor((byte)Math.Clamp(soft + 16, 0, 130)) },
+                    new GradientStop { Offset = 0.82, Color = Windows.UI.Color.FromArgb(8, 255, 255, 255) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateBubbleCornerGlintBrush(int lightDirection, bool isNeighborHighlight)
+        {
+            byte hot = (byte)(isNeighborHighlight ? 178 : 104);
+            byte soft = (byte)(isNeighborHighlight ? 50 : 26);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = lightDirection < 0
+                    ? new Windows.Foundation.Point(1, 0)
+                    : new Windows.Foundation.Point(0, 0),
+                EndPoint = lightDirection < 0
+                    ? new Windows.Foundation.Point(0, 0)
+                    : new Windows.Foundation.Point(1, 0),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.22, Color = Windows.UI.Color.FromArgb(soft, 255, 255, 255) },
+                    new GradientStop { Offset = 0.52, Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = 0.76, Color = GetThemeAccentColor((byte)Math.Clamp(soft + 14, 0, 100)) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateBubbleTopGlintBrush(int lightDirection, bool isNeighborHighlight)
+        {
+            byte hot = (byte)(isNeighborHighlight ? 120 : 72);
+            byte accent = (byte)(isNeighborHighlight ? 56 : 32);
+
+            double center = lightDirection < 0 ? 0.78 : lightDirection > 0 ? 0.22 : 0.5;
+
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 0),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = Math.Max(0, center - 0.28), Color = Windows.UI.Color.FromArgb(6, 255, 255, 255) },
+                    new GradientStop { Offset = Math.Max(0, center - 0.08), Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = Math.Min(1, center + 0.08), Color = GetThemeAccentColor(accent) },
+                    new GradientStop { Offset = Math.Min(1, center + 0.28), Color = Windows.UI.Color.FromArgb(5, 255, 255, 255) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
         }
 
 
@@ -6995,7 +8750,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _taskRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _taskRefreshTimer.Tick += async (s, e) =>
             {
-                if (_isRefreshRunning || !IsWindowInForeground()) return; // Scanne nur, wenn GCM offen ist!
+                if (_isRefreshRunning || !_isShellUiReady || !IsWindowInForeground()) return; // Scanne nur, wenn GCM offen ist!
 
                 _isRefreshRunning = true;
                 await RefreshAppListAsync();
@@ -7185,12 +8940,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Tries to find a Steam AppID by searching all local manifest files
         /// for a matching game name (window title). Used for Anti-Cheat processes.
         /// </summary>
-        private async Task<string> FindAppIdFromGameNameLocally(string gameName)
+        private string FindAppIdFromGameNameLocallySync(string gameName)
         {
             Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: Searching for AppID for '{gameName}'...");
 
             // Check cache first
             string cleanedName = CleanGameNameForSearch(gameName);
+            if (string.IsNullOrWhiteSpace(cleanedName))
+            {
+                return null;
+            }
+
             if (_localGameNameCache.TryGetValue(cleanedName, out string cachedAppId))
             {
                 Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: Found AppID '{cachedAppId ?? "null"}' in name cache.");
@@ -7200,7 +8960,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Get all library paths (cached)
             if (_steamLibraryPathsCache == null)
             {
-                _steamLibraryPathsCache = await Task.Run(() => GetAllSteamLibraryPaths());
+                _steamLibraryPathsCache = GetAllSteamLibraryPaths();
             }
 
             if (_steamLibraryPathsCache == null || !_steamLibraryPathsCache.Any())
@@ -7219,7 +8979,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     foreach (var file in Directory.EnumerateFiles(libPath, "appmanifest_*.acf"))
                     {
-                        string content = await File.ReadAllTextAsync(file);
+                        string content = File.ReadAllText(file);
 
                         // Regex to find the "name" "Some Game Name"
                         var nameMatch = Regex.Match(content, "\"name\"\\s+\"([^\"]+)\"");
@@ -7259,6 +9019,499 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Logger.Log($"[DEBUG] FindAppIdFromGameNameLocally: No local manifest match found for '{cleanedName}'.");
             _localGameNameCache[cleanedName] = null; // Add null to cache to prevent re-scan
             return null;
+        }
+
+        private Task<string> FindAppIdFromGameNameLocally(string gameName)
+        {
+            return Task.Run(() => FindAppIdFromGameNameLocallySync(gameName));
+        }
+
+        private static bool ContainsKeyword(string text, IEnumerable<string> keywords)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private string ResolveGameDisplayName(string windowTitle, string exePath, Process proc)
+        {
+            string cleanedTitle = CleanGameNameForSearch(windowTitle);
+            if (!string.IsNullOrWhiteSpace(cleanedTitle) && !ContainsKeyword(cleanedTitle, _nonGameKeywords))
+            {
+                return cleanedTitle;
+            }
+
+            if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+            {
+                try
+                {
+                    var versionInfo = FileVersionInfo.GetVersionInfo(exePath);
+                    if (!string.IsNullOrWhiteSpace(versionInfo.ProductName) && !ContainsKeyword(versionInfo.ProductName, _nonGameKeywords))
+                    {
+                        return CleanGameNameForSearch(versionInfo.ProductName);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(versionInfo.FileDescription) && !ContainsKeyword(versionInfo.FileDescription, _nonGameKeywords))
+                    {
+                        return CleanGameNameForSearch(versionInfo.FileDescription);
+                    }
+                }
+                catch { }
+
+                return Path.GetFileNameWithoutExtension(exePath);
+            }
+
+            if (proc != null)
+            {
+                try
+                {
+                    return proc.ProcessName;
+                }
+                catch { }
+            }
+
+            return cleanedTitle;
+        }
+
+        private string BuildGameResolutionCacheKey(string windowTitle, string exePath, Process proc)
+        {
+            if (!string.IsNullOrWhiteSpace(exePath))
+            {
+                string cleanedTitleForKey = CleanGameNameForSearch(windowTitle);
+                if (!string.IsNullOrWhiteSpace(cleanedTitleForKey))
+                {
+                    return $"{exePath.Trim()}|{cleanedTitleForKey.ToLowerInvariant()}";
+                }
+
+                return exePath.Trim();
+            }
+
+            if (proc != null)
+            {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(proc.ProcessName))
+                    {
+                        return $"proc:{proc.ProcessName.Trim().ToLowerInvariant()}";
+                    }
+                }
+                catch { }
+            }
+
+            string cleanedTitle = CleanGameNameForSearch(windowTitle);
+            return $"title:{cleanedTitle.ToLowerInvariant()}";
+        }
+
+        private string GetProcessLineageCacheKey(Process proc)
+        {
+            if (proc == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return $"{proc.Id}:{proc.StartTime.ToUniversalTime().Ticks}";
+            }
+            catch
+            {
+                return $"pid:{proc.Id}";
+            }
+        }
+
+        private IReadOnlyList<string> GetProcessLineage(Process proc)
+        {
+            if (proc == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            string cacheKey = GetProcessLineageCacheKey(proc);
+            if (_processLineageCache.TryGetValue(cacheKey, out IReadOnlyList<string> cachedLineage))
+            {
+                return cachedLineage;
+            }
+
+            var lineage = new List<string>();
+
+            try
+            {
+                int currentPid = proc.Id;
+
+                for (int depth = 0; depth < 6 && currentPid > 0; depth++)
+                {
+                    using var searcher = new ManagementObjectSearcher(
+                        $"SELECT ParentProcessId, Name FROM Win32_Process WHERE ProcessId = {currentPid}");
+
+                    var processObject = searcher.Get().Cast<ManagementObject>().FirstOrDefault();
+                    if (processObject == null)
+                    {
+                        break;
+                    }
+
+                    string processName = processObject["Name"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(processName))
+                    {
+                        lineage.Add(Path.GetFileNameWithoutExtension(processName).ToLowerInvariant());
+                    }
+
+                    currentPid = Convert.ToInt32(processObject["ParentProcessId"] ?? 0);
+                }
+            }
+            catch
+            {
+            }
+
+            _processLineageCache[cacheKey] = lineage;
+            return lineage;
+        }
+
+        private bool IsWindowLargeGameCandidate(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                GetWindowRect(hwnd, out RECT rect);
+
+                double width = Math.Max(0, rect.Right - rect.Left);
+                double height = Math.Max(0, rect.Bottom - rect.Top);
+                if (width < 640 || height < 360)
+                {
+                    return false;
+                }
+
+                double screenWidth = Math.Max(1, GetScreenWidth());
+                double screenHeight = Math.Max(1, GetScreenHeight());
+                double windowArea = width * height;
+                double screenArea = screenWidth * screenHeight;
+                double coverage = windowArea / screenArea;
+
+                return coverage >= 0.45 ||
+                       (width >= screenWidth * 0.80 && height >= screenHeight * 0.70);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool ShouldExcludeProcessWindow(string exeName, ResolvedGameInfo gameInfo)
+        {
+            if (string.IsNullOrWhiteSpace(exeName))
+            {
+                return false;
+            }
+
+            if (gameInfo?.IsGame == true &&
+                (exeName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+                 exeName.Equals("RuntimeBroker", StringComparison.OrdinalIgnoreCase) ||
+                 exeName.Equals("GameLaunchHelper", StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            if (_softExcludedProcessNames.Contains(exeName))
+            {
+                return gameInfo?.IsGame != true;
+            }
+
+            return _excludedProcessNames.Contains(exeName, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private ResolvedGameInfo ResolveGameInfo(Process proc, string windowTitle, string exePath, IntPtr hwnd)
+        {
+            string cacheKey = BuildGameResolutionCacheKey(windowTitle, exePath, proc);
+            if (_resolvedGameInfoCache.TryGetValue(cacheKey, out ResolvedGameInfo cachedInfo))
+            {
+                if (string.IsNullOrWhiteSpace(cachedInfo.DisplayName))
+                {
+                    cachedInfo.DisplayName = ResolveGameDisplayName(windowTitle, exePath, proc);
+                }
+
+                PopulateLocalSteamArtworkPaths(cachedInfo);
+                return cachedInfo;
+            }
+
+            string cleanedTitle = CleanGameNameForSearch(windowTitle);
+            string exeName = string.Empty;
+            string productName = string.Empty;
+            string fileDescription = string.Empty;
+
+            if (proc != null)
+            {
+                try { exeName = proc.ProcessName; } catch { }
+            }
+
+            if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+            {
+                try
+                {
+                    FileVersionInfo versionInfo = FileVersionInfo.GetVersionInfo(exePath);
+                    productName = versionInfo.ProductName ?? string.Empty;
+                    fileDescription = versionInfo.FileDescription ?? string.Empty;
+                }
+                catch
+                {
+                }
+            }
+
+            var info = new ResolvedGameInfo
+            {
+                CacheKey = cacheKey,
+                DisplayName = ResolveGameDisplayName(windowTitle, exePath, proc)
+            };
+
+            bool largeWindow = IsWindowLargeGameCandidate(hwnd);
+            string packageFullName = TryGetPackageFullName(proc);
+            bool uwpProcess = !string.IsNullOrWhiteSpace(packageFullName) || IsUwpProcess(proc);
+            bool pathSuggestsGame = !string.IsNullOrWhiteSpace(exePath) && _gamePathKeywords.Any(keyword => exePath.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            bool windowsStoreGameCandidate =
+                largeWindow &&
+                !string.IsNullOrWhiteSpace(exePath) &&
+                exePath.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase);
+            string stableArtworkKey = GetStableCacheKey(info.DisplayName ?? windowTitle, exePath, proc);
+            bool hasCachedArtwork = !string.IsNullOrWhiteSpace(FindCachedImageFile(stableArtworkKey));
+            bool titleLooksNonGame = ContainsKeyword(cleanedTitle, _nonGameKeywords) || ContainsKeyword(info.DisplayName, _nonGameKeywords);
+            bool exeLooksNonGame = ContainsKeyword(exeName, _nonGameKeywords) || ContainsKeyword(productName, _nonGameKeywords) || ContainsKeyword(fileDescription, _nonGameKeywords);
+            bool hardNonGameProcess = _hardNonGameProcessNames.Contains(exeName);
+            bool launcherShellLike = ContainsKeyword(cleanedTitle, _gameLauncherShellKeywords) ||
+                                     ContainsKeyword(info.DisplayName, _gameLauncherShellKeywords) ||
+                                     ContainsKeyword(exeName, _gameLauncherShellKeywords) ||
+                                     ContainsKeyword(fileDescription, _gameLauncherShellKeywords);
+            IReadOnlyList<string> lineage = GetProcessLineage(proc);
+            bool launchedFromSteam = lineage.Any(name => name.Equals("steam", StringComparison.OrdinalIgnoreCase) || name.Equals("steamwebhelper", StringComparison.OrdinalIgnoreCase));
+            bool launchedFromKnownGameClient = lineage.Any(name => _gameLauncherProcessNames.Contains(name));
+            bool launchedFromStoreBootstrap = lineage.Any(name => _softExcludedProcessNames.Contains(name));
+            bool packagedGameCandidate = uwpProcess && largeWindow && !titleLooksNonGame && !exeLooksNonGame;
+            bool steamLibraryApp = false;
+
+            var reasons = new List<string>();
+            int score = 0;
+
+            if (!string.IsNullOrWhiteSpace(exePath) && exePath.Contains(@"\steamapps\common\", StringComparison.OrdinalIgnoreCase))
+            {
+                string steamAppId = GetSteamAppIdFromExePath(exePath);
+                if (!string.IsNullOrWhiteSpace(steamAppId))
+                {
+                    info.SteamAppId = steamAppId;
+                    steamLibraryApp = true;
+                    score += 16;
+                    reasons.Add("steam-appid-from-path");
+                }
+            }
+
+            if (pathSuggestsGame)
+            {
+                score += 7;
+                reasons.Add("game-library-path");
+            }
+
+            if (windowsStoreGameCandidate || packagedGameCandidate)
+            {
+                score += 7;
+                reasons.Add("store-game-window");
+            }
+
+            if (launchedFromSteam)
+            {
+                score += 4;
+                reasons.Add("steam-lineage");
+            }
+
+            if (launchedFromKnownGameClient)
+            {
+                score += 4;
+                reasons.Add("game-client-lineage");
+            }
+
+            if (launchedFromStoreBootstrap)
+            {
+                score += 2;
+                reasons.Add("launcher-lineage");
+            }
+
+            if (hasCachedArtwork)
+            {
+                score += 6;
+                reasons.Add("cached-artwork");
+            }
+
+            if (largeWindow)
+            {
+                score += 3;
+                reasons.Add("large-window");
+            }
+
+            if (!titleLooksNonGame && !string.IsNullOrWhiteSpace(cleanedTitle))
+            {
+                score += 2;
+                reasons.Add("game-like-title");
+            }
+
+            if (!exeLooksNonGame && (!string.IsNullOrWhiteSpace(productName) || !string.IsNullOrWhiteSpace(fileDescription)))
+            {
+                score += 2;
+                reasons.Add("game-like-product");
+            }
+
+            if (launcherShellLike)
+            {
+                score -= 5;
+                reasons.Add("launcher-shell");
+            }
+
+            if (titleLooksNonGame)
+            {
+                score -= 4;
+                reasons.Add("non-game-title");
+            }
+
+            if (exeLooksNonGame)
+            {
+                score -= 7;
+                reasons.Add("non-game-product");
+            }
+
+            if (hardNonGameProcess)
+            {
+                score -= 24;
+                reasons.Add("hard-non-game-process");
+            }
+
+            if (ShouldExcludeProcessWindow(exeName, null) && !_softExcludedProcessNames.Contains(exeName))
+            {
+                score -= 10;
+                reasons.Add("excluded-process");
+            }
+
+            if (string.IsNullOrWhiteSpace(info.SteamAppId) && score >= 2)
+            {
+                string appIdFromTitle = FindAppIdFromGameNameLocallySync(info.DisplayName ?? cleanedTitle);
+                if (!string.IsNullOrWhiteSpace(appIdFromTitle))
+                {
+                    info.SteamAppId = appIdFromTitle;
+                    score += 8;
+                    reasons.Add("steam-appid-from-title");
+                }
+            }
+
+            bool hasSteamAppId = !string.IsNullOrWhiteSpace(info.SteamAppId);
+            bool hasStrongGameEvidence =
+                hasSteamAppId ||
+                steamLibraryApp ||
+                hasCachedArtwork ||
+                (pathSuggestsGame && !hardNonGameProcess && !exeLooksNonGame) ||
+                (packagedGameCandidate && !hardNonGameProcess) ||
+                (windowsStoreGameCandidate && !hardNonGameProcess && !titleLooksNonGame) ||
+                (launchedFromKnownGameClient && largeWindow && !hardNonGameProcess && !titleLooksNonGame && !exeLooksNonGame);
+
+            bool isProbablyLauncherOnly =
+                launcherShellLike &&
+                !hasSteamAppId &&
+                !pathSuggestsGame &&
+                !hasCachedArtwork &&
+                !(launchedFromKnownGameClient && largeWindow);
+
+            info.Score = score;
+            info.IsGame =
+                !hardNonGameProcess &&
+                !isProbablyLauncherOnly &&
+                hasStrongGameEvidence &&
+                (hasSteamAppId || score >= 6 || (largeWindow && (launchedFromSteam || launchedFromStoreBootstrap)));
+            info.DetectionSummary = string.Join(", ", reasons);
+
+            if (info.IsGame)
+            {
+                PopulateLocalSteamArtworkPaths(info);
+                if (!string.IsNullOrWhiteSpace(info.PosterImagePath))
+                {
+                    info.Score += 1;
+                }
+                if (!string.IsNullOrWhiteSpace(info.HeroImagePath))
+                {
+                    info.Score += 1;
+                }
+            }
+
+            _resolvedGameInfoCache[cacheKey] = info;
+            if (!string.IsNullOrWhiteSpace(exePath))
+            {
+                _resolvedGameInfoCache[exePath] = info;
+            }
+
+            return info;
+        }
+
+        private string GetFeaturedGameIdentity(ProcessData processData)
+        {
+            if (processData?.GameInfo == null || !processData.GameInfo.IsGame)
+            {
+                return string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(processData.GameInfo.SteamAppId))
+            {
+                return $"steam:{processData.GameInfo.SteamAppId}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(processData.ExePath))
+            {
+                return $"exe:{processData.ExePath}";
+            }
+
+            return $"hwnd:{processData.Hwnd}";
+        }
+
+        private string GetFeaturedGameDisplayName(ProcessData processData)
+        {
+            if (processData == null)
+            {
+                return "Unknown game";
+            }
+
+            string displayName = processData.GameInfo?.DisplayName;
+
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                displayName = processData.ProductName;
+            }
+
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                try
+                {
+                    displayName = processData.Proc?.ProcessName;
+                }
+                catch { }
+            }
+
+            return string.IsNullOrWhiteSpace(displayName) ? "Unknown game" : displayName.Trim();
+        }
+
+        private ProcessData SelectFeaturedGameProcessData(IEnumerable<ProcessData> processDataList)
+        {
+            if (processDataList == null)
+            {
+                return null;
+            }
+
+            string currentIdentity = GetFeaturedGameIdentity(_featuredGameProcessData);
+
+            return processDataList
+                .Where(data => data?.GameInfo?.IsGame == true)
+                .OrderByDescending(data => GetFeaturedGameIdentity(data) == currentIdentity)
+                .ThenByDescending(data => data.GameInfo?.Score ?? int.MinValue)
+                .ThenByDescending(data => !string.IsNullOrWhiteSpace(data.GameInfo?.SteamAppId))
+                .ThenByDescending(data => !string.IsNullOrWhiteSpace(data.GameInfo?.HeroImagePath))
+                .ThenByDescending(data => !string.IsNullOrWhiteSpace(data.GameInfo?.PosterImagePath))
+                .FirstOrDefault();
         }
         private async Task LoadFromSteamGridDbAsync(
             Border card,                // The main card
@@ -7378,40 +9631,298 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         // Die Fallback-Suche (Steam lokal -> Online) ausgelagert zur Übersicht
         private async void PerformFallbackSearch(
             Border card, Image img, Image icon, TextBlock txt,
-            string gameName, string exePath, string savePath)
+            string gameName, string exePath, Process proc, string savePath, ResolvedGameInfo gameInfo)
         {
-            // 1. Steam Lokal
-            if (!string.IsNullOrEmpty(exePath))
+            string imagePath = await ResolveAndCacheGameArtworkAsync(gameName, exePath, proc, gameInfo, savePath);
+            if (!string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath))
             {
-                string localPath = await FindLocalSteamImageAsync(exePath);
-                if (!string.IsNullOrEmpty(localPath))
+                await LoadImageToUiAsync(card, img, icon, txt, imagePath, gameInfo?.DisplayName);
+            }
+        }
+
+        private async Task<string> ResolveAndCacheGameArtworkAsync(
+            string gameName,
+            string exePath,
+            Process proc,
+            ResolvedGameInfo gameInfo,
+            string targetCachePath)
+        {
+            if (string.IsNullOrWhiteSpace(targetCachePath))
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(_imageCachePath);
+
+            if (File.Exists(targetCachePath) && new FileInfo(targetCachePath).Length > 0)
+            {
+                return targetCachePath;
+            }
+
+            string CopyLocalArtwork(string sourcePath)
+            {
+                if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
                 {
-                    try
-                    {
-                        File.Copy(localPath, savePath, true);
-                        await LoadImageToUiAsync(card, img, icon, txt, savePath, null);
-                        return;
-                    }
-                    catch { }
+                    return null;
+                }
+
+                try
+                {
+                    File.Copy(sourcePath, targetCachePath, true);
+                    InvalidateArtworkCacheLookup();
+                    return targetCachePath;
+                }
+                catch
+                {
+                    return null;
                 }
             }
 
-            // 2. Online (SteamGridDB)
-            if (_steamGridHelper != null && _steamGridHelper.IsApiKeySet)
-            {
-                // Schönen Namen suchen
-                string searchName = GetSmartSearchName(gameName, exePath);
+            PopulateLocalSteamArtworkPaths(gameInfo);
 
-                // Downloaden
-                await DownloadFromSteamGridDbAndCacheAsync(card, img, icon, txt, searchName, savePath);
+            string copiedSteamPoster = CopyLocalArtwork(gameInfo?.PosterImagePath);
+            if (!string.IsNullOrWhiteSpace(copiedSteamPoster))
+            {
+                return copiedSteamPoster;
+            }
+
+            if (!string.IsNullOrWhiteSpace(exePath))
+            {
+                string localSteamPath = await FindLocalSteamImageAsync(exePath);
+                string copiedLocalSteam = CopyLocalArtwork(localSteamPath);
+                if (!string.IsNullOrWhiteSpace(copiedLocalSteam))
+                {
+                    return copiedLocalSteam;
+                }
+            }
+
+            string steamAppId = gameInfo?.SteamAppId;
+            if (string.IsNullOrWhiteSpace(steamAppId))
+            {
+                steamAppId = await FindAppIdFromGameNameLocally(gameInfo?.DisplayName ?? gameName);
+                if (!string.IsNullOrWhiteSpace(steamAppId) && gameInfo != null)
+                {
+                    gameInfo.SteamAppId = steamAppId;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(steamAppId) &&
+                await TryDownloadFirstArtworkCandidateAsync(GetSteamArtworkCandidateUrls(steamAppId), targetCachePath))
+            {
+                return targetCachePath;
+            }
+
+            if (_steamGridHelper?.IsApiKeySet == true)
+            {
+                string searchName = gameInfo?.DisplayName ?? GetSmartSearchName(gameName, exePath);
+                string steamGridUrl = await ResolveSteamGridDbArtworkUrlAsync(searchName);
+                if (await TryDownloadImageUrlToCacheAsync(steamGridUrl, targetCachePath))
+                {
+                    return targetCachePath;
+                }
+            }
+
+            string steamStoreAppId = !string.IsNullOrWhiteSpace(steamAppId)
+                ? steamAppId
+                : await TryFindSteamStoreAppIdAsync(gameInfo?.DisplayName ?? gameName);
+
+            if (!string.IsNullOrWhiteSpace(steamStoreAppId))
+            {
+                if (gameInfo != null && string.IsNullOrWhiteSpace(gameInfo.SteamAppId))
+                {
+                    gameInfo.SteamAppId = steamStoreAppId;
+                }
+
+                if (await TryDownloadFirstArtworkCandidateAsync(GetSteamArtworkCandidateUrls(steamStoreAppId), targetCachePath))
+                {
+                    return targetCachePath;
+                }
+            }
+
+            foreach (string openFallbackUrl in await SearchCheapSharkArtworkUrlsAsync(gameInfo?.DisplayName ?? gameName))
+            {
+                if (await TryDownloadImageUrlToCacheAsync(openFallbackUrl, targetCachePath))
+                {
+                    return targetCachePath;
+                }
+            }
+
+            return null;
+        }
+
+        private async Task<string> ResolveSteamGridDbArtworkUrlAsync(string searchName)
+        {
+            if (_steamGridHelper?.IsApiKeySet != true || string.IsNullOrWhiteSpace(searchName))
+            {
+                return null;
+            }
+
+            try
+            {
+                string cleanedName = CleanGameNameForSearch(searchName);
+                SearchResult searchResult;
+
+                if (_gameIdCache.TryGetValue(cleanedName, out SearchResult cachedResult))
+                {
+                    searchResult = cachedResult;
+                }
+                else
+                {
+                    searchResult = await _steamGridHelper.SearchForGameIdAsync(cleanedName);
+                    _gameIdCache[cleanedName] = searchResult;
+                }
+
+                if (searchResult == null)
+                {
+                    return null;
+                }
+
+                double similarity = CalculateSimilarity(cleanedName, CleanGameNameForSearch(searchResult.name));
+                if (similarity < 0.4)
+                {
+                    return null;
+                }
+
+                return await _steamGridHelper.GetGridImageUrlAsync(searchResult.id);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Artwork] SteamGridDB resolve failed: {ex.Message}");
+                return null;
             }
         }
-        private void LoadCardImageAsync(Border card, Image loadedImageControl, Image defaultIconControl, TextBlock titleControl, string gameName, string exePath, Process proc)
+
+        private async Task<bool> TryDownloadFirstArtworkCandidateAsync(IEnumerable<string> urls, string targetCachePath)
+        {
+            if (urls == null)
+            {
+                return false;
+            }
+
+            foreach (string url in urls)
+            {
+                if (await TryDownloadImageUrlToCacheAsync(url, targetCachePath))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private async Task<bool> TryDownloadImageUrlToCacheAsync(string imageUrl, string targetCachePath)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl) || string.IsNullOrWhiteSpace(targetCachePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(targetCachePath));
+
+                using var client = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(8)
+                };
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
+
+                using HttpResponseMessage response = await client.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return false;
+                }
+
+                string mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+                if (!mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) &&
+                    !imageUrl.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) &&
+                    !imageUrl.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) &&
+                    !imageUrl.EndsWith(".png", StringComparison.OrdinalIgnoreCase) &&
+                    !imageUrl.EndsWith(".webp", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                byte[] data = await response.Content.ReadAsByteArrayAsync();
+                if (data.Length < 1024)
+                {
+                    return false;
+                }
+
+                string tempPath = $"{targetCachePath}.tmp";
+                await File.WriteAllBytesAsync(tempPath, data);
+                File.Move(tempPath, targetCachePath, true);
+                InvalidateArtworkCacheLookup();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Artwork] Download failed '{imageUrl}': {ex.Message}");
+                return false;
+            }
+        }
+
+        private void InvalidateArtworkCacheLookup()
+        {
+            _verifiedImageCache.Clear();
+            _lastCacheRefresh = DateTime.MinValue;
+        }
+
+        private async Task EnsureGameArtworkCachedAsync(ProcessData gameData)
+        {
+            if (gameData?.GameInfo?.IsGame != true)
+            {
+                return;
+            }
+
+            string stableKey = GetStableCacheKey(gameData.ProductName, gameData.ExePath, gameData.Proc);
+            if (string.IsNullOrWhiteSpace(stableKey) || !string.IsNullOrWhiteSpace(FindCachedImageFile(stableKey)))
+            {
+                return;
+            }
+
+            lock (_gameArtworkRequestsInFlight)
+            {
+                if (!_gameArtworkRequestsInFlight.Add(stableKey))
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                string displayName = GetFeaturedGameDisplayName(gameData);
+                ShowInAppNotification($"Preparing artwork: {displayName}");
+
+                string targetCachePath = Path.Combine(_imageCachePath, $"{stableKey}.jpg");
+                string resolvedPath = await ResolveAndCacheGameArtworkAsync(
+                    displayName,
+                    gameData.ExePath,
+                    gameData.Proc,
+                    gameData.GameInfo,
+                    targetCachePath);
+
+                if (!string.IsNullOrWhiteSpace(resolvedPath) && File.Exists(resolvedPath))
+                {
+                    ShowInAppNotification($"Artwork ready: {displayName}");
+                }
+            }
+            finally
+            {
+                lock (_gameArtworkRequestsInFlight)
+                {
+                    _gameArtworkRequestsInFlight.Remove(stableKey);
+                }
+            }
+        }
+        private void LoadCardImageAsync(Border card, Image loadedImageControl, Image defaultIconControl, TextBlock titleControl, string gameName, string exePath, Process proc, ResolvedGameInfo gameInfo = null)
         {
             if (!Directory.Exists(_imageCachePath)) Directory.CreateDirectory(_imageCachePath);
 
             Task.Run(async () =>
             {
+                ResolvedGameInfo resolvedGameInfo = gameInfo ?? ResolveGameInfo(proc, gameName, exePath, IntPtr.Zero);
+
                 // 1. Stabilen Namen generieren (z.B. "devenv", "deadspace3")
                 string stableKey = GetStableCacheKey(gameName, exePath, proc);
 
@@ -7428,15 +9939,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     // NEIN -> Kein Bild im Cache.
 
                     // WICHTIG: Ist es ein Spiel?
-                    if (IsLikelyGame(proc))
+                    if (resolvedGameInfo?.IsGame == true)
                     {
                         // Ja -> Suche online (SteamGridDB)
-                        string searchName = GetSmartSearchName(gameName, exePath);
+                        string searchName = resolvedGameInfo.DisplayName ?? GetSmartSearchName(gameName, exePath);
                         string savePath = Path.Combine(_imageCachePath, $"{stableKey}.jpg");
 
                         card.DispatcherQueue.TryEnqueue(() =>
                         {
-                            PerformFallbackSearch(card, loadedImageControl, defaultIconControl, titleControl, searchName, exePath, savePath);
+                            PerformFallbackSearch(card, loadedImageControl, defaultIconControl, titleControl, searchName, exePath, proc, savePath, resolvedGameInfo);
                         });
                     }
                     else
@@ -7490,6 +10001,313 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private async Task<string> DownloadHeroFromSteamGridDbAndCacheAsync(string searchName, string targetCachePath)
+        {
+            if (_steamGridHelper == null || !_steamGridHelper.IsApiKeySet || string.IsNullOrWhiteSpace(searchName))
+            {
+                return null;
+            }
+
+            try
+            {
+                var searchResult = await _steamGridHelper.SearchForGameIdAsync(searchName);
+                if (searchResult == null)
+                {
+                    return null;
+                }
+
+                double similarity = CalculateSimilarity(CleanGameNameForSearch(searchName), CleanGameNameForSearch(searchResult.name));
+                if (similarity < 0.4)
+                {
+                    return null;
+                }
+
+                string imageUrl = await _steamGridHelper.GetHeroImageUrlAsync(searchResult.id);
+                if (string.IsNullOrWhiteSpace(imageUrl))
+                {
+                    return null;
+                }
+
+                if (!File.Exists(targetCachePath))
+                {
+                    using var client = new HttpClient();
+                    byte[] data = await client.GetByteArrayAsync(imageUrl);
+                    await File.WriteAllBytesAsync(targetCachePath, data);
+                }
+
+                return targetCachePath;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Backdrop] SteamGridDB hero download failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        private async Task<SteamStoreBackdropInfo> GetSteamStoreBackdropInfoAsync(string steamAppId)
+        {
+            if (string.IsNullOrWhiteSpace(steamAppId))
+            {
+                return null;
+            }
+
+            if (_steamStoreBackdropCache.TryGetValue(steamAppId, out SteamStoreBackdropInfo cachedInfo))
+            {
+                return cachedInfo;
+            }
+
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
+
+                string json = await client.GetStringAsync($"https://store.steampowered.com/api/appdetails?appids={steamAppId}&l=en");
+                using JsonDocument doc = JsonDocument.Parse(json);
+
+                if (!doc.RootElement.TryGetProperty(steamAppId, out JsonElement appElement) ||
+                    !appElement.TryGetProperty("success", out JsonElement successElement) ||
+                    !successElement.GetBoolean() ||
+                    !appElement.TryGetProperty("data", out JsonElement dataElement))
+                {
+                    _steamStoreBackdropCache[steamAppId] = null;
+                    return null;
+                }
+
+                var info = new SteamStoreBackdropInfo();
+
+                if (dataElement.TryGetProperty("background_raw", out JsonElement backgroundRawElement))
+                {
+                    info.BackgroundRawUrl = backgroundRawElement.GetString();
+                }
+
+                if (dataElement.TryGetProperty("background", out JsonElement backgroundElement))
+                {
+                    info.BackgroundUrl = backgroundElement.GetString();
+                }
+
+                if (dataElement.TryGetProperty("screenshots", out JsonElement screenshotsElement) &&
+                    screenshotsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement screenshot in screenshotsElement.EnumerateArray())
+                    {
+                        if (screenshot.TryGetProperty("path_full", out JsonElement pathFullElement))
+                        {
+                            string screenshotUrl = pathFullElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(screenshotUrl))
+                            {
+                                info.ScreenshotUrl = screenshotUrl;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                _steamStoreBackdropCache[steamAppId] = info;
+                return info;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Backdrop] Steam store backdrop lookup failed: {ex.Message}");
+                _steamStoreBackdropCache[steamAppId] = null;
+                return null;
+            }
+        }
+
+        private async Task<string> DownloadBackdropUrlToCacheAsync(string imageUrl, string cacheKey)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl))
+            {
+                return null;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(_backdropCachePath);
+                string cachePath = GetBackdropCacheFilePath(cacheKey);
+                if (!File.Exists(cachePath))
+                {
+                    using var client = new HttpClient();
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("GCM/1.0");
+                    byte[] data = await client.GetByteArrayAsync(imageUrl);
+                    await File.WriteAllBytesAsync(cachePath, data);
+                }
+
+                return cachePath;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Backdrop] Failed to cache backdrop '{imageUrl}': {ex.Message}");
+                return null;
+            }
+        }
+
+        private async Task<string> ResolveFeaturedGameBackdropPathAsync(ProcessData featuredGame)
+        {
+            if (featuredGame?.GameInfo?.IsGame != true)
+            {
+                return null;
+            }
+
+            string cacheKey = $"{GetStableCacheKey(featuredGame.ProductName, featuredGame.ExePath, featuredGame.Proc)}_hero";
+            if (_gameBackdropCache.TryGetValue(cacheKey, out string cachedBackdropPath) && File.Exists(cachedBackdropPath))
+            {
+                return cachedBackdropPath;
+            }
+
+            if (_steamGridHelper?.IsApiKeySet == true)
+            {
+                string steamGridCachePath = GetBackdropCacheFilePath($"{cacheKey}_sgdb");
+                if (File.Exists(steamGridCachePath))
+                {
+                    _gameBackdropCache[cacheKey] = steamGridCachePath;
+                    return steamGridCachePath;
+                }
+
+                string downloadedHero = await DownloadHeroFromSteamGridDbAndCacheAsync(
+                    featuredGame.GameInfo.DisplayName ?? featuredGame.ProductName,
+                    steamGridCachePath);
+
+                if (!string.IsNullOrWhiteSpace(downloadedHero) && File.Exists(downloadedHero))
+                {
+                    _gameBackdropCache[cacheKey] = downloadedHero;
+                    return downloadedHero;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(featuredGame.GameInfo.SteamAppId))
+            {
+                SteamStoreBackdropInfo steamStoreInfo = await GetSteamStoreBackdropInfoAsync(featuredGame.GameInfo.SteamAppId);
+                if (steamStoreInfo != null)
+                {
+                    string storeBackdropPath =
+                        await DownloadBackdropUrlToCacheAsync(steamStoreInfo.BackgroundRawUrl, $"{cacheKey}_steam_bg_raw") ??
+                        await DownloadBackdropUrlToCacheAsync(steamStoreInfo.BackgroundUrl, $"{cacheKey}_steam_bg") ??
+                        await DownloadBackdropUrlToCacheAsync(steamStoreInfo.ScreenshotUrl, $"{cacheKey}_steam_ss0");
+
+                    if (!string.IsNullOrWhiteSpace(storeBackdropPath) && File.Exists(storeBackdropPath))
+                    {
+                        _gameBackdropCache[cacheKey] = storeBackdropPath;
+                        return storeBackdropPath;
+                    }
+                }
+            }
+
+            PopulateLocalSteamArtworkPaths(featuredGame.GameInfo);
+
+            if (!string.IsNullOrWhiteSpace(featuredGame.GameInfo.HeroImagePath) && File.Exists(featuredGame.GameInfo.HeroImagePath))
+            {
+                _gameBackdropCache[cacheKey] = featuredGame.GameInfo.HeroImagePath;
+                return featuredGame.GameInfo.HeroImagePath;
+            }
+
+            return null;
+        }
+
+        private async Task UpdateFeaturedGameBackdropAsync(ProcessData featuredGame)
+        {
+            int loadVersion = Interlocked.Increment(ref _activeGameBackdropLoadVersion);
+            string backdropIdentity = GetFeaturedGameIdentity(featuredGame);
+
+            if (string.IsNullOrWhiteSpace(backdropIdentity))
+            {
+                _activeGameBackdropIdentity = string.Empty;
+                DispatcherQueue.TryEnqueue(HideFeaturedGameBackdrop);
+                return;
+            }
+
+            if (string.Equals(_activeGameBackdropIdentity, backdropIdentity, StringComparison.OrdinalIgnoreCase) &&
+                GameBackgroundImage?.Visibility == Visibility.Visible)
+            {
+                return;
+            }
+
+            string backdropPath = await ResolveFeaturedGameBackdropPathAsync(featuredGame);
+            if (loadVersion != _activeGameBackdropLoadVersion)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(backdropPath) || !File.Exists(backdropPath))
+            {
+                _activeGameBackdropIdentity = string.Empty;
+                DispatcherQueue.TryEnqueue(HideFeaturedGameBackdrop);
+                return;
+            }
+
+            _activeGameBackdropIdentity = backdropIdentity;
+            await ApplyFeaturedGameBackdropAsync(backdropPath, loadVersion);
+        }
+
+        private async Task ApplyFeaturedGameBackdropAsync(string backdropPath, int loadVersion)
+        {
+            byte[] imageBytes;
+            try
+            {
+                imageBytes = await File.ReadAllBytesAsync(backdropPath);
+            }
+            catch
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                if (GameBackgroundImage == null || loadVersion != _activeGameBackdropLoadVersion)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var bitmap = new BitmapImage();
+                    using (var ms = new MemoryStream(imageBytes))
+                    {
+                        await bitmap.SetSourceAsync(ms.AsRandomAccessStream());
+                    }
+
+                    if (loadVersion != _activeGameBackdropLoadVersion)
+                    {
+                        return;
+                    }
+
+                    if (GameBackgroundImage.Visibility == Visibility.Visible && GameBackgroundImage.Opacity > 0.05)
+                    {
+                        AnimateOverlayOpacity(GameBackgroundImage, 0.0, false);
+                        await Task.Delay(220);
+                    }
+
+                    if (loadVersion != _activeGameBackdropLoadVersion)
+                    {
+                        return;
+                    }
+
+                    GameBackgroundImage.Source = bitmap;
+                    GameBackgroundImage.Visibility = Visibility.Visible;
+                    GameBackgroundImage.Opacity = 0.0;
+                    AnimateOverlayOpacity(GameBackgroundImage, 1.0, false);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Backdrop] Failed to apply featured backdrop: {ex.Message}");
+                }
+            });
+        }
+
+        private void HideFeaturedGameBackdrop()
+        {
+            if (GameBackgroundImage == null)
+            {
+                return;
+            }
+
+            if (GameBackgroundImage.Visibility == Visibility.Collapsed && GameBackgroundImage.Source == null)
+            {
+                return;
+            }
+
+            AnimateOverlayOpacity(GameBackgroundImage, 0.0, true);
+        }
+
         // --- HELPER METHODEN ---
 
         /// <summary>
@@ -7540,12 +10358,60 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             return Path.Combine(_imageCachePath, $"{key}.jpg");
         }
 
+        private string GetBackdropCacheFilePath(string key)
+        {
+            foreach (char c in Path.GetInvalidFileNameChars()) key = key.Replace(c, '_');
+            if (key.Length > 80) key = key.Substring(0, 80);
+            return Path.Combine(_backdropCachePath, $"{key}.jpg");
+        }
+
         private void UpdateUiFromData(List<ProcessData> processDataList)
         {
             if (processDataList == null) return;
 
+            _latestProcessData = processDataList.ToList();
+
+            if (!_isShellUiReady || MainContent == null || MainContent.Visibility != Visibility.Visible)
+            {
+                _deferredProcessData = _latestProcessData.ToList();
+                return;
+            }
+
+            ProcessData featuredGame = SelectFeaturedGameProcessData(processDataList);
+            string featuredIdentity = GetFeaturedGameIdentity(featuredGame);
+            string previousFeaturedIdentity = _featuredGameIdentity;
+
+            bool launcherNeedsRefresh = !string.Equals(_featuredGameIdentity, featuredIdentity, StringComparison.OrdinalIgnoreCase);
+            _featuredGameIdentity = featuredIdentity;
+            _featuredGameProcessData = featuredGame;
+
+            foreach (ProcessData gameData in processDataList.Where(data => data?.GameInfo?.IsGame == true))
+            {
+                _ = EnsureGameArtworkCachedAsync(gameData);
+            }
+
+            if (launcherNeedsRefresh)
+            {
+                if (featuredGame != null)
+                {
+                    ShowInAppNotification($"Game detected: {GetFeaturedGameDisplayName(featuredGame)}");
+                }
+                else if (!string.IsNullOrWhiteSpace(previousFeaturedIdentity))
+                {
+                    ShowInAppNotification("Game session ended.");
+                }
+
+                LoadDynamicLauncherCards();
+            }
+
+            List<ProcessData> visibleProcessCards = processDataList;
+            if (featuredGame != null)
+            {
+                visibleProcessCards = processDataList.Where(data => data.Hwnd != featuredGame.Hwnd).ToList();
+            }
+
             // Wir erstellen ein HashSet der NEUEN Handles für schnellen Abgleich
-            var scannedHwnds = processDataList.Select(p => p.Hwnd).ToHashSet();
+            var scannedHwnds = visibleProcessCards.Select(p => p.Hwnd).ToHashSet();
 
             // Wir erstellen ein HashSet der BEREITS ANGEZEIGTEN Handles
             var currentUiHwnds = _cardCache.Select(c => c.Hwnd).ToHashSet();
@@ -7574,20 +10440,21 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // ---------------------------------------------------------
             // 2. HINZUFÜGEN (Nur was wir NOCH NICHT haben)
             // ---------------------------------------------------------
-            foreach (var data in processDataList)
+            foreach (var data in visibleProcessCards)
             {
                 // DER FIX: Wenn wir das Fenster schon anzeigen -> ÜBERSPRINGEN (Fass es nicht an!)
                 // Das verhindert das Neuladen und Controller-Springen.
                 if (currentUiHwnds.Contains(data.Hwnd)) continue;
 
                 // Wenn wir hier sind, ist es ein NEUES Fenster. Erstelle Karte.
-                var border = CreateProgramCard(data.ProductName, data.ExePath, data.Proc, data.Hwnd);
+                var border = CreateProgramCard(data.ProductName, data.ExePath, data.Proc, data.Hwnd, data.GameInfo);
                 var entry = new ProgramCardEntry
                 {
                     ProductName = data.ProductName,
                     ExePath = data.ExePath,
                     Hwnd = data.Hwnd,
                     Proc = data.Proc,
+                    GameInfo = data.GameInfo,
                     Card = border
                 };
 
@@ -7601,7 +10468,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // ---------------------------------------------------------
             if (uiChanged)
             {
-                // Index im gültigen Bereich halten
                 if (_cardCache.Count > 0)
                 {
                     if (_selectedCardIndex >= _cardCache.Count) _selectedCardIndex = _cardCache.Count - 1;
@@ -7613,10 +10479,213 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
 
                 NoCardsMessage.Visibility = _cardCache.Any() ? Visibility.Collapsed : Visibility.Visible;
+                HighlightSelectedCard(skipScroll: true, forceAnimation: false);
             }
+
+            if (launcherNeedsRefresh && _currentFocusArea == FocusArea.Launcher)
+            {
+                UpdateVisualFocus();
+                return;
+            }
+
+            UpdateSelectionSurface();
         }
 
 
+
+        private LauncherCardItem SelectedLauncherItemOrNull()
+        {
+            if (_launcherAreaButtons == null || _selectedLauncherAreaIndex < 0 || _selectedLauncherAreaIndex >= _launcherAreaButtons.Count)
+            {
+                return null;
+            }
+
+            return _launcherAreaButtons[_selectedLauncherAreaIndex].Tag as LauncherCardItem;
+        }
+
+        private Border SelectedLauncherCardOrNull()
+        {
+            if (_launcherAreaButtons == null || _selectedLauncherAreaIndex < 0 || _selectedLauncherAreaIndex >= _launcherAreaButtons.Count)
+            {
+                return null;
+            }
+
+            return _launcherAreaButtons[_selectedLauncherAreaIndex];
+        }
+
+        private bool SelectedLauncherItemRepresentsGame()
+        {
+            return SelectedLauncherItemOrNull()?.GameInfo?.IsGame == true;
+        }
+
+        private ProgramCardEntry CreateProgramCardEntryFromLauncherItem(LauncherCardItem item, Border card)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            return new ProgramCardEntry
+            {
+                ProductName = item.Name,
+                ExePath = item.ExePath,
+                Hwnd = item.Hwnd,
+                Proc = item.Proc,
+                GameInfo = item.GameInfo,
+                Card = card
+            };
+        }
+
+        private ProgramCardEntry SelectedProgramCardEntryOrNull()
+        {
+            if (_cardCache == null || _selectedCardIndex < 0 || _selectedCardIndex >= _cardCache.Count)
+            {
+                return null;
+            }
+
+            return _cardCache[_selectedCardIndex];
+        }
+
+        private void EnsureSelectionSurfaceReferences()
+        {
+            if (_bottomLegendItemsHost != null &&
+                _bottomStatusText != null &&
+                _bottomStatusPopup != null &&
+                _bottomStatusPopupTransform != null)
+            {
+                return;
+            }
+
+            if (Content is not FrameworkElement root)
+            {
+                return;
+            }
+
+            _bottomLegendBar ??= root.FindName("BottomLegendBar") as Border;
+            _bottomLegendItemsHost ??= root.FindName("BottomLegendItemsHost") as StackPanel;
+            _bottomStatusPopup ??= root.FindName("BottomStatusPopup") as Border;
+            _bottomStatusPopupTransform ??= root.FindName("BottomStatusPopupTransform") as CompositeTransform;
+            _bottomStatusText ??= root.FindName("BottomStatusText") as TextBlock;
+        }
+
+        private void UpdateSelectionSurface()
+        {
+            EnsureSelectionSurfaceReferences();
+
+            if (_bottomLegendBar == null || _bottomLegendItemsHost == null)
+            {
+                return;
+            }
+
+            var hints = new List<LegendHint>();
+
+            switch (_currentFocusArea)
+            {
+                case FocusArea.StartupVideo:
+                    AddLegendHint(hints, "A", "Skip");
+                    AddLegendHint(hints, "B", "Skip");
+                    AddLegendHint(hints, "Start", "Skip");
+                    break;
+
+                case FocusArea.Launcher:
+                case FocusArea.QuickLaunchers:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Launch");
+                    if (_currentFocusArea == FocusArea.Launcher && SelectedLauncherItemRepresentsGame())
+                    {
+                        AddLegendHint(hints, "B", "Close");
+                        AddLegendHint(hints, "Start", "Options");
+                    }
+                    break;
+
+                case FocusArea.Cards:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Open");
+                    if (_cardCache.Any())
+                    {
+                        AddLegendHint(hints, "B", "Close");
+                        AddLegendHint(hints, "Start", "Options");
+                    }
+                    break;
+
+                case FocusArea.TopButtons:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Open");
+                    AddLegendHint(hints, "X", "Audio");
+                    AddLegendHint(hints, "DPadDown", "Back");
+                    break;
+
+                case FocusArea.SettingsMenu:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Select");
+                    AddLegendHint(hints, "X", "Back");
+                    AddLegendHint(hints, "B", "Close");
+                    break;
+
+                case FocusArea.AudioMenu:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Select");
+                    AddLegendHint(hints, "Y", "Master");
+                    AddLegendHint(hints, "LeftShoulder", "Prev Tab");
+                    AddLegendHint(hints, "RightShoulder", "Next Tab");
+                    AddLegendHint(hints, "B", "Close");
+                    break;
+
+                case FocusArea.PowerMenu:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Confirm");
+                    AddLegendHint(hints, "B", "Back");
+                    break;
+
+                case FocusArea.WindowsReturnConfirm:
+                    AddLegendHint(hints, "A", "Return to Windows");
+                    AddLegendHint(hints, "B", "Stay in GCM");
+                    break;
+
+                case FocusArea.AppLauncher:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "LeftShoulder", "Prev Tab");
+                    AddLegendHint(hints, "RightShoulder", "Next Tab");
+                    AddLegendHint(hints, "A", "Launch");
+                    AddLegendHint(hints, "X", "Favorite");
+                    AddLegendHint(hints, "B", "Close");
+                    break;
+
+                case FocusArea.ImageSelection:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Apply");
+                    AddLegendHint(hints, "B", "Back");
+                    break;
+
+                case FocusArea.GameOptions:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", ArtworkSearchPanel.Visibility == Visibility.Visible ? "Apply" : "Select");
+                    AddLegendHint(hints, "B", "Back");
+                    break;
+            }
+
+            string legendSignature = $"{_currentFocusArea}|{_lastActiveControllerType}|{string.Join("|", hints.Select(h => $"{h.IconKey}:{h.Label}"))}";
+            Visibility desiredVisibility = hints.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            bool needsRebuild =
+                _lastLegendSignature != legendSignature ||
+                _bottomLegendItemsHost.Children.Count != hints.Count ||
+                _bottomLegendBar.Visibility != desiredVisibility;
+
+            if (!needsRebuild)
+            {
+                return;
+            }
+
+            _bottomLegendItemsHost.Children.Clear();
+
+            foreach (LegendHint hint in hints)
+            {
+                _bottomLegendItemsHost.Children.Add(CreateLegendChip(hint.IconKey, hint.Label));
+            }
+
+            _bottomLegendBar.Visibility = desiredVisibility;
+            _lastLegendSignature = legendSignature;
+        }
 
         private class ProgramCardEntry
         {
@@ -7624,6 +10693,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             public string ExePath;
             public IntPtr Hwnd;
             public Process Proc;
+            public ResolvedGameInfo GameInfo;
             public Border Card;
         }
 
@@ -7667,59 +10737,72 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void ShowTaskManager()
         {
-            // Creates a timer for 10 seconds
-            var hideTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(1)
-            };
-            hideTimer.Tick += (s, e) =>
-            {
-                hideTimer.Stop();
-                ProgramCardPanel.Visibility = Visibility.Visible;
-
-                // ⏳ Wichtig: kleiner Delay mit DispatcherTimer
-                var focusTimer = new DispatcherTimer
-                {
-                    Interval = TimeSpan.FromMilliseconds(100)
-                };
-
-                focusTimer.Tick += (s2, e2) =>
-                {
-                    focusTimer.Stop();
-
-                    var firstCard = ProgramCardPanel.Children.OfType<StackPanel>().FirstOrDefault();
-                    if (firstCard?.Children.Count >= 3 && firstCard.Children[2] is StackPanel buttons)
-                    {
-                        if (buttons.Children[0] is Button launchButton)
-                        {
-                            Debug.WriteLine("→ Setze Fokus auf Launch-Button");
-                            launchButton.Focus(FocusState.Programmatic);
-                        }
-                    }
-
-                    LoadAllLauncherSettings();
-                };
-
-                focusTimer.Start();
-                StartAutoTaskRefresh();
-
-            };
-
-            hideTimer.Start();
+            App.StartupTrace("ShowTaskManager called.");
             StartClock();
+            _selectedCardIndex = 0;
 
-            DispatcherQueue.TryEnqueue(() =>
+            if (!_isShellUiReady)
             {
-                _selectedCardIndex = 0;
-                HighlightSelectedCard(); // beim Öffnen markieren
-            });
+                _taskManagerStartupPending = true;
+                _ = RefreshAppListAsync();
+                return;
+            }
 
-            DispatcherQueue.TryEnqueue(() =>
+            InitializeTaskManagerShell();
+        }
+
+        private void InitializeTaskManagerShell()
+        {
+            if (_hasTaskManagerShellInitialized || !_isShellUiReady)
             {
-                _selectedCardIndex = 0;
-                UpdateVisualFocus(); // Stellt sicher, dass die erste Karte hervorgehoben wird
-            });
+                return;
+            }
 
+            _hasTaskManagerShellInitialized = true;
+            _taskManagerStartupPending = false;
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    ProgramCardPanel.Visibility = Visibility.Visible;
+                    LoadAllLauncherSettings();
+                    ApplyResponsiveShellSizing();
+                    UpdateSelectionSurface();
+                    UpdateVisualFocus();
+                    StartAutoTaskRefresh();
+
+                    if (_deferredProcessData.Count > 0)
+                    {
+                        UpdateUiFromData(_deferredProcessData);
+                        _deferredProcessData = new List<ProcessData>();
+                    }
+                    else
+                    {
+                        await RefreshAppListAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _hasTaskManagerShellInitialized = false;
+                    Debug.WriteLine($"[TaskManager] Deferred startup failed: {ex.Message}");
+                }
+            });
+        }
+
+        private void MarkShellUiReady()
+        {
+            if (_isShellUiReady)
+            {
+                return;
+            }
+
+            _isShellUiReady = true;
+
+            if (_taskManagerStartupPending || !_hasTaskManagerShellInitialized)
+            {
+                InitializeTaskManagerShell();
+            }
         }
 
 
@@ -7924,6 +11007,33 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private static string TryGetPackageFullName(Process proc)
+        {
+            try
+            {
+                if (proc == null)
+                {
+                    return string.Empty;
+                }
+
+                int length = 0;
+                GetPackageFullName(proc.Handle, ref length, null);
+                if (length == 0)
+                {
+                    return string.Empty;
+                }
+
+                var sb = new StringBuilder(length);
+                return GetPackageFullName(proc.Handle, ref length, sb) == 0
+                    ? sb.ToString()
+                    : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private readonly HashSet<string> _nonGameKeywords = new(StringComparer.OrdinalIgnoreCase)
 {
     // -- Web Browsers --
@@ -7937,6 +11047,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     
     // -- Development --
     "Visual Studio", "VS Code", "Rider", "Android Studio", "Debugger",
+    "Codex", "Cursor", "Windows Terminal", "Command Prompt", "Git Bash",
+    "Node.js", "npm", "pnpm", "yarn",
     
     // -- Office & Productivity --
     "Word", "Excel", "PowerPoint", "Outlook", "OneNote", "Teams",
@@ -7961,9 +11073,80 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     "Dienst", "Host", "Service", "Server", "Launcher", "Runtime", "SDK", "CrashReporter"
 };
 
+        private readonly HashSet<string> _gameLauncherShellKeywords = new(StringComparer.OrdinalIgnoreCase)
+{
+    "launcher", "patcher", "updater", "bootstrap", "boot", "play", "start", "client", "anti-cheat"
+};
+
+        private readonly HashSet<string> _softExcludedProcessNames = new(StringComparer.OrdinalIgnoreCase)
+{
+    "EADesktop",
+    "epicgameslauncher",
+    "GalaxyClient",
+    "battle.net",
+    "UbisoftConnect",
+    "start_protected_game",
+    "GeForceNOW"
+};
+
+        private readonly HashSet<string> _gameLauncherProcessNames = new(StringComparer.OrdinalIgnoreCase)
+{
+    "steam",
+    "steamwebhelper",
+    "xbox",
+    "xboxapp",
+    "xboxpcapp",
+    "gamingservices",
+    "gamingservicesnet",
+    "gamelaunchhelper",
+    "gamebar",
+    "gamebarftserver",
+    "EADesktop",
+    "epicgameslauncher",
+    "GalaxyClient",
+    "battle.net",
+    "UbisoftConnect"
+};
+
+        private readonly HashSet<string> _hardNonGameProcessNames = new(StringComparer.OrdinalIgnoreCase)
+{
+    "codex",
+    "code",
+    "cursor",
+    "devenv",
+    "rider64",
+    "WindowsTerminal",
+    "wt",
+    "cmd",
+    "conhost",
+    "powershell",
+    "pwsh",
+    "node",
+    "npm",
+    "git-bash",
+    "notepad",
+    "notepad++",
+    "snippingtool",
+    "mspaint",
+    "spotify",
+    "discord",
+    "teams",
+    "slack",
+    "zoom",
+    "opera",
+    "opera_gx",
+    "chrome",
+    "msedge",
+    "firefox",
+    "brave"
+};
+
         private readonly List<string> _gamePathKeywords = new()
 {
     "\\steamapps\\common\\",
+    "\\XboxGames\\",
+    "\\MSIXVC\\",
+    "\\ModifiableWindowsApps\\",
     "\\GOG Galaxy\\Games\\",
     "\\Epic Games\\",
     "\\Ubisoft Game Launcher\\games\\",
@@ -7977,9 +11160,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// Creates a single, clickable launcher card based on the provided data.
         /// Now handles a custom image for the Main Launcher card with a "LAUNCHER" label.
         /// </summary>
-        private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd)
+        private Border CreateProgramCard(string name, string exePath, Process proc, IntPtr hwnd, ResolvedGameInfo gameInfo = null)
         {
+            double scale = _currentShellLayoutScale;
             var contentGrid = new Grid();
+            bool isGameCard = gameInfo?.IsGame == true;
 
             var loadedImage = new Image
             {
@@ -7987,78 +11172,111 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // UniformToFill ensures the image covers the whole card without distortion.
                 Stretch = Stretch.UniformToFill,
                 Opacity = 0.0,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
                 RenderTransform = new CompositeTransform()
             };
 
-            // 2. DIE GLASS-SCHICHT (Der "Clear Glass" Container)
+            var artworkFrame = new Border
+            {
+                Margin = new Thickness(5 * scale),
+                CornerRadius = new CornerRadius(21 * scale),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 0, 0, 0)),
+                Child = loadedImage
+            };
+
+            var ambientGlow = new Border
+            {
+                CornerRadius = new CornerRadius(24 * scale),
+                Background = new SolidColorBrush(GetThemeAccentColor(48))
+            };
+
             var glassEffect = new Border
             {
                 Name = "GlassBase",
-                CornerRadius = new CornerRadius(10),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255)),
-                BorderThickness = new Thickness(1.0),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255))
+                CornerRadius = new CornerRadius(24 * scale),
+                BorderBrush = new SolidColorBrush(GetThemeAccentColor(58)),
+                BorderThickness = new Thickness(0.9),
+                Background = new SolidColorBrush(GetThemeCardTintColor(GetThemeGlassAlpha(20, 28, 48)))
             };
 
-            // 3. TITEL-BEREICH (Exakt wie Launcher Card, aber etwas "Cleaner")
-            var titleBlurLayer = new Border
+            var titleChip = new TextBlock
             {
-                VerticalAlignment = VerticalAlignment.Top,
-                Height = 55,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(130, 20, 20, 20)),
-                CornerRadius = new CornerRadius(10, 10, 0, 0),
-                Child = new TextBlock
-                {
-                    Text = name.ToUpper(),
-                    FontSize = 12,
-                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                    TextAlignment = TextAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(12, 0, 12, 0),
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    MaxLines = 1
-                }
+                Text = gameInfo?.IsGame == true ? "GAME" : "LIVE PROCESS",
+                FontSize = 10.5 * scale,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(188, 232, 242, 255)),
+                CharacterSpacing = (int)(65 * scale),
+                Margin = new Thickness(20 * scale, 28 * scale, 20 * scale, 0),
+                VerticalAlignment = VerticalAlignment.Top
             };
 
-            // 4. ICON
             var iconImage = new Image
             {
                 Source = GetAppIconAsBitmapImage(exePath) ?? new BitmapImage(new Uri("ms-appx:///Assets/game.png")),
-                Width = 80,
-                Height = 80,
+                Width = 68 * scale,
+                Height = 68 * scale,
                 Stretch = Stretch.Uniform,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 20, 0, 0),
+                Margin = new Thickness(0, 0, 0, 10 * scale),
                 RenderTransform = new CompositeTransform()
             };
 
-            // 5. BANNER-BEREICH (Buttons)
-            var bannerContainer = new Border
+            var footerPlate = new Border
             {
-                Name = "ButtonBanner",
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Height = 50,
-                Opacity = 0,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(90, 10, 10, 10)),
-                CornerRadius = new CornerRadius(0, 0, 10, 10),
-                Child = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Spacing = 15 }
+                Height = 58 * scale,
+                Margin = new Thickness(16 * scale, 0, 16 * scale, 14 * scale),
+                Padding = new Thickness(15 * scale, 8 * scale, 15 * scale, 10 * scale),
+                Background = new SolidColorBrush(GetThemeCardTintColor(176)),
+                CornerRadius = new CornerRadius(18 * scale),
+                Child = new StackPanel
+                {
+                    Spacing = 1,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = name.ToUpperInvariant(),
+                            FontSize = 14 * scale,
+                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Bahnschrift"),
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            MaxLines = 1
+                        },
+                        new TextBlock
+                        {
+                            Text = proc?.ProcessName?.ToUpperInvariant() ?? "RUNNING NOW",
+                            FontSize = 10 * scale,
+                            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(188, 232, 242, 255)),
+                            CharacterSpacing = (int)(70 * scale),
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            MaxLines = 1
+                        }
+                    }
+                }
             };
-            SetupButtonLayout((StackPanel)bannerContainer.Child, "Xbox");
 
-            // Ebenen stapeln
-            contentGrid.Children.Add(loadedImage);
+            contentGrid.Children.Add(ambientGlow);
+            contentGrid.Children.Add(artworkFrame);
             contentGrid.Children.Add(glassEffect);
-            contentGrid.Children.Add(titleBlurLayer);
+            AddBubbleReflectionLayers(contentGrid, scale, false);
+            contentGrid.Children.Add(titleChip);
             contentGrid.Children.Add(iconImage);
-            contentGrid.Children.Add(bannerContainer);
+            if (!isGameCard)
+            {
+                contentGrid.Children.Add(footerPlate);
+            }
 
             var cardBorder = new Border
             {
-                Width = 220,
-                Height = 280,
-                CornerRadius = new CornerRadius(10),
-                Margin = new Thickness(10, 0, 10, 0),
+                Width = 192 * scale,
+                Height = 228 * scale,
+                CornerRadius = new CornerRadius(24 * scale),
+                Margin = new Thickness(0, 0, 12 * scale, 0),
+                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(2),
                 Child = contentGrid,
                 Tag = new CardTag { Process = proc, Hwnd = hwnd },
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
@@ -8068,8 +11286,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // --- EFFEKTE AKTIVIEREN ---
             cardBorder.Loaded += (s, e) => ApplyNativeWinUI3Blur(glassEffect);
 
-            // FIX: Hier übergeben wir jetzt 'proc' als letzten Parameter!
-            LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath, proc);
+            LoadCardImageAsync(cardBorder, loadedImage, iconImage, null, name, exePath, proc, gameInfo);
 
             return cardBorder;
         }
@@ -8100,167 +11317,84 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        private void SetupButtonLayout(StackPanel banner, string type)
+        private void ApplyRoundedCompositionClip(FrameworkElement target, double radius)
         {
-            banner.Children.Clear();
-
-            if (type == "Xbox")
-            {
-                // WICHTIG: Ersetze die Dateinamen durch deine exakten PNG-Namen!
-                banner.Children.Add(CreateImageButton("controllericons/xbox/a.png", "Play"));
-                banner.Children.Add(CreateImageButton("controllericons/xbox/b.png", "Close"));
-
-                // NEU: Das Start-Symbol ganz rechts für das Optionen-Menü
-                banner.Children.Add(CreateImageButton("controllericons/xbox/start.png", ""));
-            }
-            else // PlayStation Style
-            {
-                // WICHTIG: Ersetze die Dateinamen durch deine exakten PNG-Namen!
-                banner.Children.Add(CreateImageButton("controllericons/playstation/cross.png", "Play"));
-                banner.Children.Add(CreateImageButton("controllericons/playstation/circle.png", "Close"));
-
-                // NEU: Das Start-Symbol für PlayStation
-                banner.Children.Add(CreateImageButton("controllericons/playstation/start.png", ""));
-            }
+            // Disabled intentionally: WinUI composition clips can crash during startup
+            // when cards are created before the visual tree is fully ready.
         }
 
-        // Hilfsmethode, die das Bild aus dem relativen Pfad lädt und den Text daneben setzt
-        private StackPanel CreateImageButton(string relativeImagePath, string label)
+        private sealed class LegendHint
         {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-
-            // Das PNG laden (ms-appx:///Assets/ + der Pfad, den wir oben übergeben haben)
-            var iconImage = new Image
+            public LegendHint(string iconKey, string label)
             {
-                Source = new BitmapImage(new Uri($"ms-appx:///Assets/{relativeImagePath}")),
-                Width = 24,  // Passe diese Werte an, falls die Icons zu groß/klein sind
-                Height = 24,
+                IconKey = iconKey;
+                Label = label;
+            }
+
+            public string IconKey { get; }
+            public string Label { get; }
+        }
+
+        private string GetControllerIconAssetPath(string iconKey)
+        {
+            bool isPlayStation = _lastActiveControllerType == ControllerType.PlayStation;
+            string folder = isPlayStation ? "controllericons/playstation" : "controllericons/xbox";
+
+            return iconKey switch
+            {
+                "Navigate" => isPlayStation ? $"{folder}/T_P5_Dpad.png" : $"{folder}/T_X_Dpad.png",
+                "Guide" => isPlayStation ? $"{folder}/Start.png" : $"{folder}/xbox.png",
+                _ => $"{folder}/{iconKey}.png"
+            };
+        }
+
+        private Border CreateLegendChip(string iconKey, string label)
+        {
+            double scale = _currentShellLayoutScale;
+            var row = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8 * scale,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            row.Children.Add(new Image
+            {
+                Source = new BitmapImage(new Uri($"ms-appx:///Assets/{GetControllerIconAssetPath(iconKey)}")),
+                Width = 22 * scale,
+                Height = 22 * scale,
                 Stretch = Stretch.Uniform,
                 VerticalAlignment = VerticalAlignment.Center
-            };
+            });
 
-            var textBlock = new TextBlock
+            row.Children.Add(new TextBlock
             {
                 Text = label,
-                FontSize = 13,
+                FontSize = 13 * scale,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1
+            });
+
+            return new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(52, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14 * scale),
+                Padding = new Thickness(12 * scale, 8 * scale, 12 * scale, 8 * scale),
+                Child = row
             };
-
-            sp.Children.Add(iconImage);
-            sp.Children.Add(textBlock);
-
-            return sp;
         }
 
-        private StackPanel CreateControllerButton(string symbol, string colorHex, string label, bool isPS = false)
+        private static void AddLegendHint(ICollection<LegendHint> hints, string iconKey, string label)
         {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-
-            var btnCircle = new Border
+            if (!string.IsNullOrWhiteSpace(label))
             {
-                Width = 20,
-                Height = 20,
-                CornerRadius = new CornerRadius(10),
-                Background = new SolidColorBrush(HexToColor(colorHex)),
-                Child = new TextBlock
-                {
-                    Text = symbol,
-                    FontSize = isPS ? 10 : 12,
-                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
-                    Foreground = new SolidColorBrush(isPS ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-            };
-            sp.Children.Add(btnCircle);
-            sp.Children.Add(new TextBlock
-            {
-                Text = label,
-                FontSize = 13,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-            return sp;
-        }
-
-        private Windows.UI.Color HexToColor(string hex)
-        {
-            hex = hex.Replace("#", "");
-            byte r = byte.Parse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber);
-            byte g = byte.Parse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber);
-            byte b = byte.Parse(hex.Substring(6, 2), System.Globalization.NumberStyles.HexNumber);
-            return Windows.UI.Color.FromArgb(255, r, g, b);
-        }
-
-        private StackPanel CreateXboxHint(string button, string colorHex, string label)
-        {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-
-            // Der farbige Kreis mit dem Buchstaben
-            var btnCircle = new Border
-            {
-                Width = 18,
-                Height = 18,
-                CornerRadius = new CornerRadius(9),
-                Background = new SolidColorBrush(HexToColor(colorHex)),
-                Child = new TextBlock
-                {
-                    Text = button,
-                    FontSize = 11,
-                    FontWeight = Microsoft.UI.Text.FontWeights.ExtraBold,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-            };
-
-            sp.Children.Add(btnCircle);
-            sp.Children.Add(new TextBlock
-            {
-                Text = label,
-                FontSize = 12,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-            return sp;
-        }
-
-        // Hilfsfunktion für Farben
-        
-
-        // 3. HILFSMETHODE FÜR DIE BUTTON-ANZEIGE
-        private StackPanel CreateKeyHint(string glyph, string text)
-        {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            sp.Children.Add(new FontIcon
-            {
-                Glyph = glyph,
-                FontSize = 14,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons")
-            });
-            sp.Children.Add(new TextBlock
-            {
-                Text = text,
-                FontSize = 13,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-            return sp;
-        }
-
-        // Hilfsmethode für die Shortcut-Anzeigen (X Start / O Close)
-        private StackPanel CreateKeyHint(string glyph, string color, string label)
-        {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-            sp.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
-            sp.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), VerticalAlignment = VerticalAlignment.Center });
-            return sp;
+                hints.Add(new LegendHint(iconKey, label));
+            }
         }
 
         /// <summary>
@@ -8271,8 +11405,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Color targetColor;
             if (isSelected)
             {
-                // Wir machen die Hervorhebung etwas heller und sichtbarer
-                targetColor = Microsoft.UI.Colors.WhiteSmoke;
+                targetColor = GetThemeAccentColor(168);
             }
             else
             {
@@ -8310,7 +11443,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private int _lastSelectedCardIndex = -1; // <--- NEU
         private void HighlightSelectedCard(bool skipScroll = false, bool forceAnimation = true)
         {
-            // Sicherheitscheck: Falls die Liste leer ist, abbrechen
             if (ProgramCardPanel.Children.Count == 0) return;
 
             // 1. Die alte Karte (die den Fokus verliert) sanft zurücksetzen
@@ -8339,8 +11471,543 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
 
-            // 3. Den aktuellen Index für das nächste Mal speichern
             _lastSelectedCardIndex = _selectedCardIndex;
+            UpdateBubbleReflectionRig();
+            UpdateSelectionSurface();
+        }
+
+        private void UpdateBubbleReflectionRig()
+        {
+            bool launcherIsSource = _currentFocusArea == FocusArea.Launcher || _currentFocusArea == FocusArea.QuickLaunchers;
+            bool cardsAreSource = _currentFocusArea == FocusArea.Cards;
+            bool hasActiveLight = launcherIsSource || cardsAreSource;
+
+            if (_launcherAreaButtons != null)
+            {
+                for (int i = 0; i < _launcherAreaButtons.Count; i++)
+                {
+                    int distance;
+                    if (launcherIsSource)
+                    {
+                        distance = i - _selectedLauncherAreaIndex;
+                    }
+                    else if (cardsAreSource)
+                    {
+                        // Launcher cards sit left of the process rail, so they catch light on their right edge.
+                        distance = -(Math.Max(1, _launcherAreaButtons.Count - i) + Math.Max(0, _selectedCardIndex));
+                    }
+                    else
+                    {
+                        distance = 0;
+                    }
+
+                    ApplyBubbleReflection(_launcherAreaButtons[i], distance, hasActiveLight);
+                }
+            }
+
+            if (ProgramCardPanel != null)
+            {
+                for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
+                {
+                    if (ProgramCardPanel.Children[i] is not Border card)
+                    {
+                        continue;
+                    }
+
+                    int distance;
+                    if (cardsAreSource)
+                    {
+                        distance = i - _selectedCardIndex;
+                    }
+                    else if (launcherIsSource)
+                    {
+                        // Process cards sit right of the launcher rail, so they catch light on their left edge.
+                        distance = Math.Max(1, i + 1 + (_launcherAreaButtons?.Count ?? 1) - _selectedLauncherAreaIndex);
+                    }
+                    else
+                    {
+                        distance = 0;
+                    }
+
+                    ApplyBubbleReflection(card, distance, hasActiveLight);
+                }
+            }
+
+            UpdateRailReflectionRig(launcherIsSource, cardsAreSource, hasActiveLight);
+        }
+
+        private void ApplyBubbleReflection(Border card, int distanceFromLight, bool hasActiveLight)
+        {
+            if (card == null)
+            {
+                return;
+            }
+
+            int direction = Math.Sign(distanceFromLight);
+            int absDistance = Math.Abs(distanceFromLight);
+            bool isSelected = hasActiveLight && absDistance == 0;
+            double falloff = hasActiveLight ? Math.Max(0, 1.0 - Math.Max(0, absDistance - 1) * 0.34) : 0;
+            bool isNeighbor = hasActiveLight && absDistance > 0;
+            bool isCloseNeighbor = hasActiveLight && absDistance <= 2 && absDistance > 0;
+
+            double edgeOpacity = isSelected ? 0.14 : 0.0;
+            double sheenOpacity = isSelected ? 0.10 : 0.0;
+            double lowerOpacity = isSelected ? 0.045 : 0.0;
+            double sideGlintOpacity = isCloseNeighbor ? 0.16 + (0.34 * falloff) : 0.0;
+            double cornerGlintOpacity = isCloseNeighbor ? 0.18 + (0.30 * falloff) : isSelected ? 0.12 : 0.0;
+            double topGlintOpacity = isSelected ? 0.14 : 0.0;
+
+            var edge = FindDescendantByName<Border>(card, "BubbleEdgeLight");
+            if (edge != null)
+            {
+                edge.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                edge.Background = CreateBubbleEdgeBrush(direction, isSelected, isNeighbor);
+                AnimateReflectionOpacity(edge, edgeOpacity, 190);
+            }
+
+            var sheen = FindDescendantByName<Border>(card, "BubbleSheen");
+            if (sheen != null)
+            {
+                sheen.Background = CreateBubbleSheenBrush(direction, isSelected, isNeighbor);
+                AnimateReflectionOpacity(sheen, sheenOpacity, 220);
+
+                if (sheen.RenderTransform is CompositeTransform transform)
+                {
+                    double cardWidth = Math.Max(120, card.ActualWidth);
+                    double targetX = isSelected ? 0 : -direction * cardWidth * 0.10;
+                    double targetY = isSelected ? -2 * _currentShellLayoutScale : 0;
+                    AnimateReflectionTransform(transform, targetX, targetY, isSelected ? 1.0 : 0.98, 220);
+                }
+            }
+
+            var lowerReflection = FindDescendantByName<Border>(card, "BubbleLowerReflection");
+            if (lowerReflection != null)
+            {
+                AnimateReflectionOpacity(lowerReflection, lowerOpacity, 220);
+            }
+
+            var sideGlint = FindDescendantByName<Border>(card, "BubbleSideGlint");
+            if (sideGlint != null)
+            {
+                sideGlint.HorizontalAlignment = direction < 0 ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+                sideGlint.Background = CreateBubbleSideGlintBrush(direction < 0 ? -1 : 1, isNeighbor);
+                AnimateReflectionOpacity(sideGlint, sideGlintOpacity, 210);
+
+                if (sideGlint.RenderTransform is CompositeTransform sideTransform)
+                {
+                    double targetX = direction == 0 ? 0 : direction * 8 * _currentShellLayoutScale;
+                    AnimateReflectionTransform(sideTransform, targetX, 0, isCloseNeighbor ? 1.08 : 0.96, 210);
+                }
+            }
+
+            var cornerGlint = FindDescendantByName<Border>(card, "BubbleCornerGlint");
+            if (cornerGlint != null)
+            {
+                bool lightFromLeft = direction > 0;
+                cornerGlint.HorizontalAlignment = direction < 0 ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+                cornerGlint.Background = CreateBubbleCornerGlintBrush(direction < 0 ? -1 : 1, isNeighbor);
+                AnimateReflectionOpacity(cornerGlint, cornerGlintOpacity, 210);
+
+                if (cornerGlint.RenderTransform is CompositeTransform cornerTransform)
+                {
+                    cornerTransform.Rotation = direction < 0 ? -10 : 10;
+                    cornerTransform.CenterX = lightFromLeft ? 0 : Math.Max(18, cornerGlint.ActualWidth);
+                    cornerTransform.CenterY = Math.Max(1, cornerGlint.ActualHeight * 0.5);
+                    double targetX = direction == 0 ? 0 : direction * 5 * _currentShellLayoutScale;
+                    double targetY = isSelected ? 0 : 2.5 * _currentShellLayoutScale;
+                    AnimateReflectionTransform(cornerTransform, targetX, targetY, isCloseNeighbor ? 1.04 : 1.0, 210);
+                }
+            }
+
+            var topGlint = FindDescendantByName<Border>(card, "BubbleTopGlint");
+            if (topGlint != null)
+            {
+                topGlint.Background = CreateBubbleTopGlintBrush(direction, isNeighbor);
+                AnimateReflectionOpacity(topGlint, topGlintOpacity, 220);
+
+                if (topGlint.RenderTransform is CompositeTransform topTransform)
+                {
+                    double cardWidth = Math.Max(120, card.ActualWidth);
+                    double targetX = isSelected ? 0 : -direction * cardWidth * 0.08;
+                    AnimateReflectionTransform(topTransform, targetX, 0, isSelected ? 1.0 : 0.98, 220);
+                }
+            }
+        }
+
+        private void EnsureGlassRailReflection(Border rail, double scale, bool isTopRail)
+        {
+            if (rail == null)
+            {
+                return;
+            }
+
+            Grid host;
+            if (rail.Child is Grid existingGrid &&
+                existingGrid.Tag is string existingTag &&
+                existingTag == "GlassRailReflectionHost")
+            {
+                host = existingGrid;
+            }
+            else
+            {
+                UIElement originalChild = rail.Child;
+                rail.Child = null;
+
+                host = new Grid
+                {
+                    Tag = "GlassRailReflectionHost"
+                };
+
+                if (originalChild != null)
+                {
+                    host.Children.Add(originalChild);
+                }
+
+                rail.Child = host;
+            }
+
+            double radius = Math.Max(0, rail.CornerRadius.TopLeft);
+
+            Border sheen = host.Children.OfType<Border>().FirstOrDefault(child => child.Name == "RailSheen");
+            if (sheen == null)
+            {
+                sheen = new Border
+                {
+                    Name = "RailSheen",
+                    IsHitTestVisible = false,
+                    Opacity = 0,
+                    RenderTransform = new CompositeTransform(),
+                    RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5)
+                };
+                host.Children.Add(sheen);
+            }
+
+            sheen.CornerRadius = new CornerRadius(radius);
+            sheen.Margin = new Thickness(2 * scale);
+
+            Border edge = host.Children.OfType<Border>().FirstOrDefault(child => child.Name == "RailEdgeLight");
+            if (edge == null)
+            {
+                edge = new Border
+                {
+                    Name = "RailEdgeLight",
+                    IsHitTestVisible = false,
+                    Opacity = 0
+                };
+                host.Children.Add(edge);
+            }
+
+            edge.Margin = new Thickness(4 * scale);
+            edge.CornerRadius = new CornerRadius(Math.Max(0, radius - (4 * scale)));
+            edge.BorderThickness = new Thickness(0);
+
+            Border lightBand = host.Children.OfType<Border>().FirstOrDefault(child => child.Name == "RailLightBand");
+            if (lightBand == null)
+            {
+                lightBand = new Border
+                {
+                    Name = "RailLightBand",
+                    IsHitTestVisible = false,
+                    Opacity = 0,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    RenderTransform = new CompositeTransform(),
+                    RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5)
+                };
+                host.Children.Add(lightBand);
+            }
+
+            lightBand.Height = Math.Max(2, 3 * scale);
+            lightBand.Margin = isTopRail
+                ? new Thickness(32 * scale, 0, 32 * scale, 4 * scale)
+                : new Thickness(32 * scale, 4 * scale, 32 * scale, 0);
+            lightBand.VerticalAlignment = isTopRail ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+            lightBand.CornerRadius = new CornerRadius(3 * scale);
+
+            Border cornerGlint = host.Children.OfType<Border>().FirstOrDefault(child => child.Name == "RailCornerGlint");
+            if (cornerGlint == null)
+            {
+                cornerGlint = new Border
+                {
+                    Name = "RailCornerGlint",
+                    IsHitTestVisible = false,
+                    Opacity = 0,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    RenderTransform = new CompositeTransform { Rotation = 7 },
+                    RenderTransformOrigin = new Windows.Foundation.Point(0.0, 0.5)
+                };
+                host.Children.Add(cornerGlint);
+            }
+
+            cornerGlint.Width = Math.Max(36, 48 * scale);
+            cornerGlint.Height = Math.Max(2, 3 * scale);
+            cornerGlint.VerticalAlignment = isTopRail ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+            cornerGlint.Margin = isTopRail
+                ? new Thickness(20 * scale, 0, 20 * scale, 7 * scale)
+                : new Thickness(20 * scale, 7 * scale, 20 * scale, 0);
+            cornerGlint.CornerRadius = new CornerRadius(3 * scale);
+        }
+
+        private void UpdateRailReflectionRig(bool launcherIsSource, bool cardsAreSource, bool hasActiveLight)
+        {
+            double lightBias = 0.5;
+            double intensity = hasActiveLight ? 1.0 : 0.45;
+
+            if (launcherIsSource)
+            {
+                int launcherCount = Math.Max(1, _launcherAreaButtons?.Count ?? 1);
+                lightBias = 0.18 + (Math.Clamp(_selectedLauncherAreaIndex, 0, launcherCount - 1) / (double)launcherCount) * 0.26;
+                intensity = 0.92;
+            }
+            else if (cardsAreSource)
+            {
+                int cardCount = Math.Max(1, ProgramCardPanel?.Children.Count ?? 1);
+                lightBias = 0.44 + (Math.Clamp(_selectedCardIndex, 0, cardCount - 1) / (double)Math.Max(1, cardCount - 1)) * 0.42;
+                intensity = 1.0;
+            }
+            else if (_currentFocusArea == FocusArea.TopButtons)
+            {
+                int topCount = Math.Max(1, _topButtons?.Count ?? 1);
+                lightBias = 0.36 + (Math.Clamp(_selectedTopButtonIndex, 0, topCount - 1) / (double)Math.Max(1, topCount - 1)) * 0.28;
+                intensity = 0.86;
+            }
+
+            ApplyRailReflection(infopanelright, lightBias, intensity, true);
+            ApplyRailReflection(_bottomLegendBar, lightBias, Math.Max(0.62, intensity * 0.82), false);
+        }
+
+        private void ApplyRailReflection(Border rail, double lightBias, double intensity, bool isTopRail)
+        {
+            if (rail == null)
+            {
+                return;
+            }
+
+            EnsureGlassRailReflection(rail, isTopRail ? _currentTopPanelScale : _currentShellLayoutScale, isTopRail);
+
+            var sheen = FindDescendantByName<Border>(rail, "RailSheen");
+            if (sheen != null)
+            {
+                sheen.Background = CreateRailSheenBrush(lightBias, intensity);
+                AnimateReflectionOpacity(sheen, isTopRail ? 0.0 : Math.Clamp(0.02 + (intensity * 0.045), 0, 0.08), 280);
+
+                if (sheen.RenderTransform is CompositeTransform transform)
+                {
+                    double railWidth = Math.Max(320, rail.ActualWidth);
+                    AnimateReflectionTransform(
+                        transform,
+                        (lightBias - 0.5) * railWidth * 0.24,
+                        0,
+                        1.0 + (0.018 * intensity),
+                        260);
+                }
+            }
+
+            var edge = FindDescendantByName<Border>(rail, "RailEdgeLight");
+            if (edge != null)
+            {
+                edge.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                edge.Background = CreateRailEdgeBrush(lightBias, intensity);
+                AnimateReflectionOpacity(edge, 0.0, 260);
+            }
+
+            var band = FindDescendantByName<Border>(rail, "RailLightBand");
+            if (band != null)
+            {
+                band.Background = CreateRailBandBrush(lightBias, intensity);
+                AnimateReflectionOpacity(band, Math.Clamp(0.08 + (intensity * 0.18), 0, 0.28), 260);
+            }
+
+            var corner = FindDescendantByName<Border>(rail, "RailCornerGlint");
+            if (corner != null)
+            {
+                bool useRightCorner = lightBias > 0.55;
+                corner.HorizontalAlignment = useRightCorner ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+                corner.Background = CreateRailCornerGlintBrush(useRightCorner ? -1 : 1, intensity);
+
+                if (corner.RenderTransform is CompositeTransform transform)
+                {
+                    double railScale = isTopRail ? _currentTopPanelScale : _currentShellLayoutScale;
+                    transform.Rotation = (useRightCorner ? -7 : 7) * (isTopRail ? -1 : 1);
+                    transform.CenterX = useRightCorner ? Math.Max(24, corner.ActualWidth) : 0;
+                    transform.CenterY = Math.Max(1, corner.ActualHeight * 0.5);
+                    AnimateReflectionTransform(
+                        transform,
+                        (useRightCorner ? -1 : 1) * Math.Max(2, 4 * railScale),
+                        (isTopRail ? -1 : 1) * 1.5 * railScale,
+                        1.0,
+                        260);
+                }
+
+                AnimateReflectionOpacity(corner, Math.Clamp(0.08 + (intensity * 0.20), 0, 0.30), 260);
+            }
+        }
+
+        private LinearGradientBrush CreateRailSheenBrush(double lightBias, double intensity)
+        {
+            lightBias = Math.Clamp(lightBias, 0.08, 0.92);
+            byte hot = (byte)Math.Clamp(34 + (56 * intensity), 0, 96);
+            byte accent = (byte)Math.Clamp(24 + (44 * intensity), 0, 76);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(Math.Max(0, lightBias - 0.50), 0),
+                EndPoint = new Windows.Foundation.Point(Math.Min(1, lightBias + 0.50), 1),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.22, Color = Windows.UI.Color.FromArgb(6, 255, 255, 255) },
+                    new GradientStop { Offset = 0.44, Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = 0.60, Color = GetThemeAccentColor(accent) },
+                    new GradientStop { Offset = 0.86, Color = Windows.UI.Color.FromArgb(5, 255, 255, 255) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateRailEdgeBrush(double lightBias, double intensity)
+        {
+            lightBias = Math.Clamp(lightBias, 0.08, 0.92);
+            byte hot = (byte)Math.Clamp(38 + (52 * intensity), 0, 96);
+            byte accent = (byte)Math.Clamp(28 + (46 * intensity), 0, 82);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(Math.Max(0, lightBias - 0.46), 0),
+                EndPoint = new Windows.Foundation.Point(Math.Min(1, lightBias + 0.46), 1),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.24, Color = Windows.UI.Color.FromArgb(5, 255, 255, 255) },
+                    new GradientStop { Offset = 0.42, Color = GetThemeAccentColor(accent) },
+                    new GradientStop { Offset = 0.56, Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = 0.82, Color = Windows.UI.Color.FromArgb(5, 255, 255, 255) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateRailBandBrush(double lightBias, double intensity)
+        {
+            lightBias = Math.Clamp(lightBias, 0.08, 0.92);
+            byte hot = (byte)Math.Clamp(64 + (78 * intensity), 0, 154);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 0),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = Math.Max(0, lightBias - 0.18), Color = Windows.UI.Color.FromArgb(2, 255, 255, 255) },
+                    new GradientStop { Offset = lightBias, Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = Math.Min(1, lightBias + 0.18), Color = GetThemeAccentColor((byte)Math.Clamp(34 + (56 * intensity), 0, 108)) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private LinearGradientBrush CreateRailCornerGlintBrush(int lightDirection, double intensity)
+        {
+            byte hot = (byte)Math.Clamp(82 + (82 * intensity), 0, 178);
+            byte soft = (byte)Math.Clamp(24 + (34 * intensity), 0, 76);
+
+            return new LinearGradientBrush
+            {
+                StartPoint = lightDirection < 0
+                    ? new Windows.Foundation.Point(1, 0)
+                    : new Windows.Foundation.Point(0, 0),
+                EndPoint = lightDirection < 0
+                    ? new Windows.Foundation.Point(0, 0)
+                    : new Windows.Foundation.Point(1, 0),
+                GradientStops =
+                {
+                    new GradientStop { Offset = 0.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) },
+                    new GradientStop { Offset = 0.22, Color = Windows.UI.Color.FromArgb(soft, 255, 255, 255) },
+                    new GradientStop { Offset = 0.52, Color = Windows.UI.Color.FromArgb(hot, 255, 255, 255) },
+                    new GradientStop { Offset = 0.76, Color = GetThemeAccentColor((byte)Math.Clamp(soft + 18, 0, 108)) },
+                    new GradientStop { Offset = 1.00, Color = Windows.UI.Color.FromArgb(0, 255, 255, 255) }
+                }
+            };
+        }
+
+        private T FindDescendantByName<T>(DependencyObject root, string name) where T : FrameworkElement
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            int childCount = VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < childCount; i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(root, i);
+                if (child is T typedChild && typedChild.Name == name)
+                {
+                    return typedChild;
+                }
+
+                T nested = FindDescendantByName<T>(child, name);
+                if (nested != null)
+                {
+                    return nested;
+                }
+            }
+
+            return null;
+        }
+
+        private void AnimateReflectionOpacity(UIElement element, double targetOpacity, int durationMs)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            var animation = new DoubleAnimation
+            {
+                To = Math.Clamp(targetOpacity, 0.0, 1.0),
+                Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            Storyboard.SetTarget(animation, element);
+            Storyboard.SetTargetProperty(animation, "Opacity");
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(animation);
+            storyboard.Begin();
+        }
+
+        private void AnimateReflectionTransform(CompositeTransform transform, double targetX, double targetY, double targetScale, int durationMs)
+        {
+            if (transform == null)
+            {
+                return;
+            }
+
+            var storyboard = new Storyboard();
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var duration = new Duration(TimeSpan.FromMilliseconds(durationMs));
+
+            void AddTransformAnimation(string property, double value)
+            {
+                var animation = new DoubleAnimation
+                {
+                    To = value,
+                    Duration = duration,
+                    EasingFunction = easing
+                };
+                Storyboard.SetTarget(animation, transform);
+                Storyboard.SetTargetProperty(animation, property);
+                storyboard.Children.Add(animation);
+            }
+
+            AddTransformAnimation("TranslateX", targetX);
+            AddTransformAnimation("TranslateY", targetY);
+            AddTransformAnimation("ScaleX", targetScale);
+            AddTransformAnimation("ScaleY", targetScale);
+
+            storyboard.Begin();
         }
 
 
@@ -8354,27 +12021,42 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             try
             {
-                // Hole die Position der Karte innerhalb des scrollbaren Bereichs (des Panels).
                 var transform = card.TransformToVisual(ProgramCardPanel);
                 var position = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
-
-                // Berechne die Zielposition, um die Karte in der Mitte des sichtbaren Bereichs zu zentrieren.
                 double cardX = position.X;
                 double cardWidth = (card as FrameworkElement).ActualWidth;
+                double cardRight = cardX + cardWidth;
+                double currentOffset = ProgramScrollViewer.HorizontalOffset;
                 double viewportWidth = ProgramScrollViewer.ActualWidth;
-
-                double targetOffset = cardX - (viewportWidth / 2) + (cardWidth / 2);
-
-                // Stelle sicher, dass wir nicht über die Grenzen hinaus scrollen.
                 double maxOffset = ProgramScrollViewer.ScrollableWidth;
-                targetOffset = Math.Max(0, Math.Min(targetOffset, maxOffset));
+                double edgePadding = 26 * _currentShellLayoutScale;
+                double visibleLeft = currentOffset + edgePadding;
+                double visibleRight = currentOffset + viewportWidth - edgePadding;
 
-                // Scrolle zur Zielposition. Der letzte Parameter "false" aktiviert die sanfte Animation.
+                if (cardX >= visibleLeft && cardRight <= visibleRight)
+                {
+                    return;
+                }
+
+                double targetOffset = currentOffset;
+                if (cardX < visibleLeft)
+                {
+                    targetOffset = Math.Max(0, cardX - edgePadding);
+                }
+                else if (cardRight > visibleRight)
+                {
+                    targetOffset = Math.Min(maxOffset, cardRight - viewportWidth + edgePadding);
+                }
+
+                if (Math.Abs(ProgramScrollViewer.HorizontalOffset - targetOffset) < 2)
+                {
+                    return;
+                }
+
                 ProgramScrollViewer.ChangeView(targetOffset, null, null, false);
             }
             catch (Exception ex)
             {
-                // Fängt seltene Layout-Fehler ab, um einen Absturz zu verhindern.
                 Debug.WriteLine($"[SCROLL ERROR] Could not scroll to card: {ex.Message}");
             }
         }
@@ -8462,44 +12144,333 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
          * If the DPI has changed since the last time GCM was shown, it triggers 
          * a complete window rebuild to ensure a 100% accurate UI.
          */
+        private void ResetParkedSteamState()
+        {
+            _parkedSteamBigPictureHwnd = IntPtr.Zero;
+            _steamBigPictureWasParkedByTaskManager = false;
+        }
+
+        private async Task SoftBringWindowToForegroundAsync(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            try
+            {
+                IntPtr currentForegroundHwnd = GetForegroundWindow();
+                uint currentThreadId = GetWindowThreadProcessId(currentForegroundHwnd, out _);
+                uint thisThreadId = GetCurrentThreadId();
+
+                AllowSetForegroundWindow(ASFW_ANY);
+                if (currentThreadId != thisThreadId)
+                {
+                    AttachThreadInput(thisThreadId, currentThreadId, true);
+                }
+
+                if (IsIconic(hWnd))
+                {
+                    ShowWindow(hWnd, SW_RESTORE);
+                }
+                else
+                {
+                    ShowWindow(hWnd, SW_SHOW);
+                }
+                BringWindowToTop(hWnd);
+                SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                SetForegroundWindow(hWnd);
+                SetActiveWindow(hWnd);
+                SetFocus(hWnd);
+
+                if (currentThreadId != thisThreadId)
+                {
+                    AttachThreadInput(thisThreadId, currentThreadId, false);
+                }
+
+                await Task.Delay(60);
+                SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Focus Soft Error] {ex.Message}");
+            }
+        }
+
+        private async Task<bool> TryBringGcmToFrontViaTaskViewAsync()
+        {
+            try
+            {
+                ClearFocusReturnWatchdog();
+                ResetParkedSteamState();
+
+                await SendWinTabForHandoffAsync();
+                await Task.Delay(1000);
+                await SoftBringWindowToForegroundAsync(WinRT.Interop.WindowNative.GetWindowHandle(this));
+                await SendWinTabForHandoffAsync();
+                await Task.Delay(260);
+                await ConfirmGcmInputFocusWithSafeClickAsync();
+                await Task.Delay(80);
+                return IsWindowInForeground();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Task View switch to GCM failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool IsModalOverlayVisible()
+        {
+            return GithubReleaseOverlay?.Visibility == Visibility.Visible ||
+                   WindowsReturnConfirmOverlay?.Visibility == Visibility.Visible ||
+                   SettingsOverlay?.Visibility == Visibility.Visible ||
+                   AppLauncher?.Visibility == Visibility.Visible ||
+                   AudioOverlay?.Visibility == Visibility.Visible ||
+                   PowerMenu?.Visibility == Visibility.Visible ||
+                   GameOptionsOverlay?.Visibility == Visibility.Visible;
+        }
+
+        private async Task ConfirmGcmInputFocusWithSafeClickAsync()
+        {
+            IntPtr gcmHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (gcmHwnd == IntPtr.Zero || !IsWindow(gcmHwnd) || IsModalOverlayVisible())
+            {
+                return;
+            }
+
+            try
+            {
+                if (!GetWindowRect(gcmHwnd, out RECT rect))
+                {
+                    return;
+                }
+
+                int windowWidth = rect.Right - rect.Left;
+                int windowHeight = rect.Bottom - rect.Top;
+                if (windowWidth <= 0 || windowHeight <= 0)
+                {
+                    return;
+                }
+
+                int clickX = Math.Clamp(rect.Left + 12, 0, Math.Max(0, GetScreenWidth() - 1));
+                int clickY = Math.Clamp(rect.Top + 12, 0, Math.Max(0, GetScreenHeight() - 1));
+
+                SetCursorPos(clickX, clickY);
+                await Task.Delay(18);
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                await Task.Delay(12);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+                await Task.Delay(18);
+
+                if (this.Content is UIElement root)
+                {
+                    root.Focus(FocusState.Programmatic);
+                }
+
+                Debug.WriteLine("[Focus] Safe click confirmed GCM input focus.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Focus Safe Click Error] {ex.Message}");
+            }
+            finally
+            {
+                ParkMouseCursor();
+            }
+        }
+
+        private async Task<bool> TryReturnToSteamViaTaskViewAsync()
+        {
+            ClearFocusReturnWatchdog();
+            ResetParkedSteamState();
+
+            try
+            {
+                Process.Start(new ProcessStartInfo("steam://open/gamepadui") { UseShellExecute = true });
+            }
+            catch
+            {
+            }
+
+            IntPtr steamHwnd = FindSteamBigPictureWindow();
+            if (steamHwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                return await TrySwitchToWindowViaTaskViewAsync(
+                    steamHwnd,
+                    FocusReturnTarget.SteamBigPicture,
+                    maximizeTarget: true);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Task View switch back to Steam failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task<bool> TrySwitchToWindowViaTaskViewAsync(
+            IntPtr targetHwnd,
+            FocusReturnTarget focusTarget,
+            bool maximizeTarget = false)
+        {
+            if (targetHwnd == IntPtr.Zero || !IsWindow(targetHwnd))
+            {
+                return false;
+            }
+
+            ClearFocusReturnWatchdog();
+            ResetParkedSteamState();
+
+            try
+            {
+                MakeSelfNonTopmost();
+
+                if (focusTarget == FocusReturnTarget.SteamBigPicture)
+                {
+                    _lastKnownSteamBigPictureHwnd = targetHwnd;
+                }
+                else if (focusTarget == FocusReturnTarget.GameWindow)
+                {
+                    _lastKnownGameHwnd = targetHwnd;
+                }
+
+                await SendWinTabForHandoffAsync();
+                await Task.Delay(1000);
+
+                if (IsIconic(targetHwnd))
+                {
+                    ShowWindow(targetHwnd, SW_RESTORE);
+                }
+                else if (maximizeTarget)
+                {
+                    ShowWindow(targetHwnd, SW_SHOWMAXIMIZED);
+                }
+                else
+                {
+                    ShowWindow(targetHwnd, SW_SHOW);
+                }
+
+                await SoftBringWindowToForegroundAsync(targetHwnd);
+
+                // Close Task View with the same gesture once the target is selected.
+                await SendWinTabForHandoffAsync();
+                await Task.Delay(260);
+
+                return GetForegroundWindow() == targetHwnd;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Task View switch to target failed: {ex.Message}");
+                return false;
+            }
+        }
+
         public void BringTaskManagerToFrontAndFocus()
         {
             this.DispatcherQueue.TryEnqueue(async () =>
             {
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-
-                // 1. GCM in den Vordergrund bringen (JETZT WARTEN WIR DARAUF!)
-                await ForceGcmToFront();
                 UpdateControllerBatteryStatus();
+                ApplySteamOnlyMode();
 
-                // 2. Launcher-Logik (Steam minimieren etc.)
-                try
+                if (IsWindowInForeground())
                 {
-                    string launcher = AppSettings.Load<string>("launcher");
-                    if (launcher == "steam")
+                    if (!await TryReturnToSteamViaTaskViewAsync())
                     {
-                        IntPtr steamHwnd = FindSteamBigPictureWindow();
-                        if (steamHwnd != IntPtr.Zero)
-                        {
-                            // Steam-spezifische Korrektur: Falls Steam sich kurzzeitig wehrt,
-                            // setzen wir GCM zur Sicherheit nach 50ms nochmal in den Fokus.
-                            await Task.Delay(50);
-                            await ForceGcmToFront();
-                        }
+                        await StartSteam(false);
                     }
-                    else if (launcher == "playnite" || launcher == "custom")
-                    {
-                        string procToFind = launcher == "playnite"
-                            ? "Playnite.FullscreenApp"
-                            : Path.GetFileNameWithoutExtension(AppSettings.Load<string>("customlauncherpath"));
-
-                        Process proc = Process.GetProcessesByName(procToFind).FirstOrDefault();
-                        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
-                            ShowWindow(proc.MainWindowHandle, 6); // SW_MINIMIZE
-                    }
+                    return;
                 }
-                catch (Exception ex) { Debug.WriteLine($"[GCM] Launcher logic error: {ex.Message}"); }
+
+                if (!await TryBringGcmToFrontViaTaskViewAsync())
+                {
+                    Debug.WriteLine("[GCM] Task View handoff to GCM did not report focus; skipping fallback by design.");
+                }
             });
+        }
+
+        private async Task ParkSteamBigPictureForTaskManagerAsync()
+        {
+            IntPtr steamHwnd = FindSteamBigPictureWindow();
+            if (steamHwnd == IntPtr.Zero)
+            {
+                _parkedSteamBigPictureHwnd = IntPtr.Zero;
+                _steamBigPictureWasParkedByTaskManager = false;
+                return;
+            }
+
+            try
+            {
+                _parkedSteamBigPictureHwnd = steamHwnd;
+                _lastKnownSteamBigPictureHwnd = steamHwnd;
+                _steamBigPictureWasParkedByTaskManager = true;
+                ShowWindow(steamHwnd, SW_MINIMIZE);
+                await Task.Delay(80);
+                ShowWindow(steamHwnd, SW_HIDE);
+                SetWindowPos(steamHwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                await Task.Delay(120);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Failed to park Steam Big Picture: {ex.Message}");
+            }
+        }
+
+        private async Task<bool> RestoreParkedSteamBigPictureAsync()
+        {
+            if (!_steamBigPictureWasParkedByTaskManager)
+            {
+                return false;
+            }
+
+            IntPtr steamHwnd = _parkedSteamBigPictureHwnd;
+            if (steamHwnd == IntPtr.Zero)
+            {
+                steamHwnd = FindSteamBigPictureWindow();
+            }
+
+            if (steamHwnd == IntPtr.Zero)
+            {
+                _parkedSteamBigPictureHwnd = IntPtr.Zero;
+                _steamBigPictureWasParkedByTaskManager = false;
+                return false;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo("steam://open/gamepadui") { UseShellExecute = true });
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                MakeSelfNonTopmost();
+                IntPtr selfHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                SetWindowPos(selfHwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                ShowWindow(selfHwnd, SW_MINIMIZE);
+                await Task.Delay(80);
+                ShowWindow(steamHwnd, SW_SHOW);
+                ShowWindow(steamHwnd, SW_RESTORE);
+                ShowWindow(steamHwnd, SW_SHOWMAXIMIZED);
+                await Task.Delay(160);
+                await ForcefullyBringToForeground(steamHwnd);
+                _lastKnownSteamBigPictureHwnd = steamHwnd;
+                _parkedSteamBigPictureHwnd = IntPtr.Zero;
+                _steamBigPictureWasParkedByTaskManager = false;
+                ArmFocusReturnWatchdog(FocusReturnTarget.SteamBigPicture, TimeSpan.FromSeconds(15));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Failed to restore parked Steam Big Picture: {ex.Message}");
+                return false;
+            }
         }
 
 
@@ -8872,12 +12843,25 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private DateTime altTabStartedTime;
         // Constants
         private const int ALT_TAB_DEBOUNCE_MS = 300; // debounce time in milliseconds
-        private void SendWinTab()
+        private void SendWinTab(bool silent = false)
         {
             MakeSelfNonTopmost(); // <-- HINZUGEFÜGT
-            SendOverlayNotification("Shortcut: Task View");
+            if (!silent)
+            {
+                SendOverlayNotification("Shortcut: Task View");
+            }
             keybd_event(0x5B, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
             keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
+        private async Task SendWinTabForHandoffAsync()
+        {
+            MakeSelfNonTopmost();
+            keybd_event(0x5B, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(VK_TAB, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            await Task.Delay(120);
             keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             keybd_event(0x5B, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
@@ -9019,15 +13003,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);   // Win-Taste loslassen
         }
         #endregion xbox bar
-        #region lossless scalling
-        // Das Schlüsselwort "async" ist hier erforderlich
-        public static void LosslessScaling()
-        {
-            // User notification
-            SendOverlayNotification("Toggle Scaling");
-            LosslessScalingController.TriggerScaling();
-        }
-        #endregion lossless scalling
         #region backtowin
         [DllImport("user32.dll")]
         private static extern void LockWorkStation();
@@ -10138,11 +14113,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // 4. Map Functions to Actions
                 // 4. Map Functions to Actions
                 _shortcutActions["taskmanager"] = BringTaskManagerToFrontAndFocus;
-                _shortcutActions["switch tab"] = SendWinTab;
+                _shortcutActions["switch tab"] = () => SendWinTab();
                 _shortcutActions["audio switch"] = SwitchToNextAudioDevice;
                 _shortcutActions["performance overlay"] = TriggerPerformanceOverlay;
                 _shortcutActions["xbox bar"] = xboxbar;
-                _shortcutActions["lossless scaling"] = LosslessScaling;
                 _shortcutActions["xbox keyboard"] = ToggleTouchKeyboard;
                 _shortcutActions["volume up"] = VolumeUp;
                 _shortcutActions["shortcut overlay"] = ToggleGlobalShortcutOverlay;//VolumeUp;
@@ -10323,6 +14297,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
             if (!IsWindowInForeground()) return;
 
+            _lastActiveControllerType = controllerIndex >= 4 ? ControllerType.PlayStation : ControllerType.Xbox;
+
             bool navigated = false;
 
             switch (_currentFocusArea)
@@ -10336,6 +14312,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         Debug.WriteLine("[StartupVideo] Video durch User übersprungen!");
                         DispatcherQueue.TryEnqueue(() => TransitionToMainUI());
+                    }
+                    return;
+
+                case FocusArea.WindowsReturnConfirm:
+                    if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        ConfirmReturnToWindows();
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        CloseWindowsReturnConfirm();
+                        PlaydeactivationSound();
                     }
                     return;
 
@@ -10390,8 +14379,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if (((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight) && ProgramCardPanel.Children.Any())
                     {
-                        _selectedCardIndex = (_selectedCardIndex + 1) % ProgramCardPanel.Children.Count;
-                        navigated = true;
+                        if (_selectedCardIndex < ProgramCardPanel.Children.Count - 1)
+                        {
+                            _selectedCardIndex++;
+                            navigated = true;
+                        }
                     }
                     else if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
                     {
@@ -10475,9 +14467,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         if (_selectedLauncherAreaIndex == 0)
                         {
-                            // Wir sind auf der Hauptkarte -> Gehe zu den 4 kleinen Quadraten
-                            _currentFocusArea = FocusArea.QuickLaunchers;
-                            _selectedQuickLauncherIndex = 0;
+                            if (_quickLauncherButtons != null && _quickLauncherButtons.Any() && QuickLauncherPanel.Visibility == Visibility.Visible)
+                            {
+                                // Wir sind auf der Hauptkarte -> Gehe zu den Quick-Launch Quadraten
+                                _currentFocusArea = FocusArea.QuickLaunchers;
+                                _selectedQuickLauncherIndex = 0;
+                            }
+                            else
+                            {
+                                _previousFocusArea = FocusArea.Launcher;
+                                _previousLauncherAreaIndex = _selectedLauncherAreaIndex;
+                                _currentFocusArea = FocusArea.TopButtons;
+                                _selectedTopButtonIndex = _previousTopButtonIndex != -1 ? _previousTopButtonIndex : 0;
+                            }
                         }
                         else
                         {
@@ -10517,6 +14519,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             item?.TapAction?.Invoke(null, null);
                         }
                         PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        if (SelectedLauncherItemRepresentsGame())
+                        {
+                            CloseFeaturedGame();
+                            PlaydeactivationSound();
+                        }
+                    }
+                    else if ((newPresses & GamepadButtonFlags.Start) != 0)
+                    {
+                        if (SelectedLauncherItemRepresentsGame())
+                        {
+                            var item = SelectedLauncherItemOrNull();
+                            var card = SelectedLauncherCardOrNull();
+                            DispatcherQueue.TryEnqueue(() => OpenGameOptions(CreateProgramCardEntryFromLauncherItem(item, card)));
+                            PlayActivationSound();
+                        }
                     }
                     break;
 
@@ -10688,7 +14708,23 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         ToggleAppLauncher_Click(null, null);
                         PlaydeactivationSound();
                     }
-                    // A = App starten (NEU)
+                    else if ((newPresses & GamepadButtonFlags.X) != 0)
+                    {
+                        ToggleSelectedAppFavorite();
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.LeftShoulder) != 0)
+                    {
+                        CycleAppLauncherFilter(-1);
+                        PlayNavigationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.RightShoulder) != 0 ||
+                             (newPresses & GamepadButtonFlags.Y) != 0)
+                    {
+                        CycleAppLauncherFilter(1);
+                        PlayNavigationSound();
+                    }
+                    // A = App starten
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
                         if (AppGridView.SelectedItem is AppInfo selectedApp)
@@ -10722,6 +14758,69 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         {
                             HandleAppLauncherNavigation(xDir, yDir);
                         }
+                    }
+                    break;
+
+                case FocusArea.SettingsMenu:
+                    if (TryHandleSettingsCaptureInput(newPresses, stickMovedLeft, stickMovedRight, stickMovedUp, stickMovedDown))
+                    {
+                        PlayActivationSound();
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        CloseSettingsOverlay();
+                        PlaydeactivationSound();
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown)
+                    {
+                        MoveSettingsSelection(1);
+                        PlayNavigationSound();
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp)
+                    {
+                        MoveSettingsSelection(-1);
+                        PlayNavigationSound();
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        ActivateSelectedSettingsRow();
+                        PlayActivationSound();
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.DPadLeft) != 0 || stickMovedLeft)
+                    {
+                        if (FocusSettingsCategories())
+                        {
+                            PlayNavigationSound();
+                        }
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.DPadRight) != 0 || stickMovedRight)
+                    {
+                        if (AdvanceSettingsSelection())
+                        {
+                            PlayNavigationSound();
+                        }
+                        return;
+                    }
+
+                    if ((newPresses & GamepadButtonFlags.X) != 0)
+                    {
+                        if (RewindSettingsSelection())
+                        {
+                            PlayNavigationSound();
+                        }
+                        return;
                     }
                     break;
 
@@ -10866,6 +14965,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         }
                     }
                     break;
+
+                case FocusArea.GithubReleasePrompt:
+                    if ((newPresses & GamepadButtonFlags.A) != 0)
+                    {
+                        GithubReleaseOpenButton_Click(null, null);
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        GithubReleaseLaterButton_Click(null, null);
+                        PlaydeactivationSound();
+                    }
+                    break;
             }
 
             if (navigated)
@@ -10946,14 +15058,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // --- RESET PHASE ---
             _launcherAreaButtons.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); _quickLauncherButtons?.ForEach(b => { AnimateScale(b, false); AnimateBorderColor(b, false); }); });
             _topButtons.ForEach(b => {
+                b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 b.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 b.BorderThickness = new Thickness(0);
             });
             _powerMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
+            StyleWindowsReturnConfirmChoices();
 
-            for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
+            if (_currentFocusArea != FocusArea.Cards)
             {
-                if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
+                for (int i = 0; i < ProgramCardPanel.Children.Count; i++)
+                {
+                    if (ProgramCardPanel.Children[i] is Border card) { AnimateScale(card, false); AnimateBorderColor(card, false); }
+                }
             }
 
             foreach (var btn in _audioDeviceButtons)
@@ -10981,23 +15098,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     if (_topButtons.Count > _selectedTopButtonIndex)
                     {
                         var selectedButton = _topButtons[_selectedTopButtonIndex];
-                        selectedButton.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
+                        selectedButton.Background = new SolidColorBrush(GetThemeAccentColor(42));
+                        selectedButton.BorderBrush = new SolidColorBrush(GetThemeAccentColor(210));
                         selectedButton.BorderThickness = new Thickness(2);
                     }
                     break;
 
                 case FocusArea.Cards:
                     AnimateInfoPanelFocus(false);
-                    if (ProgramCardPanel.Children.Count > _selectedCardIndex)
-                    {
-                        if (ProgramCardPanel.Children[_selectedCardIndex] is Border card)
-                        {
-                            AnimateScale(card, true);
-                            AnimateBorderColor(card, true);
-                            ScrollToCardAnimated(card);
-                        }
-                    }
-                    break;
+                    HighlightSelectedCard();
+                    return;
 
                 case FocusArea.AudioMenu:
                     if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
@@ -11026,7 +15136,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         AnimateBorderColor(selectedQuick, true);
                     }
                     break;
+
+                case FocusArea.SettingsMenu:
+                    UpdateSettingsVisualFocus();
+                    break;
+
+                case FocusArea.WindowsReturnConfirm:
+                    StyleWindowsReturnConfirmChoices();
+                    break;
+
+                case FocusArea.GithubReleasePrompt:
+                    StyleGithubReleasePromptChoices();
+                    break;
             }
+
+            UpdateBubbleReflectionRig();
+            UpdateSelectionSurface();
         }
 
         #endregion
@@ -11052,45 +15177,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 border.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
             }
 
-            // Banner (A/B Buttons) suchen für Karten
-            FrameworkElement banner = null;
-            if (border.Child is Grid g)
-            {
-                banner = g.Children.OfType<FrameworkElement>().FirstOrDefault(x => x.Name == "ButtonBanner");
-            }
-
-            var duration = TimeSpan.FromMilliseconds(120);
+            var duration = TimeSpan.FromMilliseconds(170);
             var sb = new Storyboard();
-
-            // WICHTIG: Hier von 1.08 auf 1.02 reduziert -> Verhindert Abschneiden!
-            double scaleFactor = 1.02;
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            bool isProcessCard = border.Tag is CardTag;
+            double scaleFactor = isProcessCard ? 1.012 : 1.026;
+            double translateY = isProcessCard ? 0 : -4;
 
             // 1. SKALIERUNG
-            var animX = new DoubleAnimation { To = isSelected ? scaleFactor : 1.0, Duration = duration };
-            var animY = new DoubleAnimation { To = isSelected ? scaleFactor : 1.0, Duration = duration };
-            // TranslateY leicht reduzieren für Mixer, da die Zeilen flacher sind
-            var animTrans = new DoubleAnimation { To = isSelected ? -2 : 0, Duration = duration };
+            var animX = new DoubleAnimation { To = isSelected ? scaleFactor : 1.0, Duration = duration, EasingFunction = easing };
+            var animY = new DoubleAnimation { To = isSelected ? scaleFactor : 1.0, Duration = duration, EasingFunction = easing };
+            var animTrans = new DoubleAnimation { To = isSelected ? translateY : 0, Duration = duration, EasingFunction = easing };
 
             Storyboard.SetTarget(animX, transform); Storyboard.SetTargetProperty(animX, "ScaleX");
             Storyboard.SetTarget(animY, transform); Storyboard.SetTargetProperty(animY, "ScaleY");
             Storyboard.SetTarget(animTrans, transform); Storyboard.SetTargetProperty(animTrans, "TranslateY");
             sb.Children.Add(animX); sb.Children.Add(animY); sb.Children.Add(animTrans);
-
-            // 2. BANNER-LOGIK (Nur für Main Cards relevant)
-            if (banner != null)
-            {
-                if (isSelected)
-                {
-                    var animOp = new DoubleAnimation { To = 1.0, Duration = duration };
-                    Storyboard.SetTarget(animOp, banner);
-                    Storyboard.SetTargetProperty(animOp, "Opacity");
-                    sb.Children.Add(animOp);
-                }
-                else
-                {
-                    banner.Opacity = 0;
-                }
-            }
 
             sb.Begin();
         }
@@ -11137,19 +15239,21 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             switch (e.Key)
             {
                 case VirtualKey.Left:
-                    _selectedCardIndex--;
-                    if (_selectedCardIndex < 0)
-                        _selectedCardIndex = ProgramCardPanel.Children.Count - 1;
-                    HighlightSelectedCard();
-                    PlayNavigationSound();
+                    if (_selectedCardIndex > 0)
+                    {
+                        _selectedCardIndex--;
+                        HighlightSelectedCard();
+                        PlayNavigationSound();
+                    }
                     break;
 
                 case VirtualKey.Right:
-                    _selectedCardIndex++;
-                    if (_selectedCardIndex >= ProgramCardPanel.Children.Count)
-                        _selectedCardIndex = 0;
-                    HighlightSelectedCard();
-                    PlayNavigationSound();
+                    if (_selectedCardIndex < ProgramCardPanel.Children.Count - 1)
+                    {
+                        _selectedCardIndex++;
+                        HighlightSelectedCard();
+                        PlayNavigationSound();
+                    }
                     break;
 
                 case VirtualKey.Enter:
@@ -11195,18 +15299,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             var sb = new Storyboard();
             var animX = new DoubleAnimation();
             var animY = new DoubleAnimation();
+            double baseScale = _currentTopPanelScale;
 
             animX.Duration = animY.Duration = new Duration(TimeSpan.FromMilliseconds(400));
 
             // Bounce-Effekt beim Aktivieren
             if (hasFocus)
             {
-                animX.To = animY.To = 1.05; // 5% größer
+                animX.To = animY.To = baseScale * 1.05;
                 animX.EasingFunction = animY.EasingFunction = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut };
             }
             else
             {
-                animX.To = animY.To = 1.0; // Normalgröße
+                animX.To = animY.To = baseScale;
                 animX.EasingFunction = animY.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut };
             }
 
@@ -11236,6 +15341,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             WS_EX_TRANSPARENT = 0x00000020
         }
 
+        private async Task CloseProcessWindowAsync(Process proc, IntPtr hwnd)
+        {
+            try
+            {
+                if (proc != null && !proc.HasExited)
+                {
+                    proc.Kill();
+                }
+                else if (hwnd != IntPtr.Zero)
+                {
+                    PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Could not kill process, sending close message instead: {ex.Message}");
+                if (hwnd != IntPtr.Zero)
+                {
+                    PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                }
+            }
+
+            await Task.Delay(500);
+            await RefreshAppListAsync();
+        }
+
  
         private async void TriggerCardAction(int index, bool launch)
         {
@@ -11248,7 +15379,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 // --- CINEMATIC MANUAL RESUME LOGIC ---
                 // Check if the target process is actually asleep
-                bool isSuspended = ProcessSuspender.IsProcessSuspended(tag.Process.Id);
+                bool isSuspended = tag.Process != null && !tag.Process.HasExited && ProcessSuspender.IsProcessSuspended(tag.Process.Id);
 
                 if (isSuspended)
                 {
@@ -11278,29 +15409,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // Standard switching logic (happens instantly if not suspended)
                 MakeSelfNonTopmost();
-                TaskManagerBringWindowToForeground(tag.Hwnd);
+                if (!await TrySwitchToWindowViaTaskViewAsync(
+                        tag.Hwnd,
+                        FocusReturnTarget.GameWindow))
+                {
+                    Debug.WriteLine("[GCM] Process handoff did not report focus; skipping fallback by design.");
+                }
             }
             else // B-Button to Close (Logic remains identical)
             {
-                try
-                {
-                    if (tag.Process != null && !tag.Process.HasExited)
-                    {
-                        tag.Process.Kill();
-                    }
-                    else
-                    {
-                        PostMessage(tag.Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Could not kill process, sending close message instead: {ex.Message}");
-                    PostMessage(tag.Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                }
-
-                await Task.Delay(500);
-                await RefreshAppListAsync();
+                await CloseProcessWindowAsync(tag.Process, tag.Hwnd);
             }
         }
 
@@ -11487,14 +15605,65 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             catch { return false; }
         }
 
+        private void ForceStartupVideoFullscreen()
+        {
+            try
+            {
+                IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                if (hwnd == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                ShowWindow(hwnd, SW_RESTORE);
+
+                try
+                {
+                    var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+                    var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+                    if (appWindow.Presenter.Kind != Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen)
+                    {
+                        appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"Startup fullscreen presenter fallback: {ex.Message}");
+                }
+
+                long style = (long)GetWindowLongPtr(hwnd, GWL_STYLE);
+                style &= ~(WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+                style |= WS_POPUP;
+                SetWindowLongPtr(hwnd, GWL_STYLE, (IntPtr)style);
+
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    GetScreenWidth(),
+                    GetScreenHeight(),
+                    SWP_SHOWWINDOW | 0x0020);
+
+                App.StartupTrace("Startup fullscreen forced.");
+            }
+            catch (Exception ex)
+            {
+                App.StartupTrace($"Startup fullscreen force failed: {ex.Message}");
+                Debug.WriteLine($"[StartupVideo] Fullscreen force failed: {ex.Message}");
+            }
+        }
+
         // --- GCM PLAYER (Startet direkt beim App-Start) ---
 
         private void PlayStartupVideo()
         {
             try
             {
+                App.StartupTrace("PlayStartupVideo entered.");
                 if (!IsGcmVideoEnabled() || IsSteamInjectionEnabled())
                 {
+                    App.StartupTrace("Startup video skipped.");
                     TransitionToMainUI();
                     return;
                 }
@@ -11505,15 +15674,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
                 {
                     Debug.WriteLine("[StartupVideo] Videodatei nicht gefunden.");
+                    App.StartupTrace("Startup video path missing. Transitioning directly to UI.");
                     TransitionToMainUI();
                     return;
                 }
+
+                ForceStartupVideoFullscreen();
 
                 // ALLES andere ausblenden, Hintergrund auf Tiefschwarz setzen
                 MainContent.Visibility = Visibility.Collapsed;
                 FocusLossOverlay.Visibility = Visibility.Collapsed;
 
                 StartupVideoPlayer.Visibility = Visibility.Visible;
+                StartupVideoPlayer.HorizontalAlignment = HorizontalAlignment.Stretch;
+                StartupVideoPlayer.VerticalAlignment = VerticalAlignment.Stretch;
                 // WICHTIG: Stretch auf UniformToFill, damit keine Ränder entstehen (Letterboxing vermeiden)
                 StartupVideoPlayer.Stretch = Stretch.UniformToFill;
 
@@ -11535,6 +15709,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
             catch (Exception ex)
             {
+                App.StartupTrace($"PlayStartupVideo failed: {ex.Message}");
                 Debug.WriteLine("[StartupVideo] Fehler: " + ex.Message);
                 TransitionToMainUI();
             }
@@ -11547,37 +15722,119 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void TransitionToMainUI()
         {
-            if (startupVideoFinished) return; // Verhindert doppeltes Ausführen
+            if (startupVideoFinished || _isTransitioningToMainUi) return; // Verhindert doppeltes Ausführen
 
-            SetBackgroundImage(GetScreenWidth(), GetScreenHeight());
+            App.StartupTrace("TransitionToMainUI begin.");
+            _isTransitioningToMainUi = true;
 
-            if (_startupMediaPlayer != null)
+            try
             {
-                _startupMediaPlayer.MediaEnded -= OnStartupVideoEnded;
-                _startupMediaPlayer.Pause(); // Sicherstellen, dass der Ton sofort stoppt
-                _startupMediaPlayer.Dispose();
-                _startupMediaPlayer = null;
+                try
+                {
+                    if (_startupMediaPlayer != null)
+                    {
+                        _startupMediaPlayer.MediaEnded -= OnStartupVideoEnded;
+                        _startupMediaPlayer.Pause();
+                        _startupMediaPlayer.Dispose();
+                        _startupMediaPlayer = null;
+                    }
+
+                    if (StartupVideoPlayer != null)
+                    {
+                        StartupVideoPlayer.SetMediaPlayer(null);
+                        StartupVideoPlayer.Visibility = Visibility.Collapsed;
+                    }
+
+                    App.StartupTrace("TransitionToMainUI startup video cleaned.");
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"TransitionToMainUI video cleanup failed: {ex}");
+                }
+
+                try
+                {
+                    MainContent.Opacity = 1.0;
+                    MainContent.Visibility = Visibility.Visible;
+
+                    FocusLossOverlay.Opacity = 1.0;
+                    FocusLossOverlay.Visibility = Visibility.Collapsed;
+                    _isOverlayActive = false;
+                    App.StartupTrace("TransitionToMainUI main content visible.");
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"TransitionToMainUI visibility failed: {ex}");
+                }
+
+                try
+                {
+                    _currentFocusArea = FocusArea.Cards;
+                    MarkShellUiReady();
+                    ApplyResponsiveShellSizing();
+                    UpdateVisualFocus();
+                    App.StartupTrace("TransitionToMainUI shell ready.");
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"TransitionToMainUI shell failed: {ex}");
+                }
+
+                try
+                {
+                    IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(myHwnd);
+                    var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+                    if (appWindow.Presenter.Kind != Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen)
+                    {
+                        appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+                    }
+
+                    App.StartupTrace("TransitionToMainUI fullscreen ready.");
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"TransitionToMainUI fullscreen failed: {ex}");
+                }
+
+                try
+                {
+                    SetBackgroundImage(GetScreenWidth(), GetScreenHeight());
+                    App.StartupTrace("TransitionToMainUI background scheduled.");
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"TransitionToMainUI background failed: {ex}");
+                }
+
+                try
+                {
+                    IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    SetWindowPos(myHwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                }
+                catch (Exception ex)
+                {
+                    App.StartupTrace($"TransitionToMainUI topmost reset failed: {ex}");
+                }
+
+                startupVideoFinished = true;
+                App.StartupTrace("TransitionToMainUI complete.");
             }
-
-            StartupVideoPlayer.SetMediaPlayer(null);
-            StartupVideoPlayer.Visibility = Visibility.Collapsed;
-
-            MainContent.Opacity = 1.0;
-            MainContent.Visibility = Visibility.Visible;
-
-            FocusLossOverlay.Opacity = 1.0;
-            FocusLossOverlay.Visibility = Visibility.Collapsed; // Normalerweise ausgeblendet, bis Fokus verloren geht
-            _isOverlayActive = false;
-
-            // Fokus auf die Karten setzen
-            _currentFocusArea = FocusArea.Cards;
-            UpdateVisualFocus();
-
-            // WICHTIG: Das Fenster aus dem "Immer im Vordergrund"-Modus befreien!
-            IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            SetWindowPos(myHwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-
-            startupVideoFinished = true;
+            catch (Exception ex)
+            {
+                App.StartupTrace($"TransitionToMainUI failed fatally but was contained: {ex}");
+                try
+                {
+                    MainContent.Visibility = Visibility.Visible;
+                    FocusLossOverlay.Visibility = Visibility.Collapsed;
+                }
+                catch { }
+                startupVideoFinished = true;
+            }
+            finally
+            {
+                _isTransitioningToMainUi = false;
+            }
         }
 
         // --- STEAM INJECTION ---
@@ -11771,6 +16028,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     await LoadInstalledAppsAsync();
                 }
+                else
+                {
+                    LoadAppLauncherFavorites();
+                    foreach (AppInfo app in AllInstalledApps)
+                    {
+                        app.IsFavorite = _favoriteAppIds.Contains(app.StableId);
+                    }
+                    RefreshAppLauncherView();
+                }
 
                 if (AppGridView.Items.Count > 0)
                 {
@@ -11795,8 +16061,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             try
             {
-                // Launch without admin privileges so apps don't inherit the elevated token.
-                if (app.FilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+                ClearFocusReturnWatchdog();
+
+                if (app.LaunchKind.Equals("Packaged", StringComparison.OrdinalIgnoreCase))
+                {
+                    ActivateUwpApp(app.LaunchTarget);
+                }
+                else if (app.LaunchKind.Equals("Shortcut", StringComparison.OrdinalIgnoreCase) ||
+                         app.FilePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
                 {
                     // For .lnk shortcuts use IShellDispatch2 which runs at medium integrity
                     // even when called from an elevated process.
@@ -11805,7 +16077,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
                 else
                 {
-                    StartProcessAsNonAdmin(app.FilePath);
+                    StartProcessAsNonAdmin(string.IsNullOrWhiteSpace(app.LaunchTarget) ? app.FilePath : app.LaunchTarget);
                 }
 
                 // Clean up the UI after launching.
@@ -11848,15 +16120,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // This command launches the main Windows Settings page.
-                Process.Start(new ProcessStartInfo("ms-settings:") { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[GCM] Could not open Windows Settings: {ex.Message}");
-            }
+            ToggleSettingsOverlay();
         }
 
 
@@ -12197,6 +16461,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private Process FindActiveGameProcess()
         {
+            if (_featuredGameProcessData?.Proc != null &&
+                !_featuredGameProcessData.Proc.HasExited &&
+                !IsProtectedProcess(_featuredGameProcessData.Proc))
+            {
+                LogToAppData($"[ProcessManager] Featured game target: {_featuredGameProcessData.Proc.ProcessName}");
+                return _featuredGameProcessData.Proc;
+            }
+
             if (_cardCache == null || _cardCache.Count == 0) return null;
 
             // 1. Pass: Look for a confirmed game (based on install path)
@@ -12275,9 +16547,219 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void ExitGcmButton_Click_1(object sender, RoutedEventArgs e)
         {
-            // Schritt 2: "explorer.exe" wieder als Standard-Shell in der Registry eintragen
+            ShowWindowsReturnConfirm();
+        }
+
+        private void ShowGithubReleasePrompt(Version currentVersion)
+        {
+            if (_availableGithubReleaseUpdate == null || GithubReleaseOverlay == null)
+            {
+                return;
+            }
+
+            _githubReleaseReturnFocusArea = _currentFocusArea == FocusArea.GithubReleasePrompt
+                ? FocusArea.Cards
+                : _currentFocusArea;
+
+            UpdateGithubReleasePromptIcons();
+
+            if (GithubReleaseTitleText != null)
+            {
+                GithubReleaseTitleText.Text = _availableGithubReleaseUpdate.DisplayTitle.ToUpperInvariant();
+            }
+
+            if (GithubReleaseMessageText != null)
+            {
+                GithubReleaseMessageText.Text =
+                    $"GitHub release {_availableGithubReleaseUpdate.VersionText} is available. " +
+                    $"You are currently on {FormatVersion(currentVersion)}. Open the release page to install it manually.";
+            }
+
+            GithubReleaseOverlay.Visibility = Visibility.Visible;
+            _currentFocusArea = FocusArea.GithubReleasePrompt;
+            StyleGithubReleasePromptChoices();
+
+            if (this.Content is UIElement root)
+            {
+                root.Focus(FocusState.Programmatic);
+            }
+
+            UpdateVisualFocus();
+        }
+
+        private void UpdateGithubReleasePromptIcons()
+        {
+            string confirmIcon = $"ms-appx:///Assets/{GetControllerIconAssetPath("A")}";
+            string cancelIcon = $"ms-appx:///Assets/{GetControllerIconAssetPath("B")}";
+
+            if (GithubReleaseOpenIcon != null)
+            {
+                GithubReleaseOpenIcon.Source = new BitmapImage(new Uri(confirmIcon));
+            }
+
+            if (GithubReleaseLaterIcon != null)
+            {
+                GithubReleaseLaterIcon.Source = new BitmapImage(new Uri(cancelIcon));
+            }
+        }
+
+        private void StyleGithubReleasePromptChoices()
+        {
+            if (GithubReleaseOpenButton != null)
+            {
+                GithubReleaseOpenButton.Background = new SolidColorBrush(GetThemeAccentColor(52));
+                GithubReleaseOpenButton.BorderBrush = new SolidColorBrush(GetThemeAccentColor(138));
+                GithubReleaseOpenButton.BorderThickness = new Thickness(1.35);
+            }
+
+            if (GithubReleaseLaterButton != null)
+            {
+                GithubReleaseLaterButton.Background = new SolidColorBrush(GetThemeCardTintColor(GetThemeGlassAlpha(24, 38, 58)));
+                GithubReleaseLaterButton.BorderBrush = new SolidColorBrush(GetThemeAccentColor(54));
+                GithubReleaseLaterButton.BorderThickness = new Thickness(1.0);
+            }
+        }
+
+        private void CloseGithubReleasePrompt()
+        {
+            if (GithubReleaseOverlay != null)
+            {
+                GithubReleaseOverlay.Visibility = Visibility.Collapsed;
+            }
+
+            _currentFocusArea = _githubReleaseReturnFocusArea;
+            UpdateVisualFocus();
+        }
+
+        private void OpenGithubReleasePromptPage()
+        {
+            if (_availableGithubReleaseUpdate == null || string.IsNullOrWhiteSpace(_availableGithubReleaseUpdate.HtmlUrl))
+            {
+                CloseGithubReleasePrompt();
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = _availableGithubReleaseUpdate.HtmlUrl,
+                    UseShellExecute = true
+                });
+
+                SendOverlayNotification($"Release page opened: {_availableGithubReleaseUpdate.VersionText}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Update] Failed to open release page: {ex.Message}");
+            }
+
+            CloseGithubReleasePrompt();
+        }
+
+        private void GithubReleaseOpenButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenGithubReleasePromptPage();
+        }
+
+        private void GithubReleaseLaterButton_Click(object sender, RoutedEventArgs e)
+        {
+            CloseGithubReleasePrompt();
+        }
+
+        private void GithubReleaseOverlay_BackdropTapped(object sender, TappedRoutedEventArgs e)
+        {
+            CloseGithubReleasePrompt();
+        }
+
+        private void GithubReleaseContent_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        private void ShowWindowsReturnConfirm()
+        {
+            UpdateWindowsReturnConfirmIcons();
+            WindowsReturnConfirmOverlay.Visibility = Visibility.Visible;
+            _currentFocusArea = FocusArea.WindowsReturnConfirm;
+            StyleWindowsReturnConfirmChoices();
+            if (this.Content is UIElement root)
+            {
+                root.Focus(FocusState.Programmatic);
+            }
+            UpdateVisualFocus();
+        }
+
+        private void UpdateWindowsReturnConfirmIcons()
+        {
+            string confirmIcon = $"ms-appx:///Assets/{GetControllerIconAssetPath("A")}";
+            string cancelIcon = $"ms-appx:///Assets/{GetControllerIconAssetPath("B")}";
+
+            if (WindowsReturnConfirmIcon != null)
+            {
+                WindowsReturnConfirmIcon.Source = new BitmapImage(new Uri(confirmIcon));
+            }
+
+            if (WindowsReturnCancelIcon != null)
+            {
+                WindowsReturnCancelIcon.Source = new BitmapImage(new Uri(cancelIcon));
+            }
+        }
+
+        private void StyleWindowsReturnConfirmChoices()
+        {
+            if (WindowsReturnConfirmButton != null)
+            {
+                WindowsReturnConfirmButton.Background = new SolidColorBrush(GetThemeCardTintColor(GetThemeGlassAlpha(30, 46, 68)));
+                WindowsReturnConfirmButton.BorderBrush = new SolidColorBrush(GetThemeAccentColor(82));
+                WindowsReturnConfirmButton.BorderThickness = new Thickness(1.2);
+            }
+
+            if (WindowsReturnCancelButton != null)
+            {
+                WindowsReturnCancelButton.Background = new SolidColorBrush(GetThemeCardTintColor(GetThemeGlassAlpha(24, 38, 58)));
+                WindowsReturnCancelButton.BorderBrush = new SolidColorBrush(GetThemeAccentColor(58));
+                WindowsReturnCancelButton.BorderThickness = new Thickness(1.2);
+            }
+        }
+
+        private void CloseWindowsReturnConfirm()
+        {
+            WindowsReturnConfirmOverlay.Visibility = Visibility.Collapsed;
+            _currentFocusArea = FocusArea.TopButtons;
+            _selectedTopButtonIndex = _topButtons.IndexOf(ExitGcmButton);
+            if (_selectedTopButtonIndex < 0)
+            {
+                _selectedTopButtonIndex = 0;
+            }
+            UpdateVisualFocus();
+        }
+
+        private void ConfirmReturnToWindows()
+        {
+            WindowsReturnConfirmOverlay.Visibility = Visibility.Collapsed;
+            ClearFocusReturnWatchdog();
             BackToWindows();
-          
+        }
+
+        private void WindowsReturnConfirmButton_Click(object sender, RoutedEventArgs e)
+        {
+            ConfirmReturnToWindows();
+        }
+
+        private void WindowsReturnCancelButton_Click(object sender, RoutedEventArgs e)
+        {
+            CloseWindowsReturnConfirm();
+        }
+
+        private void WindowsReturnConfirmOverlay_BackdropTapped(object sender, TappedRoutedEventArgs e)
+        {
+            CloseWindowsReturnConfirm();
+        }
+
+        private void WindowsReturnConfirmContent_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
         }
     }
 
@@ -12646,6 +17128,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
     {
         public string Name { get; set; }
         public string FilePath { get; set; }
+        public string LaunchTarget { get; set; }
+        public string LaunchKind { get; set; } = "Executable";
+        public string SourceLabel { get; set; } = "DESKTOP";
+        public string StableId { get; set; }
+        public bool IsFavorite { get; set; }
+        public string FavoriteGlyph => IsFavorite ? "★" : "☆";
+        public double FavoriteOpacity => IsFavorite ? 1.0 : 0.38;
         public BitmapImage Icon { get; set; }
     }
 

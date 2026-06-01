@@ -1,6 +1,7 @@
 ﻿using Microsoft.UI.Xaml;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Security.Principal;
 using System.Threading;
 using LaunchActivatedEventArgs = Microsoft.UI.Xaml.LaunchActivatedEventArgs;
@@ -14,19 +15,46 @@ namespace gcmloader
 
         private static Mutex _mutex = null;
         private const string AppName = "GameConsoleModeLoader";
+        private static readonly string StartupTracePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "gcmsettings",
+            "startup_trace.log");
 
         public App()
         {
             this.InitializeComponent();
         }
 
+        internal static void StartupTrace(string message)
+        {
+            try
+            {
+                string? directory = Path.GetDirectoryName(StartupTracePath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                File.AppendAllText(
+                    StartupTracePath,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
+            }
+            catch
+            {
+            }
+        }
+
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
+            StartupTrace("OnLaunched begin");
+
             // 1. Single Instance Check (Mutex)
            bool isFirstInstance;
            _mutex = new Mutex(true, AppName, out isFirstInstance);
+            StartupTrace($"Mutex acquired. isFirstInstance={isFirstInstance}");
             if (!isFirstInstance)
             {
+                StartupTrace("Exiting because another instance is already running.");
                 Environment.Exit(0);
                 return;
             }
@@ -34,20 +62,26 @@ namespace gcmloader
              //2. Admin-Rechte Check
             if (!IsAdministrator())
             {
+                StartupTrace("Current process is not elevated. Restarting as admin.");
                 RestartAsAdmin();
                 Environment.Exit(0);
                 return;
             }
+          StartupTrace("Admin check passed.");
 
             // 3. Toast Notification Setup (Optional)
             CommunityToolkit.WinUI.Notifications.ToastNotificationManagerCompat.OnActivated += (toastArgs) =>
             {
                 // Hier könnte Logik für Toast-Klicks rein
             };
+            StartupTrace("Toast activation handler attached.");
 
             // 4. Hauptfenster erstellen
+            StartupTrace("Creating MainWindow.");
             m_window = new MainWindow();
+            StartupTrace("MainWindow created. Activating.");
             m_window.Activate();
+            StartupTrace("MainWindow activated.");
         }
 
         /* * DOCUMENTATION:
@@ -88,8 +122,17 @@ namespace gcmloader
                 FileName = Process.GetCurrentProcess().MainModule.FileName,
                 Verb = "runas"
             };
-            try { Process.Start(startInfo); }
-            catch (Exception ex) { Debug.WriteLine($"Failed to restart as admin: {ex.Message}"); }
+            try
+            {
+                StartupTrace("Attempting elevated relaunch.");
+                Process.Start(startInfo);
+                StartupTrace("Elevated relaunch started.");
+            }
+            catch (Exception ex)
+            {
+                StartupTrace($"Failed to restart as admin: {ex.Message}");
+                Debug.WriteLine($"Failed to restart as admin: {ex.Message}");
+            }
         }
     }
 }

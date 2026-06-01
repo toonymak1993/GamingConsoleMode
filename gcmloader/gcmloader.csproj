@@ -3,6 +3,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <Version>2.6.0</Version>
+    <AssemblyVersion>2.6.0.0</AssemblyVersion>
+    <FileVersion>2.6.0.0</FileVersion>
+    <InformationalVersion>2.6.0</InformationalVersion>
     <RootNamespace>gcmloader</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
@@ -33,6 +37,7 @@
     <Content Remove="Assets\play.wav" />
     <Content Remove="Assets\playnite_logo.png" />
     <Content Remove="Assets\shortcut.wav" />
+    <Content Remove="Assets\steam_launcher_background.jpg" />
     <Content Remove="Assets\steam_logo.png" />
     <Content Remove="Assets\windowsicon.png" />
     <Content Remove="Assets\xbox-controller.png" />
@@ -48,6 +53,7 @@
     <None Remove="Assets\pause.wav" />
     <None Remove="Assets\play.wav" />
     <None Remove="Assets\shortcut.wav" />
+    <None Remove="Assets\steam_launcher_background.jpg" />
     <None Remove="Assets\windowsicon.png" />
     <None Remove="Assets\xbox_logo.png" />
     <None Remove="InAppNotification.xaml" />
@@ -112,6 +118,10 @@
     <EmbeddedResource Include="Assets\steam_logo.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
+    <Content Include="Assets\steam_launcher_background.jpg">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
     <EmbeddedResource Include="Assets\windowsicon.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -151,7 +161,6 @@
     <PackageReference Include="Discord.Net.Core" Version="3.17.1" />
     <PackageReference Include="DualSenseAPI" Version="1.0.2" />
     <PackageReference Include="HidSharp" Version="2.6.4" />
-    <PackageReference Include="InputSimulator" Version="1.0.4" />
     <PackageReference Include="InTheHand.BluetoothLE" Version="4.0.41" />
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.106">
       <PrivateAssets>all</PrivateAssets>
