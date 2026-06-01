@@ -4,7 +4,7 @@ using System.Threading;
 using Tomlyn;
 using Tomlyn.Model;
 
-namespace GAMINGCONSOLEMODE
+namespace gcmloader
 {
     public class AppSettings
     {
