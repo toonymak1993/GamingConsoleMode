@@ -45,9 +45,11 @@ using Tomlyn;
 using Tomlyn.Model;
 using Vanara.PInvoke;
 using Windows.Devices.Power;
+using Windows.Devices.Enumeration;
 using Windows.Gaming.Input;
 using Windows.Management.Deployment;
 using Windows.Media.Core;
+using Windows.Media.Devices;
 using Windows.Media.Playback;
 using Windows.Networking.Connectivity;
 using Windows.System;
@@ -108,6 +110,7 @@ namespace gcmloader
         private Storyboard _bottomStatusHideStoryboard;
         private string _pendingStatusMessage = string.Empty;
         private ControllerType _lastActiveControllerType = ControllerType.Xbox;
+        private bool _hasObservedControllerInput;
         private double _currentShellLayoutScale = 1.0;
         private double _currentTopPanelScale = 1.0;
         private bool _isRebuildingResponsiveShell;
@@ -115,6 +118,10 @@ namespace gcmloader
         private DispatcherTimer _audioOverlayRefreshTimer;
         private bool _allowMasterVolumeSliderWrite;
         private bool _suppressMasterVolumeWrite;
+        private readonly Dictionary<string, MediaPlayer> _uiSoundPlayers = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _uiSoundLastPlayedUtc = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _uiActionGateSync = new();
+        private readonly Dictionary<string, DateTime> _uiActionLastTriggeredUtc = new(StringComparer.OrdinalIgnoreCase);
         private bool _isShellUiReady;
         private bool _isTransitioningToMainUi;
         private bool _taskManagerStartupPending;
@@ -167,6 +174,13 @@ namespace gcmloader
             public string VersionText { get; set; }
             public string DisplayTitle { get; set; }
             public string HtmlUrl { get; set; }
+        }
+
+        private sealed class AudioRenderDeviceInfo
+        {
+            public string Id { get; set; }
+            public string DisplayName { get; set; }
+            public bool IsDefault { get; set; }
         }
         #endregion
 
@@ -339,7 +353,10 @@ namespace gcmloader
                 LegendDevices.Visibility = Visibility.Collapsed;
                 LegendMixer.Visibility = Visibility.Visible;
 
-                RefreshMixerList();
+                if (_audioMixerRows.Count == 0 || (DateTime.UtcNow - _lastAudioMixerRefreshUtc).TotalMilliseconds >= 350)
+                {
+                    RefreshMixerList();
+                }
             }
             else
             {
@@ -370,24 +387,29 @@ namespace gcmloader
             MixerListStackPanel.Children.Clear();
             _audioMixerRows.Clear();
             _selectedMixerIndex = 0;
+            _lastAudioMixerRefreshUtc = DateTime.UtcNow;
 
             HashSet<uint> processedPids = new HashSet<uint>();
 
             try
             {
                 var enumerator = new MMDeviceEnumerator();
-                MMDevice device;
-                try
+                var device = TryGetDefaultRenderDevice(enumerator);
+                if (device == null)
                 {
-                    device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                }
-                catch
-                {
+                    ShowMixerFallbackMessage("No default audio output device is available.");
                     return;
                 }
 
                 var sessionManager = device.AudioSessionManager;
-                sessionManager.RefreshSessions();
+                try
+                {
+                    sessionManager.RefreshSessions();
+                }
+                catch (Exception refreshEx)
+                {
+                    Debug.WriteLine($"[AudioMixer] RefreshSessions failed: {refreshEx}");
+                }
 
                 for (int i = 0; i < sessionManager.Sessions.Count; i++)
                 {
@@ -449,10 +471,16 @@ namespace gcmloader
                     MixerListStackPanel.Children.Add(row);
                     _audioMixerRows.Add(row);
                 }
+
+                if (_audioMixerRows.Count == 0)
+                {
+                    ShowMixerFallbackMessage("No active app audio sessions are available right now.");
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[AudioMixer CRITICAL ERROR]: {ex.Message}");
+                Debug.WriteLine($"[AudioMixer CRITICAL ERROR]: {ex}");
+                ShowMixerFallbackMessage("The app mixer could not be loaded right now.");
             }
         }
 
@@ -461,13 +489,13 @@ namespace gcmloader
         {
             var border = new Border
             {
-                Height = 70,
-                CornerRadius = new CornerRadius(12),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(15, 0, 15, 0),
-                // WICHTIG: Margin sorgt dafür, dass beim Zoomen nichts abgeschnitten wird
-                Margin = new Thickness(12, 4, 12, 4),
+                Height = 76,
+                CornerRadius = new CornerRadius(18),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(18, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(38, 255, 255, 255)),
+                Padding = new Thickness(18, 0, 18, 0),
+                Margin = new Thickness(8, 6, 8, 6),
                 Tag = session,
                 // Transform direkt vorbereiten für flüssigere Animation
                 RenderTransform = new CompositeTransform { CenterX = 0.5, CenterY = 0.5 },
@@ -633,7 +661,41 @@ namespace gcmloader
             }
         }
 
+        private void ApplyAudioMixerRowVisual(Border row, bool isSelected)
+        {
+            if (row == null)
+            {
+                return;
+            }
 
+            row.Background = new SolidColorBrush(isSelected
+                ? GetThemeAccentColor(34)
+                : Windows.UI.Color.FromArgb(18, 255, 255, 255));
+            row.BorderBrush = new SolidColorBrush(isSelected
+                ? GetThemeAccentColor(174)
+                : Windows.UI.Color.FromArgb(38, 255, 255, 255));
+            row.BorderThickness = new Thickness(isSelected ? 1.4 : 1);
+        }
+
+        private void ApplyAudioDeviceButtonVisual(Button button, bool isSelected)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            bool isDefaultDevice = _audioDeviceButtonLookup.TryGetValue(button, out var info) && info.IsDefault;
+            byte baseAlpha = isDefaultDevice ? (byte)26 : (byte)16;
+            byte borderAlpha = isDefaultDevice ? (byte)78 : (byte)38;
+
+            button.Background = new SolidColorBrush(isSelected
+                ? GetThemeAccentColor(34)
+                : Windows.UI.Color.FromArgb(baseAlpha, 255, 255, 255));
+            button.BorderBrush = new SolidColorBrush(isSelected
+                ? GetThemeAccentColor(174)
+                : Windows.UI.Color.FromArgb(borderAlpha, 255, 255, 255));
+            button.BorderThickness = new Thickness(isSelected ? 1.4 : 1);
+        }
 
         // Fokus Visualisierung für Audio Menü (MIT AUTO-SCROLLING)
         private void UpdateAudioVisualFocus()
@@ -642,24 +704,24 @@ namespace gcmloader
             foreach (var btn in _audioDeviceButtons)
             {
                 AnimateScale(btn, false);
-                btn.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                ApplyAudioDeviceButtonVisual(btn, false);
             }
             foreach (var row in _audioMixerRows)
             {
                 AnimateScale(row, false);
-                row.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                ApplyAudioMixerRowVisual(row, false);
             }
 
             // 2. Reset Master Slider
             MasterVolumeContainer.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            MasterVolumeContainer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(10, 255, 255, 255)); // Standard dunkel
+            MasterVolumeContainer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(12, 255, 255, 255));
 
             // 3. Highlight Logik
             if (_isMasterVolumeFocused)
             {
                 // --- MASTER SLIDER FOKUS ---
                 // Hellerer Hintergrund + Akzent-Rahmen
-                MasterVolumeContainer.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 255, 255, 255));
+                MasterVolumeContainer.Background = new SolidColorBrush(GetThemeAccentColor(28));
                 MasterVolumeContainer.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
             }
             else
@@ -670,7 +732,7 @@ namespace gcmloader
                     if (_audioMixerRows.Count > _selectedMixerIndex && _selectedMixerIndex >= 0)
                     {
                         var active = _audioMixerRows[_selectedMixerIndex];
-                        active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                        ApplyAudioMixerRowVisual(active, true);
                         AnimateScale(active, true);
                         // Auto-Scroll Logic hier einfügen wenn nötig...
                     }
@@ -680,7 +742,7 @@ namespace gcmloader
                     if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex && _selectedAudioDeviceIndex >= 0)
                     {
                         var active = _audioDeviceButtons[_selectedAudioDeviceIndex];
-                        active.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 255, 255, 255));
+                        ApplyAudioDeviceButtonVisual(active, true);
                         AnimateScale(active, true);
                         // Auto-Scroll Logic hier einfügen wenn nötig...
                     }
@@ -693,117 +755,512 @@ namespace gcmloader
         // Cache for sounds to avoid loading from disk every time
         private readonly Dictionary<string, Uri> _soundCache = new();
         private List<Button> _audioDeviceButtons = new List<Button>();
+        private readonly Dictionary<Button, AudioRenderDeviceInfo> _audioDeviceButtonLookup = new();
         private int _selectedAudioDeviceIndex = 0;
+        private bool _isAudioFlyoutAnimating;
+        private int _audioFlyoutRequestVersion;
+        private DateTime _lastAudioMixerRefreshUtc = DateTime.MinValue;
 
-        // --- High-End Animation for the entire Sound Panel ---
-        private async void OpenAudioFlyout()
-{
-    try
-    {
-        // 1. UI Reset
-        ToggleAudioTab(false);
-        _isMasterVolumeFocused = false;
-        _allowMasterVolumeSliderWrite = false;
-        UpdateMasterVolumeUI();
-        
-        SimpleAudioList.Children.Clear();
-        _audioDeviceButtons.Clear();
-
-        // 2. Sichtbarkeit setzen (damit das Layout gerechnet wird), aber Opacity bleibt 0
-        AudioOverlay.Visibility = Visibility.Visible;
-        _currentFocusArea = FocusArea.AudioMenu;
-        _selectedAudioDeviceIndex = 0;
-
-        // --- HIER FEHLTE DIE LOGIK: Lade die Audio-Geräte ---
-        var enumerator = new MMDeviceEnumerator();
-        var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
-
-        MMDevice defaultDevice = null;
-        try { defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia); } catch { }
-
-        foreach (var device in devices)
-        {
-            var btn = new Button
-            {
-                Tag = device.FriendlyName,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Height = 60,
-                CornerRadius = new CornerRadius(12),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
-                BorderThickness = new Thickness(0)
-            };
-
-            var contentStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 15 };
-
-            string glyph = device.FriendlyName.ToLower().Contains("headset") || device.FriendlyName.ToLower().Contains("kopfhörer") ? "\uE76B" : "\uE7F5";
-            contentStack.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White) });
-
-            contentStack.Children.Add(new TextBlock
-            {
-                Text = device.FriendlyName,
-                VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 15,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-
-            if (defaultDevice != null && device.ID == defaultDevice.ID)
-            {
-                btn.BorderThickness = new Thickness(2);
-                btn.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemControlHighlightAccentBrush"];
-            }
-
-            btn.Content = contentStack;
-            btn.Click += (s, e) => SetAudioDevice(device.FriendlyName);
-
-            _audioDeviceButtons.Add(btn);
-            SimpleAudioList.Children.Add(btn);
-        }
-        // --------------------------------------------------
-
-        // FIX FÜR DAS ABSCHNEIDEN: Dem System Zeit geben, die Buttons ins UI zu zeichnen!
-        await Task.Delay(10);
-        SimpleAudioList.UpdateLayout();
-
-        // 3. Animation starten
-        var sb = new Storyboard();
-        var duration = TimeSpan.FromMilliseconds(450);
-        var easing = new ExponentialEase { Exponent = 6, EasingMode = EasingMode.EaseOut };
-
-        // Fade In
-        var fadeIn = new DoubleAnimation { To = 1.0, Duration = TimeSpan.FromMilliseconds(250) };
-        Storyboard.SetTarget(fadeIn, AudioOverlay);
-        Storyboard.SetTargetProperty(fadeIn, "Opacity");
-
-        // Slide Up
-        var slideUp = new DoubleAnimation 
-        { 
-            From = 100, 
-            To = 0, 
-            Duration = duration, 
-            EasingFunction = easing 
-        };
-        Storyboard.SetTarget(slideUp, AudioPanelTransform);
-        Storyboard.SetTargetProperty(slideUp, "TranslateY");
-
-        sb.Children.Add(fadeIn);
-        sb.Children.Add(slideUp);
-        sb.Begin();
-
-        _allowMasterVolumeSliderWrite = true;
-        StartAudioOverlayRefreshLoop();
-        UpdateVisualFocus();
-    }
-    catch (Exception ex) 
-    { 
-        Debug.WriteLine("Audio Error: " + ex.Message); 
-    }
-}
-
-        private void CloseAudioFlyout()
+        private void ResetAudioFlyoutState(bool collapseOverlay)
         {
             _allowMasterVolumeSliderWrite = false;
             StopAudioOverlayRefreshLoop();
+
+            if (AudioPanelTransform != null)
+            {
+                AudioPanelTransform.TranslateY = 100;
+            }
+
+            if (AudioOverlay != null)
+            {
+                AudioOverlay.IsHitTestVisible = !collapseOverlay;
+                AudioOverlay.Opacity = 0;
+                AudioOverlay.Visibility = collapseOverlay ? Visibility.Collapsed : Visibility.Visible;
+            }
+        }
+
+        private MMDevice TryGetDefaultRenderDevice(MMDeviceEnumerator enumerator)
+        {
+            if (enumerator == null)
+            {
+                return null;
+            }
+
+            foreach (var role in new[] { Role.Multimedia, Role.Console, Role.Communications })
+            {
+                try
+                {
+                    return enumerator.GetDefaultAudioEndpoint(DataFlow.Render, role);
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                return enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+                    .Cast<MMDevice>()
+                    .FirstOrDefault();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ShowAudioFlyoutFallbackMessage(string message)
+        {
+            if (SimpleAudioList == null)
+            {
+                return;
+            }
+
+            SimpleAudioList.Children.Clear();
+            _audioDeviceButtons.Clear();
+            _audioDeviceButtonLookup.Clear();
+            _selectedAudioDeviceIndex = 0;
+
+            var messageBlock = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                Opacity = 0.88,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(12)
+            };
+
+            var host = new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                CornerRadius = new CornerRadius(12),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(16, 18, 16, 18),
+                Child = messageBlock
+            };
+
+            SimpleAudioList.Children.Add(host);
+        }
+
+        private void ShowMixerFallbackMessage(string message)
+        {
+            if (MixerListStackPanel == null)
+            {
+                return;
+            }
+
+            MixerListStackPanel.Children.Clear();
+            _audioMixerRows.Clear();
+            _selectedMixerIndex = 0;
+
+            var messageBlock = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                Opacity = 0.88,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(12)
+            };
+
+            var host = new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                CornerRadius = new CornerRadius(12),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(16, 18, 16, 18),
+                Child = messageBlock
+            };
+
+            MixerListStackPanel.Children.Add(host);
+        }
+
+        private void ShowAudioFlyoutLoadingMessage(string message)
+        {
+            if (SimpleAudioList == null)
+            {
+                return;
+            }
+
+            SimpleAudioList.Children.Clear();
+            _audioDeviceButtons.Clear();
+            _audioDeviceButtonLookup.Clear();
+            _selectedAudioDeviceIndex = 0;
+
+            var progressRing = new ProgressRing
+            {
+                IsActive = true,
+                Width = 28,
+                Height = 28,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            var messageBlock = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                Opacity = 0.88,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            };
+
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                Spacing = 12,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            stack.Children.Add(progressRing);
+            stack.Children.Add(messageBlock);
+
+            var host = new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                CornerRadius = new CornerRadius(12),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(16, 18, 16, 18),
+                Child = stack
+            };
+
+            SimpleAudioList.Children.Add(host);
+        }
+
+        private async Task<List<AudioRenderDeviceInfo>> GetAudioRenderDevicesAsync()
+        {
+            var devices = new List<AudioRenderDeviceInfo>();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var defaultDevice = TryGetDefaultRenderDevice(enumerator);
+
+                foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).Cast<MMDevice>())
+                {
+                    string deviceId = device.ID ?? string.Empty;
+                    string displayName = device.FriendlyName?.Trim();
+                    if (string.IsNullOrWhiteSpace(displayName) || !seenIds.Add(deviceId))
+                    {
+                        continue;
+                    }
+
+                    devices.Add(new AudioRenderDeviceInfo
+                    {
+                        Id = deviceId,
+                        DisplayName = displayName,
+                        IsDefault = defaultDevice != null &&
+                                    string.Equals(defaultDevice.ID, deviceId, StringComparison.OrdinalIgnoreCase)
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Audio] NAudio render device enumeration failed: {ex}");
+            }
+
+            if (devices.Count > 0)
+            {
+                return devices;
+            }
+
+            try
+            {
+                string defaultDeviceId = string.Empty;
+                try
+                {
+                    defaultDeviceId = MediaDevice.GetDefaultAudioRenderId(AudioDeviceRole.Default) ?? string.Empty;
+                }
+                catch (Exception defaultIdEx)
+                {
+                    Debug.WriteLine($"[Audio] WinRT default render device lookup failed: {defaultIdEx}");
+                }
+
+                var infos = await DeviceInformation.FindAllAsync(MediaDevice.GetAudioRenderSelector());
+                foreach (var info in infos)
+                {
+                    if (info == null || string.IsNullOrWhiteSpace(info.Name))
+                    {
+                        continue;
+                    }
+
+                    string deviceId = info.Id ?? string.Empty;
+                    if (!seenIds.Add(deviceId))
+                    {
+                        continue;
+                    }
+
+                    devices.Add(new AudioRenderDeviceInfo
+                    {
+                        Id = deviceId,
+                        DisplayName = info.Name.Trim(),
+                        IsDefault = !string.IsNullOrWhiteSpace(defaultDeviceId) &&
+                                    string.Equals(defaultDeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Audio] WinRT render device enumeration failed: {ex}");
+            }
+
+            return devices;
+        }
+
+        // --- High-End Animation for the entire Sound Panel ---
+        private async void OpenAudioFlyout()
+        {
+            try
+            {
+                if (AudioOverlay == null || AudioPanelTransform == null || SimpleAudioList == null)
+                {
+                    Debug.WriteLine("[Audio] Overlay controls are not ready.");
+                    return;
+                }
+
+                if (_isAudioFlyoutAnimating)
+                {
+                    return;
+                }
+
+                if (AudioOverlay.Visibility == Visibility.Visible && AudioOverlay.Opacity > 0.98)
+                {
+                    return;
+                }
+
+                int requestVersion = ++_audioFlyoutRequestVersion;
+                _isAudioFlyoutAnimating = true;
+
+                ToggleAudioTab(false);
+                _isMasterVolumeFocused = false;
+                _allowMasterVolumeSliderWrite = false;
+
+                SimpleAudioList.Children.Clear();
+                _audioDeviceButtons.Clear();
+                _audioDeviceButtonLookup.Clear();
+                _selectedAudioDeviceIndex = 0;
+
+                AudioOverlay.Visibility = Visibility.Visible;
+                AudioOverlay.IsHitTestVisible = true;
+                AudioOverlay.Opacity = 0;
+                AudioPanelTransform.TranslateY = 100;
+                _currentFocusArea = FocusArea.AudioMenu;
+
+                ShowAudioFlyoutLoadingMessage("Loading audio devices...");
+                UpdateVisualFocus();
+
+                var sb = new Storyboard();
+                var duration = TimeSpan.FromMilliseconds(450);
+                var easing = new ExponentialEase { Exponent = 6, EasingMode = EasingMode.EaseOut };
+
+                var fadeIn = new DoubleAnimation { To = 1.0, Duration = TimeSpan.FromMilliseconds(250) };
+                Storyboard.SetTarget(fadeIn, AudioOverlay);
+                Storyboard.SetTargetProperty(fadeIn, "Opacity");
+
+                var slideUp = new DoubleAnimation
+                {
+                    From = 100,
+                    To = 0,
+                    Duration = duration,
+                    EasingFunction = easing
+                };
+                Storyboard.SetTarget(slideUp, AudioPanelTransform);
+                Storyboard.SetTargetProperty(slideUp, "TranslateY");
+
+                sb.Children.Add(fadeIn);
+                sb.Children.Add(slideUp);
+                sb.Completed += (_, _) => _isAudioFlyoutAnimating = false;
+                sb.Begin();
+
+                // Give WinUI one frame so the panel becomes visible before we touch audio APIs.
+                await Task.Yield();
+
+                if (requestVersion != _audioFlyoutRequestVersion || AudioOverlay.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+
+                UpdateMasterVolumeUI();
+
+                try
+                {
+                    SimpleAudioList.Children.Clear();
+
+                    var devices = await GetAudioRenderDevicesAsync();
+
+                    foreach (var device in devices)
+                    {
+                        var btn = new Button
+                        {
+                            Tag = device.DisplayName,
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            Height = 74,
+                            CornerRadius = new CornerRadius(18),
+                            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(device.IsDefault ? (byte)26 : (byte)16, 255, 255, 255)),
+                            BorderThickness = new Thickness(1),
+                            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(device.IsDefault ? (byte)78 : (byte)38, 255, 255, 255)),
+                            Padding = new Thickness(18, 0, 18, 0),
+                            HorizontalContentAlignment = HorizontalAlignment.Stretch
+                        };
+
+                        var contentGrid = new Grid();
+                        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                        string friendlyNameLower = device.DisplayName.ToLowerInvariant();
+                        string glyph = friendlyNameLower.Contains("headset") || friendlyNameLower.Contains("kopfhörer") || friendlyNameLower.Contains("headphones")
+                            ? "\uE76B"
+                            : "\uE7F5";
+
+                        var iconHost = new Border
+                        {
+                            Width = 44,
+                            Height = 44,
+                            CornerRadius = new CornerRadius(14),
+                            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(26, 255, 255, 255)),
+                            Child = new FontIcon
+                            {
+                                Glyph = glyph,
+                                FontSize = 18,
+                                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                        };
+                        Grid.SetColumn(iconHost, 0);
+
+                        var textStack = new StackPanel
+                        {
+                            Spacing = 3,
+                            Margin = new Thickness(14, 0, 0, 0),
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        textStack.Children.Add(new TextBlock
+                        {
+                            Text = device.DisplayName,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            FontSize = 15,
+                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                            TextTrimming = TextTrimming.CharacterEllipsis
+                        });
+                        textStack.Children.Add(new TextBlock
+                        {
+                            Text = device.IsDefault ? "Current default output" : "Available output",
+                            VerticalAlignment = VerticalAlignment.Center,
+                            FontSize = 12,
+                            Opacity = 0.68,
+                            TextTrimming = TextTrimming.CharacterEllipsis
+                        });
+                        Grid.SetColumn(textStack, 1);
+
+                        if (device.IsDefault)
+                        {
+                            var badge = new Border
+                            {
+                                Background = new SolidColorBrush(GetThemeAccentColor(42)),
+                                BorderBrush = new SolidColorBrush(GetThemeAccentColor(112)),
+                                BorderThickness = new Thickness(1),
+                                CornerRadius = new CornerRadius(12),
+                                Padding = new Thickness(10, 6, 10, 6),
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Child = new TextBlock
+                                {
+                                    Text = "DEFAULT",
+                                    FontSize = 11,
+                                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                                    CharacterSpacing = 80
+                                }
+                            };
+                            Grid.SetColumn(badge, 2);
+                            contentGrid.Children.Add(badge);
+                        }
+
+                        contentGrid.Children.Add(iconHost);
+                        contentGrid.Children.Add(textStack);
+
+                        btn.Content = contentGrid;
+                        _audioDeviceButtonLookup[btn] = device;
+                        btn.Click += (s, e) =>
+                        {
+                            if (TrySelectAudioDevice(device.DisplayName))
+                            {
+                                PlayActivationSound();
+                            }
+                        };
+
+                        _audioDeviceButtons.Add(btn);
+                        SimpleAudioList.Children.Add(btn);
+                    }
+
+                    if (_audioDeviceButtons.Count == 0)
+                    {
+                        ShowAudioFlyoutFallbackMessage("No active audio output devices were found.");
+                    }
+                }
+                catch (Exception deviceEx)
+                {
+                    Debug.WriteLine("[Audio] Device enumeration failed: " + deviceEx);
+                    ShowAudioFlyoutFallbackMessage("Audio devices could not be loaded right now.");
+                }
+
+                if (requestVersion != _audioFlyoutRequestVersion || AudioOverlay.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+
+                await Task.Delay(10);
+                SimpleAudioList.UpdateLayout();
+
+                _allowMasterVolumeSliderWrite = true;
+                StartAudioOverlayRefreshLoop();
+                UpdateVisualFocus();
+            }
+            catch (Exception ex)
+            {
+                _isAudioFlyoutAnimating = false;
+                ResetAudioFlyoutState(true);
+                _currentFocusArea = FocusArea.TopButtons;
+                Debug.WriteLine("[Audio] Flyout failed: " + ex.Message);
+                SendOverlayNotification("Audio panel failed to open");
+                UpdateVisualFocus();
+            }
+        }
+
+        private void CloseAudioFlyout()
+        {
+            _audioFlyoutRequestVersion++;
+            _allowMasterVolumeSliderWrite = false;
+            StopAudioOverlayRefreshLoop();
+
+            if (AudioOverlay == null || AudioPanelTransform == null)
+            {
+                _isAudioFlyoutAnimating = false;
+                _currentFocusArea = FocusArea.TopButtons;
+                UpdateVisualFocus();
+                return;
+            }
+
+            if (AudioOverlay.Visibility != Visibility.Visible)
+            {
+                _isAudioFlyoutAnimating = false;
+                _currentFocusArea = FocusArea.TopButtons;
+                UpdateVisualFocus();
+                return;
+            }
+
+            _isAudioFlyoutAnimating = true;
 
             var duration = TimeSpan.FromMilliseconds(300);
             var easing = new ExponentialEase { Exponent = 5, EasingMode = EasingMode.EaseIn };
@@ -823,6 +1280,8 @@ namespace gcmloader
             sb.Children.Add(slideDown);
 
             sb.Completed += (s, e) => {
+                _isAudioFlyoutAnimating = false;
+                AudioOverlay.IsHitTestVisible = false;
                 AudioOverlay.Visibility = Visibility.Collapsed;
                 _currentFocusArea = FocusArea.TopButtons;
                 UpdateVisualFocus();
@@ -833,9 +1292,44 @@ namespace gcmloader
 
         private void ToggleAudioFlyout()
         {
-         
+            if (AudioOverlay == null)
+            {
+                return;
+            }
+
+            if (_isAudioFlyoutAnimating)
+            {
+                return;
+            }
+
+            if (AudioOverlay.Visibility == Visibility.Visible && AudioOverlay.Opacity < 0.01)
+            {
+                ResetAudioFlyoutState(true);
+            }
+
             if (AudioOverlay.Visibility == Visibility.Visible) CloseAudioFlyout();
             else OpenAudioFlyout();
+        }
+
+        private bool TryToggleAudioFlyout(string gateKey)
+        {
+            if (!TryAcquireUiActionGate(gateKey, 280))
+            {
+                return false;
+            }
+
+            if (AudioOverlay == null || _isAudioFlyoutAnimating)
+            {
+                return false;
+            }
+
+            ToggleAudioFlyout();
+            return true;
+        }
+
+        private void VolumeButton_Click(object sender, RoutedEventArgs e)
+        {
+            DispatcherQueue.TryEnqueue(() => TryToggleAudioFlyout("audio-volume-button"));
         }
 
         private void AudioOverlay_Tapped(object sender, TappedRoutedEventArgs e)
@@ -849,8 +1343,18 @@ namespace gcmloader
             string cleanedName = deviceName.Split('(')[0].Trim();
             NirCmdUtil.NirCmdHelper.ExecuteCommand($"setdefaultsounddevice \"{cleanedName}\"");
             SendOverlayNotification("Audio: " + cleanedName);
-            PlayActivationSound();
             CloseAudioFlyout();
+        }
+
+        private bool TrySelectAudioDevice(string deviceName)
+        {
+            if (string.IsNullOrWhiteSpace(deviceName) || !TryAcquireUiActionGate("audio-set-device", 320))
+            {
+                return false;
+            }
+
+            SetAudioDevice(deviceName);
+            return true;
         }
 
         #endregion soundcontrol
@@ -859,12 +1363,38 @@ namespace gcmloader
         private HidDevice _ps5Device;
         private HidStream _ps5Stream;
         private byte[] _hidInputBuffer = new byte[64];
+        private HidDevice _steamDeckPuckDevice;
+        private HidStream _steamDeckPuckStream;
+        private readonly byte[] _steamDeckPuckInputBuffer = new byte[64];
 
         // Navigation State für PlayStation (Index 4 reserviert)
         private GamepadButtonFlags _lastPs5ButtonState = GamepadButtonFlags.None;
         private DateTime _ps5NextAllowedInputTime = DateTime.MinValue;
         private bool _ps5StickCentered = true;
+        private GamepadButtonFlags _lastSteamDeckPuckButtonState = GamepadButtonFlags.None;
+        private DateTime _steamDeckPuckNextAllowedInputTime = DateTime.MinValue;
+        private bool _steamDeckPuckStickCentered = true;
         private GamepadButtonFlags[] _lastShortcutButtons = new GamepadButtonFlags[5];
+
+        private const int SteamDeckPuckVendorId = 0x28DE;
+        private const int SteamDeckPuckProductId = 0x1304;
+        private const int SteamDeckPuckControllerIndex = 7;
+
+        private const uint SteamDeckButtonA = 0x00000001;
+        private const uint SteamDeckButtonB = 0x00000002;
+        private const uint SteamDeckButtonX = 0x00000004;
+        private const uint SteamDeckButtonY = 0x00000008;
+        private const uint SteamDeckButtonView = 0x00000040;
+        private const uint SteamDeckButtonRightStick = 0x00000020;
+        private const uint SteamDeckButtonRightShoulder = 0x00000200;
+        private const uint SteamDeckButtonDPadDown = 0x00000400;
+        private const uint SteamDeckButtonDPadRight = 0x00000800;
+        private const uint SteamDeckButtonDPadLeft = 0x00001000;
+        private const uint SteamDeckButtonDPadUp = 0x00002000;
+        private const uint SteamDeckButtonMenu = 0x00004000;
+        private const uint SteamDeckButtonLeftStick = 0x00008000;
+        private const uint SteamDeckButtonSteam = 0x00010000;
+        private const uint SteamDeckButtonLeftShoulder = 0x00080000;
 
         #endregion psdualsense
         #region controllerbattery icon
@@ -1250,6 +1780,22 @@ namespace gcmloader
         private uint _lastCheckedDpi = 0;
         private int _lastCheckedWidth = 0;
         private int _lastCheckedHeight = 0;
+        private WindowProcDelegate _nativeScalingWindowProc;
+        private IntPtr _originalWindowProc = IntPtr.Zero;
+        private bool _nativeScalingHookInstalled;
+        private int _pendingScaleRefreshRequestId;
+        private readonly bool _freezeRuntimeScaling = true;
+        private bool _hasFrozenScalingSnapshot;
+        private double _frozenLogicalWidth;
+        private double _frozenLogicalHeight;
+        private int _frozenPhysicalWidth;
+        private int _frozenPhysicalHeight;
+        private double _frozenDpiScale = 1.0;
+        private DispatcherTimer _runtimeScaleMonitorTimer;
+        private bool _isRuntimeScaleReloading;
+        private double _lastObservedLiveDpiScale = 1.0;
+        private int _lastObservedLiveMonitorWidth;
+        private int _lastObservedLiveMonitorHeight;
 
         private void HideWindowFromAltTab(IntPtr hwnd)
         {
@@ -1292,6 +1838,93 @@ namespace gcmloader
             _displayWatchdogTimer.Start();
         }
 
+        private void StartRuntimeScaleMonitor()
+        {
+            if (_runtimeScaleMonitorTimer != null)
+            {
+                return;
+            }
+
+            CaptureCurrentLiveScaleState();
+
+            _runtimeScaleMonitorTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(900)
+            };
+
+            _runtimeScaleMonitorTimer.Tick += (s, e) =>
+            {
+                if (_isRuntimeScaleReloading)
+                {
+                    return;
+                }
+
+                if (!HasLiveScaleStateChanged())
+                {
+                    return;
+                }
+
+                Debug.WriteLine("[GCM] Runtime scaling watchdog detected a real scale/monitor change.");
+                _ = SoftReloadUiForScaleChangeAsync("Watchdog");
+            };
+
+            _runtimeScaleMonitorTimer.Start();
+        }
+
+        private void CaptureCurrentLiveScaleState()
+        {
+            _lastObservedLiveDpiScale = GetLiveDpiScaleFactor();
+
+            IntPtr hwnd = IntPtr.Zero;
+            try
+            {
+                hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            }
+            catch
+            {
+            }
+
+            if (TryGetCurrentMonitorBounds(hwnd, out RECT bounds))
+            {
+                _lastObservedLiveMonitorWidth = Math.Max(1, bounds.Right - bounds.Left);
+                _lastObservedLiveMonitorHeight = Math.Max(1, bounds.Bottom - bounds.Top);
+            }
+            else
+            {
+                GetLivePhysicalResolution(out _lastObservedLiveMonitorWidth, out _lastObservedLiveMonitorHeight);
+            }
+        }
+
+        private bool HasLiveScaleStateChanged()
+        {
+            double liveDpiScale = GetLiveDpiScaleFactor();
+            bool dpiChanged = Math.Abs(liveDpiScale - _lastObservedLiveDpiScale) > 0.01;
+
+            IntPtr hwnd = IntPtr.Zero;
+            try
+            {
+                hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            }
+            catch
+            {
+            }
+
+            int liveWidth;
+            int liveHeight;
+            if (TryGetCurrentMonitorBounds(hwnd, out RECT bounds))
+            {
+                liveWidth = Math.Max(1, bounds.Right - bounds.Left);
+                liveHeight = Math.Max(1, bounds.Bottom - bounds.Top);
+            }
+            else
+            {
+                GetLivePhysicalResolution(out liveWidth, out liveHeight);
+            }
+
+            bool monitorChanged = liveWidth != _lastObservedLiveMonitorWidth || liveHeight != _lastObservedLiveMonitorHeight;
+            return dpiChanged || monitorChanged;
+        }
+
         private double _currentRatio = 1.0;
         private const int DWMWA_EXCLUDED_FROM_PEEK = 12;
         private const int DWMWA_FLIP3D_POLICY = 9;
@@ -1332,14 +1965,7 @@ namespace gcmloader
         private void SystemEvents_DisplaySettingsChanged(object sender, EventArgs e)
         {
             Debug.WriteLine("[GCM] Display settings changed detected. Re-scaling UI...");
-
-            // Give the system a tiny moment to stabilize the new resolution
-            Task.Run(async () => {
-                await Task.Delay(500);
-                this.DispatcherQueue.TryEnqueue(() => {
-                    ForceDpiRedraw();
-                });
-            });
+            _ = SoftReloadUiForScaleChangeAsync("SystemEvents.DisplaySettingsChanged");
         }
 
         #region Advanced Scaling & Redraw Logic
@@ -1354,15 +1980,361 @@ namespace gcmloader
             {
                 root.XamlRoot.Changed += (sender, args) =>
                 {
-                    // We use the Dispatcher with a tiny delay. If we redraw too fast, 
-                    // the system might still be reporting the OLD scale values.
-                    this.DispatcherQueue.TryEnqueue(async () =>
-                    {
-                        await Task.Delay(100);
-                        Debug.WriteLine("[GCM] Scaling change detected via XamlRoot. Redrawing...");
-                        ForceDpiRedraw();
-                    });
+                    _ = SoftReloadUiForScaleChangeAsync("XamlRoot.Changed");
                 };
+            }
+        }
+
+        private void InstallNativeScalingHook()
+        {
+            if (_nativeScalingHookInstalled)
+            {
+                return;
+            }
+
+            try
+            {
+                IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                if (hwnd == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                _nativeScalingWindowProc = NativeScalingWindowProc;
+                IntPtr hookPtr = Marshal.GetFunctionPointerForDelegate(_nativeScalingWindowProc);
+                _originalWindowProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, hookPtr);
+                _nativeScalingHookInstalled = _originalWindowProc != IntPtr.Zero;
+
+                Debug.WriteLine(_nativeScalingHookInstalled
+                    ? "[GCM] Native scaling hook installed."
+                    : "[GCM] Native scaling hook installation returned a null original proc.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Failed to install native scaling hook: {ex}");
+            }
+        }
+
+        private IntPtr NativeScalingWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+        {
+            IntPtr result = _originalWindowProc != IntPtr.Zero
+                ? CallWindowProc(_originalWindowProc, hWnd, msg, wParam, lParam)
+                : IntPtr.Zero;
+
+            switch (msg)
+            {
+                case WM_DPICHANGED:
+                    Debug.WriteLine("[GCM] WM_DPICHANGED received.");
+                    TryApplySuggestedDpiRect(hWnd, lParam);
+                    _ = SoftReloadUiForScaleChangeAsync("WM_DPICHANGED");
+                    break;
+
+                case WM_DISPLAYCHANGE:
+                    Debug.WriteLine("[GCM] WM_DISPLAYCHANGE received.");
+                    _ = SoftReloadUiForScaleChangeAsync("WM_DISPLAYCHANGE");
+                    break;
+
+                case WM_SETTINGCHANGE:
+                    _ = SoftReloadUiForScaleChangeAsync("WM_SETTINGCHANGE");
+                    break;
+            }
+
+            return result;
+        }
+
+        private void RequestScaleRefresh(string reason, int delayMs = 120, bool forceMonitorResize = false)
+        {
+            int requestId = ++_pendingScaleRefreshRequestId;
+
+            this.DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(delayMs);
+                if (requestId != _pendingScaleRefreshRequestId)
+                {
+                    return;
+                }
+
+                RefreshScalingLayout(reason, forceMonitorResize);
+            });
+        }
+
+        private async Task SoftReloadUiForScaleChangeAsync(string reason)
+        {
+            int requestId = ++_pendingScaleRefreshRequestId;
+            await Task.Delay(260);
+
+            if (requestId != _pendingScaleRefreshRequestId || _isRuntimeScaleReloading)
+            {
+                return;
+            }
+
+            var completionSource = new TaskCompletionSource<bool>();
+
+            if (!DispatcherQueue.TryEnqueue(async () =>
+            {
+                if (_isRuntimeScaleReloading)
+                {
+                    completionSource.TrySetResult(false);
+                    return;
+                }
+
+                _isRuntimeScaleReloading = true;
+
+                try
+                {
+                    Debug.WriteLine($"[GCM] Starting soft UI reload for scale change via {reason}.");
+
+                    IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    if (MainContent != null)
+                    {
+                        MainContent.Visibility = Visibility.Collapsed;
+                    }
+
+                    ResetScalingSnapshot();
+                    ForceMonitorResizePulse(hwnd);
+                    await Task.Delay(90);
+                    RefreshScalingLayout($"RuntimeScaleReload:{reason}", forceMonitorResize: true);
+                    CaptureCurrentLiveScaleState();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GCM] Soft UI reload for scale change failed: {ex}");
+                }
+                finally
+                {
+                    if (MainContent != null)
+                    {
+                        MainContent.Visibility = Visibility.Visible;
+                    }
+
+                    _isRuntimeScaleReloading = false;
+                    completionSource.TrySetResult(true);
+                }
+            }))
+            {
+                return;
+            }
+
+            await completionSource.Task;
+        }
+
+        private void ResetScalingSnapshot()
+        {
+            _hasFrozenScalingSnapshot = false;
+            _frozenLogicalWidth = 0;
+            _frozenLogicalHeight = 0;
+            _frozenPhysicalWidth = 0;
+            _frozenPhysicalHeight = 0;
+            _frozenDpiScale = 1.0;
+        }
+
+        private void ForceMonitorResizePulse(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero || !TryGetCurrentMonitorBounds(hwnd, out RECT bounds))
+            {
+                return;
+            }
+
+            int width = Math.Max(1, bounds.Right - bounds.Left);
+            int height = Math.Max(1, bounds.Bottom - bounds.Top);
+            int pulseWidth = Math.Max(1, width - 2);
+            int pulseHeight = Math.Max(1, height - 2);
+            uint flags = SWP_NOZORDER | 0x0010 | SWP_SHOWWINDOW | 0x0020;
+
+            SetWindowPos(hwnd, IntPtr.Zero, bounds.Left, bounds.Top, pulseWidth, pulseHeight, flags);
+            SetWindowPos(hwnd, IntPtr.Zero, bounds.Left, bounds.Top, width, height, flags);
+        }
+
+        private void CaptureScalingSnapshotIfNeeded()
+        {
+            if (_hasFrozenScalingSnapshot)
+            {
+                return;
+            }
+
+            if (!TryReadLiveLogicalViewport(out double logicalWidth, out double logicalHeight))
+            {
+                return;
+            }
+
+            GetLivePhysicalResolution(out int physicalWidth, out int physicalHeight);
+
+            if (logicalWidth <= 0 || logicalHeight <= 0 || physicalWidth <= 0 || physicalHeight <= 0)
+            {
+                return;
+            }
+
+            _frozenLogicalWidth = logicalWidth;
+            _frozenLogicalHeight = logicalHeight;
+            _frozenPhysicalWidth = physicalWidth;
+            _frozenPhysicalHeight = physicalHeight;
+            _frozenDpiScale = GetLiveDpiScaleFactor();
+            _hasFrozenScalingSnapshot = _frozenDpiScale > 0;
+
+            Debug.WriteLine($"[GCM] Scaling snapshot captured: {_frozenPhysicalWidth}x{_frozenPhysicalHeight} @ {_frozenDpiScale:F2} -> logical {_frozenLogicalWidth:F0}x{_frozenLogicalHeight:F0}");
+        }
+
+        private bool ShouldFreezeRuntimeScalingFor(string reason)
+        {
+            return _freezeRuntimeScaling &&
+                   _hasFrozenScalingSnapshot &&
+                   !reason.StartsWith("RuntimeScaleReload:", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(reason, "InitialLoad", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void RefreshScalingLayout(string reason, bool forceMonitorResize = true)
+        {
+            try
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                if (hwnd != IntPtr.Zero && forceMonitorResize)
+                {
+                    TryResizeWindowToCurrentMonitor(hwnd);
+                }
+
+                if (ShouldFreezeRuntimeScalingFor(reason))
+                {
+                    if (_isShellUiReady && MainContent != null)
+                    {
+                        MainContent.Visibility = Visibility.Visible;
+                    }
+
+                    if (this.Content is FrameworkElement frozenRoot)
+                    {
+                        frozenRoot.InvalidateMeasure();
+                        frozenRoot.UpdateLayout();
+                    }
+
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        _lastCheckedDpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
+
+                        if (TryGetCurrentMonitorBounds(hwnd, out RECT frozenMonitorBounds))
+                        {
+                            _lastCheckedWidth = Math.Max(0, frozenMonitorBounds.Right - frozenMonitorBounds.Left);
+                            _lastCheckedHeight = Math.Max(0, frozenMonitorBounds.Bottom - frozenMonitorBounds.Top);
+                        }
+                    }
+
+                    Debug.WriteLine($"[GCM] Ignoring runtime scaling refresh via {reason}; keeping startup scale snapshot.");
+                    return;
+                }
+
+                UpdateScale();
+                ApplyResponsiveShellSizing(rebuildCards: true);
+                CaptureScalingSnapshotIfNeeded();
+
+                if (_isShellUiReady && MainContent != null)
+                {
+                    MainContent.Visibility = Visibility.Visible;
+                }
+
+                if (this.Content is FrameworkElement root)
+                {
+                    root.InvalidateMeasure();
+                    root.UpdateLayout();
+                }
+
+                if (hwnd != IntPtr.Zero)
+                {
+                    _lastCheckedDpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
+
+                    if (TryGetCurrentMonitorBounds(hwnd, out RECT monitorBounds))
+                    {
+                        _lastCheckedWidth = Math.Max(0, monitorBounds.Right - monitorBounds.Left);
+                        _lastCheckedHeight = Math.Max(0, monitorBounds.Bottom - monitorBounds.Top);
+                    }
+                }
+
+                Debug.WriteLine($"[GCM] Scaling layout refreshed via {reason}.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Scaling layout refresh failed via {reason}: {ex}");
+            }
+        }
+
+        private bool TryGetCurrentMonitorBounds(IntPtr hwnd, out RECT bounds)
+        {
+            bounds = default;
+
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            MONITORINFO monitorInfo = new MONITORINFO();
+            if (!GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                return false;
+            }
+
+            bounds = monitorInfo.rcMonitor;
+            return bounds.Right > bounds.Left && bounds.Bottom > bounds.Top;
+        }
+
+        private void TryResizeWindowToCurrentMonitor(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (TryGetCurrentMonitorBounds(hwnd, out RECT bounds))
+            {
+                SetWindowPos(
+                    hwnd,
+                    IntPtr.Zero,
+                    bounds.Left,
+                    bounds.Top,
+                    Math.Max(1, bounds.Right - bounds.Left),
+                    Math.Max(1, bounds.Bottom - bounds.Top),
+                    SWP_NOZORDER | 0x0010 | SWP_SHOWWINDOW | 0x0020);
+                return;
+            }
+
+            int pWidth = Vanara.PInvoke.User32.GetSystemMetrics(
+                Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
+            int pHeight = Vanara.PInvoke.User32.GetSystemMetrics(
+                Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
+
+            if (pWidth > 0 && pHeight > 0)
+            {
+                SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, SWP_NOZORDER | 0x0010 | SWP_SHOWWINDOW | 0x0020);
+            }
+        }
+
+        private void TryApplySuggestedDpiRect(IntPtr hwnd, IntPtr lParam)
+        {
+            if (hwnd == IntPtr.Zero || lParam == IntPtr.Zero)
+            {
+                return;
+            }
+
+            try
+            {
+                RECT suggestedRect = Marshal.PtrToStructure<RECT>(lParam);
+                int width = Math.Max(1, suggestedRect.Right - suggestedRect.Left);
+                int height = Math.Max(1, suggestedRect.Bottom - suggestedRect.Top);
+
+                SetWindowPos(
+                    hwnd,
+                    IntPtr.Zero,
+                    suggestedRect.Left,
+                    suggestedRect.Top,
+                    width,
+                    height,
+                    SWP_NOZORDER | 0x0010 | SWP_SHOWWINDOW);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCM] Failed to apply suggested DPI rect: {ex}");
             }
         }
 
@@ -1378,16 +2350,8 @@ namespace gcmloader
             try
             {
                 var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                int pWidth = Vanara.PInvoke.User32.GetSystemMetrics(
-                                 Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
-                int pHeight = Vanara.PInvoke.User32.GetSystemMetrics(
-                                 Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
-                if (pWidth > 0 && pHeight > 0)
-                {
-                    SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040 | 0x0020);
-                }
-                UpdateScale();
-                ApplyResponsiveShellSizing(rebuildCards: true);
+                TryResizeWindowToCurrentMonitor(hwnd);
+                RefreshScalingLayout("ForceDpiRedraw", forceMonitorResize: false);
             }
             catch (Exception ex)
             {
@@ -1407,9 +2371,92 @@ namespace gcmloader
   */
         private double GetDpiScaleFactor()
         {
+            if (_freezeRuntimeScaling && _hasFrozenScalingSnapshot)
+            {
+                return _frozenDpiScale;
+            }
+
+            return GetLiveDpiScaleFactor();
+        }
+
+        private double GetLiveDpiScaleFactor()
+        {
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             uint dpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
             return dpi / 96.0;
+        }
+
+        private bool TryGetLogicalViewport(out double logicalWidth, out double logicalHeight)
+        {
+            logicalWidth = 0;
+            logicalHeight = 0;
+
+            if (_freezeRuntimeScaling && _hasFrozenScalingSnapshot)
+            {
+                logicalWidth = _frozenLogicalWidth;
+                logicalHeight = _frozenLogicalHeight;
+                return logicalWidth > 0 && logicalHeight > 0;
+            }
+
+            return TryReadLiveLogicalViewport(out logicalWidth, out logicalHeight);
+        }
+
+        private bool TryReadLiveLogicalViewport(out double logicalWidth, out double logicalHeight)
+        {
+            logicalWidth = 0;
+            logicalHeight = 0;
+
+            try
+            {
+                if (RootGrid?.XamlRoot != null)
+                {
+                    logicalWidth = RootGrid.XamlRoot.Size.Width;
+                    logicalHeight = RootGrid.XamlRoot.Size.Height;
+                }
+
+                if (logicalWidth <= 0 || logicalHeight <= 0)
+                {
+                    logicalWidth = RootGrid?.ActualWidth ?? 0;
+                    logicalHeight = RootGrid?.ActualHeight ?? 0;
+                }
+
+                if (logicalWidth > 0 && logicalHeight > 0)
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Scale] Failed to read logical viewport directly: {ex.Message}");
+            }
+
+            try
+            {
+                double dpiScale = GetDpiScaleFactor();
+                if (dpiScale <= 0)
+                {
+                    return false;
+                }
+
+                int pWidth = Vanara.PInvoke.User32.GetSystemMetrics(
+                    Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
+                int pHeight = Vanara.PInvoke.User32.GetSystemMetrics(
+                    Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
+
+                if (pWidth <= 0 || pHeight <= 0)
+                {
+                    return false;
+                }
+
+                logicalWidth = pWidth / dpiScale;
+                logicalHeight = pHeight / dpiScale;
+                return logicalWidth > 0 && logicalHeight > 0;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Scale] Failed to derive logical viewport from DPI: {ex.Message}");
+                return false;
+            }
         }
 
         /* * Documentation:
@@ -1422,32 +2469,34 @@ namespace gcmloader
             if (MainContent == null) return;
             try
             {
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                uint dpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
-                double dpiScale = dpi / 96.0;
-                if (dpiScale <= 0) return;
-                int pWidth = Vanara.PInvoke.User32.GetSystemMetrics(
-                                 Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
-                int pHeight = Vanara.PInvoke.User32.GetSystemMetrics(
-                                 Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
-                if (pWidth <= 0 || pHeight <= 0) return;
-                double logicalW = pWidth / dpiScale;
-                double logicalH = pHeight / dpiScale;
+                if (!TryGetLogicalViewport(out double logicalW, out double logicalH))
+                {
+                    return;
+                }
+
                 const double baseW = 1920.0;
                 const double baseH = 1080.0;
                 double ratio = Math.Min(logicalW / baseW, logicalH / baseH);
                 if (ratio <= 0) return;
+
                 MainContent.Width = baseW;
                 MainContent.Height = baseH;
                 MainContent.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center;
                 MainContent.VerticalAlignment = VerticalAlignment.Center;
                 MainContent.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
-                MainContent.RenderTransform = new ScaleTransform
+
+                if (MainContent.RenderTransform is not ScaleTransform scaleTransform)
                 {
-                    ScaleX = ratio,
-                    ScaleY = ratio
-                };
-                Debug.WriteLine($"[Scale] {pWidth}x{pHeight} / {dpiScale:F2} = {logicalW:F0}x{logicalH:F0} → {ratio:F4}");
+                    scaleTransform = new ScaleTransform();
+                    MainContent.RenderTransform = scaleTransform;
+                }
+
+                scaleTransform.ScaleX = ratio;
+                scaleTransform.ScaleY = ratio;
+
+                GetPhysicalResolution(out int physicalWidth, out int physicalHeight);
+                double dpiScale = GetDpiScaleFactor();
+                Debug.WriteLine($"[Scale] {physicalWidth}x{physicalHeight} @ {dpiScale:F2} -> logical {logicalW:F0}x{logicalH:F0} -> ratio {ratio:F4}");
             }
             catch (Exception ex)
             {
@@ -1472,6 +2521,35 @@ namespace gcmloader
 
         private void GetPhysicalResolution(out int width, out int height)
         {
+            if (_freezeRuntimeScaling && _hasFrozenScalingSnapshot)
+            {
+                width = _frozenPhysicalWidth;
+                height = _frozenPhysicalHeight;
+                return;
+            }
+
+            GetLivePhysicalResolution(out width, out height);
+        }
+
+        private void GetLivePhysicalResolution(out int width, out int height)
+        {
+            IntPtr hwnd = IntPtr.Zero;
+
+            try
+            {
+                hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            }
+            catch
+            {
+            }
+
+            if (TryGetCurrentMonitorBounds(hwnd, out RECT bounds))
+            {
+                width = Math.Max(1, bounds.Right - bounds.Left);
+                height = Math.Max(1, bounds.Bottom - bounds.Top);
+                return;
+            }
+
             // Diese Methode liest die harten Pixel aus, keine skalierten Werte
             width = GetSystemMetrics(SM_CXSCREEN);
             height = GetSystemMetrics(SM_CYSCREEN);
@@ -1486,54 +2564,10 @@ namespace gcmloader
 
         private void TriggerAutomaticResync()
         {
-            // Wir geben Windows 500ms Zeit, um die neuen Skalierungswerte in die Registry zu schreiben
-            Task.Run(async () =>
-            {
-                await Task.Delay(500);
+            Debug.WriteLine("[GCM] Automatic scaling change detected. Queueing hard resync...");
+            _lastKnownDpi = GetLiveDpiScaleFactor() * 96.0;
 
-                this.DispatcherQueue.TryEnqueue(async () =>
-                {
-                    Debug.WriteLine("[GCM] Automatische Skalierungsänderung erkannt. Führe Hard-Resync aus...");
-
-                    var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-
-                    // Aktuelle DPI speichern
-                    uint currentDpi = Vanara.PInvoke.User32.GetDpiForWindow(hwnd);
-                    _lastKnownDpi = currentDpi;
-
-                    if (MainContent != null)
-                    {
-                        // 1. Layout-Cache leeren
-                        MainContent.Visibility = Visibility.Collapsed;
-
-                        // 2. Fenster physisch anpassen (Ohne Fokus zu klauen!)
-                        int pWidth = Vanara.PInvoke.User32.GetSystemMetrics(Vanara.PInvoke.User32.SystemMetric.SM_CXSCREEN);
-                        int pHeight = Vanara.PInvoke.User32.GetSystemMetrics(Vanara.PInvoke.User32.SystemMetric.SM_CYSCREEN);
-
-                        // 0x0040 = SWP_SHOWWINDOW
-                        // 0x0020 = SWP_FRAMECHANGED (Zwingt Windows zum DPI-Refresh)
-                        // 0x0010 = SWP_NOACTIVATE (Klaut keinen Fokus!)
-                        // 0x0004 = SWP_NOZORDER (Bleibt im Hintergrund, falls es dort ist)
-                        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, pWidth, pHeight, 0x0040 | 0x0020 | 0x0010 | 0x0004);
-
-                        // 3. Dem Buffer Zeit geben
-                        await Task.Delay(100);
-
-                        // 4. Unsere magische Skalierungs-Logik anwenden
-                        UpdateScale();
-
-                        // 5. UI wieder einblenden
-                        MainContent.Visibility = Visibility.Visible;
-                    }
-
-                    // 6. XAML Engine zwingen, neu zu zeichnen
-                    if (this.Content is FrameworkElement root)
-                    {
-                        root.InvalidateMeasure();
-                        root.UpdateLayout();
-                    }
-                });
-            });
+            _ = SoftReloadUiForScaleChangeAsync("TriggerAutomaticResync");
         }
 
         #endregion autoscaling
@@ -1568,6 +2602,19 @@ namespace gcmloader
             {
                 using var proc = Process.GetProcessById((int)pid);
                 string procName = proc.ProcessName;
+
+                if (IsSteamControllerInputModeActive())
+                {
+                    if (_isMouseModeActive && _wasAutoMouseActivated)
+                    {
+                        _isMouseModeActive = false;
+                        _wasAutoMouseActivated = false;
+
+                        this.DispatcherQueue.TryEnqueue(() => ParkMouseCursor());
+                    }
+
+                    return;
+                }
 
                 bool isTargetApp = _autoMouseApps.Contains(procName);
 
@@ -1613,7 +2660,120 @@ namespace gcmloader
         #endregion mouse engine
 
         // Enum for internal switching
-        public enum ControllerType { Xbox, PlayStation }
+        public enum ControllerType { Xbox, PlayStation, SteamController }
+
+        private readonly object _steamLaunchGateSync = new();
+        private bool _steamLaunchInProgress;
+        private DateTime _lastSteamLaunchRequestUtc = DateTime.MinValue;
+
+        private ControllerType ResolveControllerTypeForIndex(int controllerIndex)
+        {
+            if (controllerIndex == SteamDeckPuckControllerIndex)
+            {
+                return ControllerType.SteamController;
+            }
+
+            return IsPlayStationControllerIndex(controllerIndex) ? ControllerType.PlayStation : ControllerType.Xbox;
+        }
+
+        private bool IsSteamControllerInputModeActive()
+        {
+            return _hasObservedControllerInput && _lastActiveControllerType == ControllerType.SteamController;
+        }
+
+        private void DisableMouseModeForSteamController()
+        {
+            if (!_isMouseModeActive)
+            {
+                return;
+            }
+
+            _isMouseModeActive = false;
+            _wasAutoMouseActivated = false;
+            _mouseToggleLocked = false;
+            ParkMouseCursor();
+        }
+
+        private void ApplyActiveControllerType(ControllerType controllerType)
+        {
+            bool typeChanged = !_hasObservedControllerInput || _lastActiveControllerType != controllerType;
+            ControllerType previousType = _lastActiveControllerType;
+
+            _hasObservedControllerInput = true;
+            _lastActiveControllerType = controllerType;
+
+            if (controllerType == ControllerType.SteamController)
+            {
+                DisableMouseModeForSteamController();
+            }
+
+            if (!typeChanged)
+            {
+                return;
+            }
+
+            if (controllerType == ControllerType.SteamController && previousType != ControllerType.SteamController)
+            {
+                SendOverlayNotification("Switching to Steam Controller mode...");
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_isSettingsOverlayInitialized)
+                {
+                    RebuildVisibleSettingsRows();
+                    RefreshSettingsOverlayValues();
+                }
+
+                UpdateVisualFocus();
+            });
+        }
+
+        private bool TryAcquireUiActionGate(string gateKey, int cooldownMilliseconds)
+        {
+            lock (_uiActionGateSync)
+            {
+                DateTime now = DateTime.UtcNow;
+                if (_uiActionLastTriggeredUtc.TryGetValue(gateKey, out var lastTriggeredUtc) &&
+                    (now - lastTriggeredUtc).TotalMilliseconds < cooldownMilliseconds)
+                {
+                    return false;
+                }
+
+                _uiActionLastTriggeredUtc[gateKey] = now;
+                return true;
+            }
+        }
+
+        private bool TryBeginSteamLaunch()
+        {
+            lock (_steamLaunchGateSync)
+            {
+                DateTime now = DateTime.UtcNow;
+                if (_steamLaunchInProgress)
+                {
+                    return false;
+                }
+
+                if ((now - _lastSteamLaunchRequestUtc).TotalMilliseconds < 1500)
+                {
+                    return false;
+                }
+
+                _steamLaunchInProgress = true;
+                _lastSteamLaunchRequestUtc = now;
+                return true;
+            }
+        }
+
+        private void EndSteamLaunch()
+        {
+            lock (_steamLaunchGateSync)
+            {
+                _steamLaunchInProgress = false;
+                _lastSteamLaunchRequestUtc = DateTime.UtcNow;
+            }
+        }
         // In MainWindow.cs, bei den anderen Klassenvariablen
         private DispatcherTimer _windowEngineTimer;
         private HashSet<IntPtr> _knownWindowHandles = new HashSet<IntPtr>();
@@ -2852,16 +4012,24 @@ namespace gcmloader
 
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
+        private const int GWLP_WNDPROC = -4;
         private const long WS_POPUP = 0x80000000L;
         private const long WS_OVERLAPPEDWINDOW = 0x00CF0000L;
         private const uint WS_EX_NOACTIVATE = 0x08000000;
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_SHOWWINDOW = 0x0040;
+        private const uint WM_DISPLAYCHANGE = 0x007E;
+        private const uint WM_SETTINGCHANGE = 0x001A;
+        private const uint WM_DPICHANGED = 0x02E0;
+
+        private delegate IntPtr WindowProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(
             IntPtr hWnd,
@@ -3025,8 +4193,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
            // Logger.Initialize();
             App.StartupTrace("MainWindow ctor begin");
             this.InitializeComponent();
+            RootGrid.SizeChanged += RootGrid_SizeChanged;
             ApplySteamOnlyMode();
             MigrateThemeDefaultsIfNeeded();
+            EnsureDefaultShortcuts();
 
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (s, e) =>
             {
@@ -3071,6 +4241,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 rootElement.Loaded += (s, e) =>
                 {
                     App.StartupTrace("Root element loaded.");
+                    InstallNativeScalingHook();
+                    SetupScalingEvents(rootElement);
+                    RefreshScalingLayout("InitialLoad", forceMonitorResize: true);
+                    StartRuntimeScaleMonitor();
                     FocusSink.Focus(FocusState.Programmatic);
 
                     if (!_isVideoPlaybackInitiated)
@@ -3086,6 +4260,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _soundCache["nav"] = new Uri(Path.Combine(baseDir, "Assets\\nav.wav"));
             _soundCache["play"] = new Uri(Path.Combine(baseDir, "Assets\\play.wav"));
             _soundCache["pause"] = new Uri(Path.Combine(baseDir, "Assets\\pause.wav"));
+            EnsureUiSoundPlayers();
 
             _autoMouseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _autoMouseTimer.Tick += AutoMouseEngine_Tick;
@@ -3139,6 +4314,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             ForceStartupVideoFullscreen();
             this.Activate();
+            InstallNativeScalingHook();
             App.StartupTrace("MainWindow ctor completed.");
         }
 
@@ -4348,10 +5524,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (scaleChanged)
                 {
                     Debug.WriteLine("[GCM] Skalierungsänderung erkannt. Aktualisiere Layout ohne Presenter-Reset...");
-                    ApplyResponsiveShellSizing(rebuildCards: true);
-                    _lastCheckedDpi = currentDpi;
-                    _lastCheckedWidth = currentWidth;
-                    _lastCheckedHeight = currentHeight;
+                    _ = SoftReloadUiForScaleChangeAsync("MainWindow_Activated");
                 }
 
                 if (appWindow.Presenter.Kind != Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen)
@@ -5962,7 +7135,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             // Restore essential settings before restarting Explorer
             TaskbarManager.RestoreOriginalState();
-            TaskManagerReEnableServices();
+            await TaskManagerReEnableServicesAsync();
             MakeSelfNonTopmost();
             MinimizeAllToDesktop();
             Console.WriteLine("Exit-Button clicked. Restoring desktop and exiting app...");
@@ -5973,11 +7146,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             try
             {
                 // 1. Reset shell to explorer.exe in Registry
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", true))
+                if (!await TrySetWinlogonShellViaServiceAsync("explorer.exe"))
                 {
-                    if (key != null)
+                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", true))
                     {
-                        key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
+                        if (key != null)
+                        {
+                            key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
+                        }
                     }
                 }
 
@@ -6028,10 +7204,16 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 if (AppSettings.Load<bool>("uac"))
                 {
-                    uac("on");
+                    if (!await TrySetUacModeViaServiceAsync(true))
+                    {
+                        uac("on");
+                    }
                 }
             }
-            catch { uac("on"); }
+            catch
+            {
+                uac("on");
+            }
 
             // Exit safely
             Environment.Exit(0);
@@ -6408,6 +7590,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private async void SwitchToSpecificLauncher(string launcherId)
         {
+            if (!TryBeginSteamLaunch())
+            {
+                Debug.WriteLine("[GCM] Ignoring duplicate Steam quick-launch request.");
+                return;
+            }
+
             MakeSelfNonTopmost();
             launcherId = "steam";
             Debug.WriteLine($"[GCM] Quick-Launch ausgelöst für: '{launcherId}'...");
@@ -6425,10 +7613,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 Debug.WriteLine($"[GCM] Fehler beim Quick-Launch: {ex.Message}");
             }
+            finally
+            {
+                EndSteamLaunch();
+            }
         }
 
         private async void SwitchToConfiguredLauncher()
         {
+            if (!TryBeginSteamLaunch())
+            {
+                Debug.WriteLine("[GCM] Ignoring duplicate Steam launcher request.");
+                return;
+            }
+
             MakeSelfNonTopmost();
             ApplySteamOnlyMode();
             Debug.WriteLine("[GCM] Wechsle zu konfiguriertem Launcher: 'steam'...");
@@ -6445,6 +7643,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             catch (Exception ex)
             {
                 Debug.WriteLine($"[GCM] Fehler während des Launcher-Wechsels: {ex.Message}");
+            }
+            finally
+            {
+                EndSteamLaunch();
             }
         }
 
@@ -6597,7 +7799,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
-        private async void ConsoleModeToShell()
+        private async Task ConsoleModeToShellAsync()
         {
             // Die Pfade zur Windows Shell Registry
             const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
@@ -6605,18 +7807,23 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             try
             {
-                // 1. SCHUTZ: Prüfen, ob wir Admin-Rechte haben. Ohne diese stürzt die App bei Registry-Schreibzugriffen ab.
-                if (!IsAdministrator())
-                {
-                    Debug.WriteLine("[ConsoleMode] ERROR: Keine Administratorrechte. Überspringe Shell-Registrierung.");
-                    return;
-                }
-
-                // 2. PFAD ERMITTELN: Pfad der aktuellen .exe holen und in Anführungszeichen setzen
+                // 1. PFAD ERMITTELN: Pfad der aktuellen .exe holen und in Anführungszeichen setzen
                 string targetExecutable = Process.GetCurrentProcess().MainModule.FileName;
                 if (!targetExecutable.StartsWith("\""))
                 {
                     targetExecutable = $"\"{targetExecutable}\"";
+                }
+
+                if (await TrySetWinlogonShellViaServiceAsync(targetExecutable))
+                {
+                    return;
+                }
+
+                // 2. FALLBACK: In local mode we only touch HKLM when Windows already grants admin rights.
+                if (!IsAdministrator())
+                {
+                    Debug.WriteLine("[ConsoleMode] Local mode active. Skipping Winlogon shell registration because no administrator token is available.");
+                    return;
                 }
 
                 // 3. REGISTRY ÖFFNEN: LocalMachine erfordert Admin-Rechte
@@ -6967,7 +8174,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private const int SW_HIDE = 0;
 
         // Method signature changed to async Task to allow non-blocking waits
-        public static async Task winpart()
+        public async Task winpart()
         {
             try
             {
@@ -6979,17 +8186,20 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     try
                     {
                         // Set explorer.exe as the default shell in the registry
-                        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
-                            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", writable: true))
+                        if (!await TrySetWinlogonShellViaServiceAsync("explorer.exe"))
                         {
-                            if (key != null)
+                            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
+                                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", writable: true))
                             {
-                                key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
-                                Console.WriteLine("Shell successfully set to explorer.exe.");
-                            }
-                            else
-                            {
-                                Console.WriteLine("Registry key not found.");
+                                if (key != null)
+                                {
+                                    key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
+                                    Console.WriteLine("Shell successfully set to explorer.exe.");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Registry key not found.");
+                                }
                             }
                         }
 
@@ -6997,7 +8207,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                         // Check if explorer is already running
                         bool explorerRunning = Process.GetProcessesByName("explorer").Any();
-                        TaskManagerDebloatServices();
+                        await TaskManagerDebloatServicesAsync();
 
                         if (!explorerRunning)
                         {
@@ -7056,21 +8266,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             return;
                         }
 
-                        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, writable: true))
+                        if (!await TrySetWinlogonShellViaServiceAsync(targetExecutable))
                         {
-                            if (key != null)
+                            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, writable: true))
                             {
-                                key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
+                                if (key != null)
+                                {
+                                    key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
 
-                                // Verify the change
-                                string currentValue = key.GetValue(valueName)?.ToString();
-                                if (currentValue == targetExecutable)
-                                {
-                                    Console.WriteLine($"Current value: {currentValue} successfully set.");
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"Failed to set '{valueName}'.");
+                                    // Verify the change
+                                    string currentValue = key.GetValue(valueName)?.ToString();
+                                    if (currentValue == targetExecutable)
+                                    {
+                                        Console.WriteLine($"Current value: {currentValue} successfully set.");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"Failed to set '{valueName}'.");
+                                    }
                                 }
                             }
                         }
@@ -7089,7 +8302,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         #region debloat service
 
-        public static void TaskManagerDebloatServices()
+        public async Task TaskManagerDebloatServicesAsync()
         {
             var debloatList = IsHandheld() ? _debloatServicesHandheld : _debloatServicesDesktop;
 
@@ -7097,33 +8310,41 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             {
                 if (!string.IsNullOrWhiteSpace(processName))
                 {
-                    // Wenn Prozessname bekannt → nutze volle Methode
-                    DisableServiceAndKillProcess(serviceName, processName);
+                    await DisableServiceAndKillProcessAsync(serviceName, processName);
                 }
                 else
                 {
-                    // Nur Dienst deaktivieren
-                    try
-                    {
-                        using var service = new ServiceController(serviceName);
-                        if (service.Status != ServiceControllerStatus.Stopped &&
-                            service.Status != ServiceControllerStatus.StopPending)
-                        {
-                            service.Stop();
-                            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
-                            Console.WriteLine($"[✓] Stopped: {serviceName}");
-                        }
+                    bool stopHandledByService = await TryStopWindowsServiceViaServiceAsync(serviceName);
+                    bool startupHandledByService = await TrySetWindowsServiceStartupModeViaServiceAsync(serviceName, "disabled");
 
-                        DisableServiceStartup(serviceName);
-                    }
-                    catch (Exception ex)
+                    if (stopHandledByService && startupHandledByService)
                     {
-                        Console.WriteLine($"[!] Failed: {serviceName} → {ex.Message}");
+                        Console.WriteLine($"[✓] Stopped and disabled via GCM service: {serviceName}");
+                    }
+                    else
+                    {
+                        try
+                        {
+                            using var service = new ServiceController(serviceName);
+                            if (service.Status != ServiceControllerStatus.Stopped &&
+                                service.Status != ServiceControllerStatus.StopPending)
+                            {
+                                service.Stop();
+                                service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
+                                Console.WriteLine($"[✓] Stopped: {serviceName}");
+                            }
+
+                            DisableServiceStartup(serviceName);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[!] Failed: {serviceName} → {ex.Message}");
+                        }
                     }
                 }
             }
         }
-        public static void TaskManagerReEnableServices()
+        public async Task TaskManagerReEnableServicesAsync()
         {
             // Choose correct list based on device mode
             var servicesToEnable = IsHandheld() ? _debloatServicesHandheld : _debloatServicesDesktop;
@@ -7131,13 +8352,22 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Set each service to start automatically (do not start now)
             foreach (var (serviceName, _) in servicesToEnable)
             {
-                SetServiceStartupToAuto(serviceName);
+                if (!await TrySetWindowsServiceStartupModeViaServiceAsync(serviceName, "auto"))
+                {
+                    SetServiceStartupToAuto(serviceName);
+                }
             }
         }
         public static void SetServiceStartupToAuto(string serviceName)
         {
             try
             {
+                if (!IsAdministrator())
+                {
+                    Debug.WriteLine($"[System] Skipping startup-mode restore for {serviceName} because GCM is running without admin rights.");
+                    return;
+                }
+
                 // Use sc.exe to set service to automatic start
                 Process.Start(new ProcessStartInfo
                 {
@@ -7145,8 +8375,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     Arguments = $"config \"{serviceName}\" start= auto",
                     CreateNoWindow = true,
                     UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    Verb = "runas"
+                    RedirectStandardOutput = true
                 })?.WaitForExit();
 
                 Debug.WriteLine($"[✓] Service {serviceName} set to automatic startup.");
@@ -7159,14 +8388,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         #region disable
         private static void DisableServiceStartup(string serviceName)
         {
+            if (!IsAdministrator())
+            {
+                Debug.WriteLine($"[System] Skipping startup-mode disable for {serviceName} because GCM is running without admin rights.");
+                return;
+            }
+
             var psi = new ProcessStartInfo
             {
                 FileName = "sc.exe",
                 Arguments = $"config \"{serviceName}\" start= disabled",
                 CreateNoWindow = true,
                 UseShellExecute = false,
-                RedirectStandardOutput = true,
-                Verb = "runas" // Admin!
+                RedirectStandardOutput = true
             };
 
             using var process = Process.Start(psi);
@@ -7210,29 +8444,40 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 };
 
 
-        public static void DisableServiceAndKillProcess(string serviceName, string processName)
+        public async Task DisableServiceAndKillProcessAsync(string serviceName, string processName)
         {
             try
             {
-                // Stop and disable service
-                using (var service = new ServiceController(serviceName))
-                {
-                    if (service.Status != ServiceControllerStatus.Stopped &&
-                        service.Status != ServiceControllerStatus.StopPending)
-                    {
-                        service.Stop();
-                        service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(5));
-                    }
+                bool stopHandledByService = await TryStopWindowsServiceViaServiceAsync(serviceName);
+                bool startupHandledByService = await TrySetWindowsServiceStartupModeViaServiceAsync(serviceName, "disabled");
 
-                    Process.Start(new ProcessStartInfo
+                if (!stopHandledByService || !startupHandledByService)
+                {
+                    if (!IsAdministrator())
                     {
-                        FileName = "sc.exe",
-                        Arguments = $"config \"{serviceName}\" start= disabled",
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        Verb = "runas"
-                    })?.WaitForExit();
+                        Debug.WriteLine($"[System] Skipping privileged service shutdown for {serviceName} because GCM is running without admin rights.");
+                    }
+                    else
+                    {
+                    using (var service = new ServiceController(serviceName))
+                    {
+                        if (service.Status != ServiceControllerStatus.Stopped &&
+                            service.Status != ServiceControllerStatus.StopPending)
+                        {
+                            service.Stop();
+                            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(5));
+                        }
+
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "sc.exe",
+                            Arguments = $"config \"{serviceName}\" start= disabled",
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true
+                        })?.WaitForExit();
+                    }
+                    }
                 }
 
                 // Kill background process (if running)
@@ -7337,7 +8582,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             await StartSteam();
 
             // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
-            ConsoleModeToShell();
+            await ConsoleModeToShellAsync();
         }
         #endregion winparts
 
@@ -7514,8 +8759,8 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 ResetParkedSteamState();
                 ShowInAppNotification("Preparing Steam...");
 
-                string steamExePath = AutoDetectLauncherPath("steam");
-                if (string.IsNullOrWhiteSpace(steamExePath))
+                string steamExePath = ResolveSteamExecutablePath();
+                if (string.IsNullOrWhiteSpace(steamExePath) || !File.Exists(steamExePath))
                 {
                     ShowInAppNotification("Steam executable not found.");
                     throw new FileNotFoundException("Steam could not be found automatically on this system.");
@@ -7525,14 +8770,27 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 IntPtr myHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 SetWindowPos(myHwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-                bool steamLiefSchon = false;
-
                 // Check if Steam is already running right at the beginning
                 var steamProc = Process.GetProcessesByName("steam").FirstOrDefault();
                 bool isSteamRunning = steamProc != null;
+                bool steamLiefSchon = false;
+                bool steamPluginHostEnabled = IsSteamPluginHostEnabled();
 
                 // A "Cold Start" is required if explicitly requested (e.g., on boot) OR if Steam is completely closed
                 bool isColdStart = forceRestart || !isSteamRunning;
+
+                if (await ShouldForceSteamRestartForPluginHostAsync(isSteamRunning))
+                {
+                    Debug.WriteLine("[GCM] Steam plugin host requested a developer-mode restart.");
+                    ShowInAppNotification("Restarting Steam for plugin host...");
+                    forceRestart = true;
+                    isColdStart = true;
+                }
+
+                if (steamPluginHostEnabled)
+                {
+                    await EnsureSteamPluginHostRunningAsync(notifyIfStarting: isColdStart);
+                }
 
                 // --- DECKY LOADER INTEGRATION ---
                 bool useDeckyLoader = false;
@@ -7614,6 +8872,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     Debug.WriteLine("[GCM] Steam Cold Boot into Big Picture Mode...");
                     ShowInAppNotification("Launching Steam Big Picture...");
 
+                    if (IsSteamStoreSyncEnabled())
+                    {
+                        await RunSteamStoreSyncBeforeLaunchAsync();
+                    }
+
                     // If Decky was OFF, but we still need a force restart, ensure Steam is dead
                     if (!useDeckyLoader && forceRestart)
                     {
@@ -7628,7 +8891,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
 
                     RenameSteamStartupVideo_Start();
-                    StartProcessAsNonAdmin(steamExePath, "-gamepadui");
+                    StartProcessAsNonAdmin(steamExePath, BuildSteamLaunchArguments());
                 }
                 // --- CASE B: WARM START (Switching via Launcher Card) ---
                 else
@@ -7875,12 +9138,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 ShowInAppNotification("Steam handoff complete.");
 
                 // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
-                ConsoleModeToShell();
+                await ConsoleModeToShellAsync();
 
                 await Task.Delay(500);
             }
             catch (Exception ex)
             {
+                if (string.Equals(ex.Message, "Required GCM system service is not ready.", StringComparison.Ordinal))
+                {
+                    App.StartupTrace("Startup aborted because the privileged GCM service was not ready.");
+                    Environment.Exit(2);
+                    return;
+                }
+
                 App.StartupTrace($"Start() failed: {ex.Message}");
                 Debug.WriteLine($"[Start Error] A critical error occurred during startup: {ex.Message}");
                 DispatcherQueue.TryEnqueue(() => TransitionToMainUI());
@@ -7893,21 +9163,34 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             App.StartupTrace("SetupSystemAndDesktopAsync begin.");
             ShowInAppNotification("Loading system services...");
+            await EnsurePrivilegedServiceReadyAsync(ShouldFailFastWhenPrivilegedServiceIsMissing());
             // System-Hooks und Hintergrunddienste aktivieren
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SetupLogging();
             BoostProcessPriority();
-            uac("off");
+            if (!await TrySetUacModeViaServiceAsync(false))
+            {
+                uac("off");
+            }
 
             // ---> HIER IST DAS NEUE AWAIT <---
             await prestartlist();
 
             SettingsVerify();
-            KeyboardRedirector.EnableRedirect();
+            if (!await TryConfigureKeyboardRedirectViaServiceAsync(true))
+            {
+                KeyboardRedirector.EnableRedirect();
+            }
 
             // Hintergrund-Tools asynchron starten
-            _ = Task.Run(() => RunBoilrNoUI());
-            EnsureTouchKeyboardServiceIsRunning();
+            if (IsSteamPluginHostEnabled())
+            {
+                _ = EnsureSteamPluginHostRunningAsync(notifyIfStarting: false);
+            }
+            if (!await TryEnsureTouchKeyboardServiceViaServiceAsync())
+            {
+                EnsureTouchKeyboardServiceIsRunning();
+            }
             cssloader();
             preaudio(true, false);
 
@@ -8133,7 +9416,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
             LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
-            CardsColumn.Width = new GridLength(1, GridUnitType.Auto);
+            CardsColumn.Width = new GridLength(1, GridUnitType.Star);
             ColumnSeparator.Visibility = Visibility.Visible;
 
             foreach (var card in _launcherAreaButtons)
@@ -8145,10 +9428,52 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _ = RefreshAppListAsync();
         }
 
+        private double GetLauncherRailReservedWidth(double scale)
+        {
+            int launcherCount = Math.Max(1, _launcherAreaButtons?.Count ?? 1);
+            double mainCardWidth = (232 + 18) * scale;
+            double secondaryCardWidth = (176 + 18) * scale;
+            double spacing = Math.Max(0, launcherCount - 1) * (18 * scale);
+            double panelLeadIn = (14 + 28) * scale;
+
+            return mainCardWidth + (Math.Max(0, launcherCount - 1) * secondaryCardWidth) + spacing + panelLeadIn;
+        }
+
         private double GetShellLayoutScale()
         {
-            GetPhysicalResolution(out int width, out int height);
-            return width >= 3400 || height >= 1900 ? 1.25 : 1.0;
+            GetPhysicalResolution(out int physicalWidth, out int physicalHeight);
+            TryGetLogicalViewport(out double logicalWidth, out double logicalHeight);
+
+            double shortSide = Math.Min(logicalWidth, logicalHeight);
+            double longSide = Math.Max(logicalWidth, logicalHeight);
+            bool ultraHdClass = physicalWidth >= 3400 || physicalHeight >= 1900;
+
+            if (ultraHdClass)
+            {
+                if (shortSide >= 1000 && longSide >= 1700)
+                {
+                    return 1.25;
+                }
+
+                if (shortSide >= 850 && longSide >= 1450)
+                {
+                    return 1.08;
+                }
+
+                return 0.96;
+            }
+
+            if (shortSide <= 820 || longSide <= 1400)
+            {
+                return 0.94;
+            }
+
+            if (shortSide >= 1200 && longSide >= 2200)
+            {
+                return 1.08;
+            }
+
+            return 1.0;
         }
 
         private void ApplyResponsiveShellSizing(bool rebuildCards = false)
@@ -8167,7 +9492,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _currentTopPanelScale = topDockScale;
 
             ShellStage.Margin = new Thickness(32 * scale, 0, 32 * scale, 72 * scale);
-            ShellStage.MaxWidth = 1700 * scale;
+            double shellStageWidth = Math.Max(1180 * scale, 1920 - ShellStage.Margin.Left - ShellStage.Margin.Right);
+            ShellStage.Width = shellStageWidth;
+            ShellStage.MaxWidth = shellStageWidth;
 
             LauncherAreaPanel.Spacing = 18 * scale;
             LauncherAreaPanel.Margin = new Thickness(14 * scale, 0, 0, 0);
@@ -8180,8 +9507,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             NoCardsMessage.FontSize = 22 * scale;
             NoCardsMessage.Margin = new Thickness(48 * scale, 0, 48 * scale, 0);
 
-            double processRailWidth = 1100 * scale;
-            ProgramScrollViewer.Margin = new Thickness(6 * scale, 0, 0, 0);
+            LauncherColumn.Width = new GridLength(1, GridUnitType.Auto);
+            CardsColumn.Width = new GridLength(1, GridUnitType.Star);
+
+            double launcherRailWidth = GetLauncherRailReservedWidth(scale);
+            double separatorReservation = ColumnSeparator.Width + ColumnSeparator.Margin.Right;
+            double minimumProcessRailWidth = 280 * scale;
+            double processRailWidth = Math.Max(minimumProcessRailWidth, shellStageWidth - launcherRailWidth - separatorReservation);
+            ProgramScrollViewer.Margin = new Thickness(0, 0, 0, 0);
+            ProgramScrollViewer.MinWidth = minimumProcessRailWidth;
             ProgramScrollViewer.Width = processRailWidth;
             ProgramScrollViewer.MaxWidth = processRailWidth;
 
@@ -10518,6 +11852,30 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             return SelectedLauncherItemOrNull()?.GameInfo?.IsGame == true;
         }
 
+        private bool TryActivateSelectedLauncherItem()
+        {
+            var item = SelectedLauncherItemOrNull();
+            if (item?.TapAction == null)
+            {
+                return false;
+            }
+
+            string gateKey = item.IsPrimary
+                ? "launcher-main-card"
+                : item.GameInfo?.IsGame == true
+                    ? "launcher-featured-game"
+                    : $"launcher-{_selectedLauncherAreaIndex}";
+
+            int cooldownMilliseconds = item.IsPrimary ? 900 : 400;
+            if (!TryAcquireUiActionGate(gateKey, cooldownMilliseconds))
+            {
+                return false;
+            }
+
+            item.TapAction.Invoke(null, null);
+            return true;
+        }
+
         private ProgramCardEntry CreateProgramCardEntryFromLauncherItem(LauncherCardItem item, Border card)
         {
             if (item == null)
@@ -12635,21 +13993,78 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             await TriggerVibration(0, 0.2f, 200);
         }
 
+        private int GetUiSoundCooldownMilliseconds(string soundKey)
+        {
+            return soundKey switch
+            {
+                "nav" => 85,
+                "play" => 140,
+                "pause" => 140,
+                _ => 100
+            };
+        }
+
+        private double GetUiSoundVolume(string soundKey)
+        {
+            return soundKey switch
+            {
+                "nav" => 0.42,
+                "play" => 0.58,
+                "pause" => 0.54,
+                _ => 0.5
+            };
+        }
+
+        private void EnsureUiSoundPlayers()
+        {
+            foreach (var entry in _soundCache)
+            {
+                if (_uiSoundPlayers.ContainsKey(entry.Key))
+                {
+                    continue;
+                }
+
+                var player = new MediaPlayer
+                {
+                    AutoPlay = false,
+                    IsLoopingEnabled = false,
+                    Volume = GetUiSoundVolume(entry.Key),
+                    AudioCategory = MediaPlayerAudioCategory.Other,
+                    Source = MediaSource.CreateFromUri(entry.Value)
+                };
+
+                _uiSoundPlayers[entry.Key] = player;
+            }
+        }
+
         private void PlayCachedSound(string soundKey)
         {
-            if (!_soundCache.TryGetValue(soundKey, out var soundUri)) return;
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => PlayCachedSound(soundKey));
+                return;
+            }
+
+            EnsureUiSoundPlayers();
+
+            if (!_uiSoundPlayers.TryGetValue(soundKey, out var player))
+            {
+                return;
+            }
 
             try
             {
-                // Create a new MediaPlayer for each trigger to allow overlapping sounds
-                var player = new MediaPlayer();
-                player.Source = MediaSource.CreateFromUri(soundUri);
+                DateTime now = DateTime.UtcNow;
+                if (_uiSoundLastPlayedUtc.TryGetValue(soundKey, out var lastPlayedUtc) &&
+                    (now - lastPlayedUtc).TotalMilliseconds < GetUiSoundCooldownMilliseconds(soundKey))
+                {
+                    return;
+                }
 
-                // Dispose resources once the sound has finished playing
-                player.MediaEnded += (s, e) => {
-                    player.Dispose();
-                };
-
+                _uiSoundLastPlayedUtc[soundKey] = now;
+                player.Volume = GetUiSoundVolume(soundKey);
+                player.Pause();
+                player.PlaybackSession.Position = TimeSpan.Zero;
                 player.Play();
             }
             catch (Exception ex)
@@ -12708,29 +14123,34 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // 2. Deaktiviere den Dienst, der den Guide-Button an Windows weiterleitet!
                 // Da GCM "Secret XInput #100" nutzt, können WIR den Button trotzdem noch lesen!
-                var psiDisable = new ProcessStartInfo
+                if (IsAdministrator())
                 {
-                    FileName = "sc.exe",
-                    Arguments = "config XboxGipSvc start= disabled",
-                    UseShellExecute = true,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    Verb = "runas" // Braucht Admin-Rechte
-                };
-                Process.Start(psiDisable)?.WaitForExit();
+                    var psiDisable = new ProcessStartInfo
+                    {
+                        FileName = "sc.exe",
+                        Arguments = "config XboxGipSvc start= disabled",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psiDisable)?.WaitForExit();
 
-                var psiStop = new ProcessStartInfo
+                    var psiStop = new ProcessStartInfo
+                    {
+                        FileName = "sc.exe",
+                        Arguments = "stop XboxGipSvc",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psiStop)?.WaitForExit();
+
+                    Debug.WriteLine("[System] Windows Xbox service disabled. Guide button is reserved for GCM.");
+                }
+                else
                 {
-                    FileName = "sc.exe",
-                    Arguments = "stop XboxGipSvc",
-                    UseShellExecute = true,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    Verb = "runas"
-                };
-                Process.Start(psiStop)?.WaitForExit();
-
-                Debug.WriteLine("[System] Windows Xbox-Dienst blockiert. Guide-Button gehört jetzt GCM!");
+                    Debug.WriteLine("[System] Local mode active. Skipping XboxGipSvc changes because no administrator token is available.");
+                }
             }
             catch (Exception ex)
             {
@@ -13277,6 +14697,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             Task.Factory.StartNew(() => XboxInputLoop(), TaskCreationOptions.LongRunning);
             Task.Factory.StartNew(() => PlayStationInputLoop(), TaskCreationOptions.LongRunning);
             Task.Factory.StartNew(() => PlayStationEdgeInputLoop(), TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(() => SteamDeckPuckInputLoop(), TaskCreationOptions.LongRunning);
         }
 
 
@@ -13458,6 +14879,206 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 Thread.Sleep(8);
             }
+        }
+
+        private async Task SteamDeckPuckInputLoop()
+        {
+            Thread.CurrentThread.Priority = ThreadPriority.Highest;
+            const short menuDeadzone = 10000;
+
+            while (!_isExiting)
+            {
+                if (_steamDeckPuckStream == null)
+                {
+                    TryConnectSteamDeckPuck();
+
+                    if (_steamDeckPuckStream == null)
+                    {
+                        await Task.Delay(1000);
+                        continue;
+                    }
+                }
+
+                try
+                {
+                    int bytesRead = _steamDeckPuckStream.Read(_steamDeckPuckInputBuffer);
+                    if (bytesRead <= 0)
+                    {
+                        Thread.Sleep(1);
+                        continue;
+                    }
+
+                    if (_steamDeckPuckInputBuffer[0] != 0x45 || bytesRead < 18)
+                    {
+                        Thread.Yield();
+                        continue;
+                    }
+
+                    uint rawButtons = BitConverter.ToUInt32(_steamDeckPuckInputBuffer, 2);
+                    GamepadButtonFlags buttons = MapSteamDeckPuckButtons(rawButtons);
+
+                    short leftThumbX = BitConverter.ToInt16(_steamDeckPuckInputBuffer, 10);
+                    short leftThumbY = BitConverter.ToInt16(_steamDeckPuckInputBuffer, 12);
+
+                    HandleShortcuts(buttons, SteamDeckPuckControllerIndex);
+
+                    int xDir = 0;
+                    if (leftThumbX < -menuDeadzone) xDir = -1;
+                    else if (leftThumbX > menuDeadzone) xDir = 1;
+
+                    int yDir = 0;
+                    if (leftThumbY < -menuDeadzone) yDir = -1;
+                    else if (leftThumbY > menuDeadzone) yDir = 1;
+
+                    if (buttons != GamepadButtonFlags.None || xDir != 0 || yDir != 0)
+                    {
+                        ApplyActiveControllerType(ControllerType.SteamController);
+                        ParkMouseCursor();
+                    }
+
+                    if (IsWindowInForeground())
+                    {
+                        DispatcherQueue.TryEnqueue(() => ProcessSteamDeckPuckSmoothNavigation(buttons, xDir, yDir));
+                    }
+
+                    Thread.Yield();
+                }
+                catch (System.TimeoutException)
+                {
+                    Thread.Yield();
+                }
+                catch
+                {
+                    _steamDeckPuckStream?.Dispose();
+                    _steamDeckPuckStream = null;
+                    _steamDeckPuckDevice = null;
+                    _lastSteamDeckPuckButtonState = GamepadButtonFlags.None;
+                    _mouseModeTimer[SteamDeckPuckControllerIndex] = DateTime.MinValue;
+                    _mouseModeTriggered[SteamDeckPuckControllerIndex] = false;
+                    _steamDeckPuckNextAllowedInputTime = DateTime.MinValue;
+                    _steamDeckPuckStickCentered = true;
+                }
+            }
+        }
+
+        private void ProcessSteamDeckPuckSmoothNavigation(GamepadButtonFlags buttons, int xDir, int yDir)
+        {
+            if (!_isMouseModeActive && (buttons != GamepadButtonFlags.None || xDir != 0 || yDir != 0))
+            {
+                ParkMouseCursor();
+            }
+
+            var newPresses = buttons & ~_lastSteamDeckPuckButtonState;
+            if (newPresses != GamepadButtonFlags.None)
+            {
+                HandleGamepadInput(newPresses, false, false, false, false, SteamDeckPuckControllerIndex);
+            }
+
+            if (xDir != 0 || yDir != 0)
+            {
+                if (DateTime.Now > _steamDeckPuckNextAllowedInputTime)
+                {
+                    HandleGamepadInput(GamepadButtonFlags.None, xDir == -1, xDir == 1, yDir == 1, yDir == -1, SteamDeckPuckControllerIndex);
+                    _steamDeckPuckNextAllowedInputTime = _steamDeckPuckStickCentered
+                        ? DateTime.Now.AddMilliseconds(400)
+                        : DateTime.Now.AddMilliseconds(150);
+                    _steamDeckPuckStickCentered = false;
+                }
+            }
+            else
+            {
+                _steamDeckPuckNextAllowedInputTime = DateTime.MinValue;
+                _steamDeckPuckStickCentered = true;
+            }
+
+            _lastSteamDeckPuckButtonState = buttons;
+        }
+
+        private void TryConnectSteamDeckPuck()
+        {
+            try
+            {
+                var candidates = DeviceList.Local
+                    .GetHidDevices(SteamDeckPuckVendorId, SteamDeckPuckProductId)
+                    .Where(device => device.MaxInputReportLength >= 54)
+                    .OrderByDescending(device => ContainsIgnoreCase(device.DevicePath, "mi_02"))
+                    .ThenByDescending(device => ContainsIgnoreCase(device.DevicePath, "col03"))
+                    .ThenByDescending(device => device.MaxInputReportLength)
+                    .ToList();
+
+                foreach (var candidate in candidates)
+                {
+                    if (!candidate.TryOpen(out var stream))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        stream.ReadTimeout = 50;
+
+                        bool isSteamDeckStateStream = false;
+                        byte[] probeBuffer = new byte[Math.Max(64, candidate.MaxInputReportLength)];
+                        for (int attempt = 0; attempt < 3; attempt++)
+                        {
+                            int probeBytes = stream.Read(probeBuffer);
+                            if (probeBytes > 0 && probeBuffer[0] == 0x45)
+                            {
+                                isSteamDeckStateStream = true;
+                                break;
+                            }
+                        }
+
+                        if (!isSteamDeckStateStream)
+                        {
+                            stream.Dispose();
+                            continue;
+                        }
+
+                        _steamDeckPuckStream = stream;
+                        _steamDeckPuckDevice = candidate;
+                        Debug.WriteLine($"[SteamDeck] Puck connected: {candidate.ProductName} ({candidate.DevicePath})");
+                        return;
+                    }
+                    catch
+                    {
+                        stream.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SteamDeck] Failed to connect puck input: {ex.Message}");
+            }
+        }
+
+        private static bool ContainsIgnoreCase(string value, string token)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static GamepadButtonFlags MapSteamDeckPuckButtons(uint rawButtons)
+        {
+            GamepadButtonFlags mapped = GamepadButtonFlags.None;
+
+            if ((rawButtons & SteamDeckButtonA) != 0) mapped |= GamepadButtonFlags.A;
+            if ((rawButtons & SteamDeckButtonB) != 0) mapped |= GamepadButtonFlags.B;
+            if ((rawButtons & SteamDeckButtonX) != 0) mapped |= GamepadButtonFlags.X;
+            if ((rawButtons & SteamDeckButtonY) != 0) mapped |= GamepadButtonFlags.Y;
+            if ((rawButtons & SteamDeckButtonView) != 0) mapped |= GamepadButtonFlags.Start;
+            if ((rawButtons & SteamDeckButtonMenu) != 0) mapped |= GamepadButtonFlags.Back;
+            if ((rawButtons & SteamDeckButtonSteam) != 0) mapped |= (GamepadButtonFlags)XINPUT_GUIDE_BUTTON;
+            if ((rawButtons & SteamDeckButtonLeftShoulder) != 0) mapped |= GamepadButtonFlags.LeftShoulder;
+            if ((rawButtons & SteamDeckButtonRightShoulder) != 0) mapped |= GamepadButtonFlags.RightShoulder;
+            if ((rawButtons & SteamDeckButtonLeftStick) != 0) mapped |= GamepadButtonFlags.LeftThumb;
+            if ((rawButtons & SteamDeckButtonRightStick) != 0) mapped |= GamepadButtonFlags.RightThumb;
+            if ((rawButtons & SteamDeckButtonDPadUp) != 0) mapped |= GamepadButtonFlags.DPadUp;
+            if ((rawButtons & SteamDeckButtonDPadRight) != 0) mapped |= GamepadButtonFlags.DPadRight;
+            if ((rawButtons & SteamDeckButtonDPadDown) != 0) mapped |= GamepadButtonFlags.DPadDown;
+            if ((rawButtons & SteamDeckButtonDPadLeft) != 0) mapped |= GamepadButtonFlags.DPadLeft;
+
+            return mapped;
         }
 
         private List<HidStream> _activePs5Streams = new List<HidStream>();
@@ -14193,6 +15814,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             foreach (var shortcut in _runtimeShortcuts)
             {
+                if (index == SteamDeckPuckControllerIndex &&
+                    !string.Equals(shortcut.FunctionName, "taskmanager", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (shortcut.HoldDurationSeconds > 0)
+                    {
+                        shortcut.HoldStartTimes[index] = DateTime.MaxValue;
+                        shortcut.HasTriggered[index] = false;
+                    }
+
+                    continue;
+                }
+
                 // 1. Check if the required buttons for this shortcut are currently held down
                 bool requirementsMet = (currentButtons & shortcut.RequiredButtons) == shortcut.RequiredButtons;
 
@@ -14297,7 +15930,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // Sicherheitscheck: Nur verarbeiten, wenn das Fenster im Fokus ist
             if (!IsWindowInForeground()) return;
 
-            _lastActiveControllerType = controllerIndex >= 4 ? ControllerType.PlayStation : ControllerType.Xbox;
+            ApplyActiveControllerType(ResolveControllerTypeForIndex(controllerIndex));
 
             bool navigated = false;
 
@@ -14356,14 +15989,18 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
-                        ClickSelectedTopButton();
-                        PlayActivationSound();
+                        if (ClickSelectedTopButton())
+                        {
+                            PlayActivationSound();
+                        }
                     }
                     else if ((newPresses & GamepadButtonFlags.X) != 0)
                     {
                         // Öffnet das integrierte Audio-Menü
-                        OpenAudioFlyout();
-                        PlayActivationSound();
+                        if (TryToggleAudioFlyout("audio-top-shortcut"))
+                        {
+                            PlayActivationSound();
+                        }
                     }
                     break;
 
@@ -14456,8 +16093,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         // Starten!
                         string targetLauncher = _quickLauncherButtons[_selectedQuickLauncherIndex].Tag.ToString();
-                        SwitchToSpecificLauncher(targetLauncher);
-                        PlayActivationSound();
+                        if (TryAcquireUiActionGate("quick-launcher-activate", 900))
+                        {
+                            SwitchToSpecificLauncher(targetLauncher);
+                            PlayActivationSound();
+                        }
                     }
                     break;
 
@@ -14513,12 +16153,10 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     else if ((newPresses & GamepadButtonFlags.A) != 0)
                     {
-                        if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count)
+                        if (_selectedLauncherAreaIndex < _launcherAreaButtons.Count && TryActivateSelectedLauncherItem())
                         {
-                            var item = _launcherAreaButtons[_selectedLauncherAreaIndex].Tag as LauncherCardItem;
-                            item?.TapAction?.Invoke(null, null);
+                            PlayActivationSound();
                         }
-                        PlayActivationSound();
                     }
                     else if ((newPresses & GamepadButtonFlags.B) != 0)
                     {
@@ -14596,6 +16234,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                             UpdateAudioVisualFocus();
                             PlayNavigationSound();
+                            return;
                         }
                     }
                     // =========================================================
@@ -14625,7 +16264,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             else if ((newPresses & GamepadButtonFlags.A) != 0)
                             {
                                 if (_audioDeviceButtons.Count > _selectedAudioDeviceIndex)
-                                    SetAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString());
+                                {
+                                    if (TrySelectAudioDevice(_audioDeviceButtons[_selectedAudioDeviceIndex].Tag.ToString()))
+                                    {
+                                        PlayActivationSound();
+                                    }
+                                }
                             }
                         }
                         else // --- MIXER LIST ---
@@ -14664,6 +16308,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                             ScrollToAudioItemAnimated(_audioMixerRows[_selectedMixerIndex], AudioMixerScrollViewer, MixerListStackPanel);
                         else if (!_isAudioMixerMode && _audioDeviceButtons.Count > _selectedAudioDeviceIndex)
                             ScrollToAudioItemAnimated(_audioDeviceButtons[_selectedAudioDeviceIndex], AudioDevicesScrollViewer, SimpleAudioList);
+                        return;
                     }
                     break;
 
@@ -14987,6 +16632,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
+        private static bool IsPlayStationControllerIndex(int controllerIndex)
+        {
+            return controllerIndex is 4 or 5 or 6;
+        }
+
         private GamepadButtonFlags[] _lastButtonStates = new GamepadButtonFlags[5];
         private DateTime[] _lastInputTimePerController = new DateTime[5];
         private int[] _lastStickXDirections = new int[4];
@@ -15201,27 +16851,44 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         /// <summary>
         /// Führt die Klick-Aktion für den aktuell ausgewählten oberen Button aus.
         /// </summary>
-        private void ClickSelectedTopButton()
+        private bool ClickSelectedTopButton()
         {
             if (_topButtons.Count > _selectedTopButtonIndex)
             {
                 var buttonToClick = _topButtons[_selectedTopButtonIndex];
+                string gateKey = buttonToClick == VolumeButton
+                    ? "top-volume-button"
+                    : buttonToClick == SettingsButton
+                        ? "top-settings-button"
+                        : buttonToClick == AppLauncherButton
+                            ? "top-app-launcher-button"
+                            : buttonToClick == ShutdownButton
+                                ? "top-shutdown-button"
+                                : "top-exit-button";
+
+                if (!TryAcquireUiActionGate(gateKey, buttonToClick == VolumeButton ? 280 : 220))
+                {
+                    return false;
+                }
 
                 if (buttonToClick == ExitGcmButton)
                 {
                     ExitGcmButton_Click_1(null, null);
+                    return true;
                 }
                 else if (buttonToClick == VolumeButton) // NEU: Reaktion auf A-Taste
                 {
-                    ToggleAudioFlyout();
+                    return TryToggleAudioFlyout("audio-top-button");
                 }
                 else if (buttonToClick == SettingsButton)
                 {
                     SettingsButton_Click(null, null);
+                    return true;
                 }
                 else if (buttonToClick == AppLauncherButton)
                 {
                     ToggleAppLauncher_Click(null, null);
+                    return true;
                 }
                 else if (buttonToClick == ShutdownButton)
                 {
@@ -15229,8 +16896,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     _selectedPowerMenuItemIndex = 0;
                     PowerButton_Click(null, null);
                     UpdateVisualFocus();
+                    return true;
                 }
             }
+
+            return false;
         }
         private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
         {

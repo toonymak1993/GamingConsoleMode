@@ -1,96 +1,67 @@
-# GMC - XBOX Mode Launcher 🎮
+# Game Console Mode
 
+Game Console Mode is a controller-first shell for Windows that is now built around a Steam backend workflow.
 
-**GameModeCompanion** (GMC Launcher) is a powerful C# application built with **WinUI 3**, designed to transform your PC into a fully functional gaming console while retaining the flexibility of the Windows operating system. GCM temporarily replaces the Windows shell with a custom gaming environment, providing a seamless console-like experience.
+It is meant for couch setups, handheld PCs, HTPCs, and full-screen gaming installs where you want Windows to stay in the background and your launcher experience to feel more like a console.
 
-Whether you're a Steam enthusiast, a Playnite user, Xbox APP user, or prefer your own custom launcher, GCM offers a streamlined gaming experience without unnecessary Windows distractions.
+![Game Console Mode](gcmnews.png)
 
-Something like **SteamOS**, but powered by the **Windows engine**.
+## What GCM Is Now
 
- ![start_gamemode](gmc.png) 
+GCM is no longer trying to be a loose collection of launchers and side tools.
 
----
+The current direction is much simpler:
 
+- Steam is the main backend system
+- settings live inside GCM itself
+- the shell, launcher flow, process view, and Steam tools are designed around controller use
 
-## ✨ Features
+That also means there is no separate desktop settings app anymore. Everything important now lives in the launcher.
 
-### 🌟 Core Functionalities
+## Controller Support
 
-#### **1. Shell Replacement**
-GCM replaces the Windows Explorer shell with its own interface, hiding the Windows desktop, taskbar, and other elements, creating a pure gaming environment.
+GCM currently supports:
 
-#### **2. Support for Multiple Launchers**
-- Seamlessly integrates with popular launchers like:
-  - **Steam**
-  - **Xbox**
-  - **Playnite**
-  - Custom launchers
-- Automatically launches the configured game launcher on startup.
+- Steam Controller 2
+- Xbox controllers
+- DualSense
 
-#### **3. Many Functions**
-- Functions like:
-  - **CSSLOADER**
-  - **JOYXOFF**
-  - **WALLPAPER**
-  - **STARTUPVIDEO**
-  - **LAUNCHER SYNC TO STEAM**
-  - **DECKY LOADER FOR WINDOWS**
-  - **LOSSLESS SCALING**
-- and many more to come...
+Xbox and DualSense still offer the fullest shortcut coverage. Steam Controller support is built around the real in-app flow that makes sense for it, including fast access back into the GCM task manager.
 
----
+## What's New In This Build
 
-🙋‍♂️ **Found a bug or have a feature request?**  
-Feel free to reach out anytime via [GitHub Issues](https://github.com/toonymak1993/GameConsoleMode/issues) or join our [Discord Server](https://discord.gg/FbjYDeEJce) to share your feedback and ideas!
+- the visual design has been heavily reworked with a cleaner glass-style shell
+- the old external settings flow is gone and has been folded into the launcher
+- the Steam side of the project has been expanded into a proper built-in backend system
+- Tools for Steam has been integrated into GCM instead of living beside it
+- the app launcher, audio panel, process cards, controller navigation, and task manager flow have all been reworked around gamepad use
 
----
+## A Quick Heads-Up
 
+This version changes a lot at once.
 
-## 🖼️ Extensions Interface
+That is exciting, but it also means there can still be rough edges and bugs while the new Steam-first direction settles in. If something feels off, please report it. That feedback is what helps turn a big transition build into a stable everyday one.
 
-Below are screenshots of the Extensions interface for better clarity:
+## Installation
 
-![General Settings](gcmsettings.png)   
-![General Settings](gcmshortcuts.png)   
+1. Download the latest installer from the GitHub Releases page.
+2. Run the setup.
+3. Start Game Console Mode from the Start Menu.
+4. Open the in-app settings and tune the shell from there.
 
----
+## Why The Project Looks Different Now
 
-## 🚀 Usage Guide
+GCM has been evolving for years, and this release is a bigger reset than a normal update.
 
-### **1. Launching GCM**
-- Run the `GCM MODE` application.
-- GCM will initialize, verify required files, and configure logging.
+The focus is now on one coherent fullscreen experience instead of splitting setup, launch logic, and Steam tooling across multiple places. The goal is less friction, fewer desktop detours, and a cleaner path from boot to play.
 
-### **2. Entering Gaming Console Mode**
-- Once GCM starts, the Windows interface will be hidden.
-- Your configured game launcher will launch automatically.
+## Feedback
 
-### **3. Immersive Gaming**
-- Enjoy your games without Windows interface distractions.
-- GCM handles all necessary system adjustments for a seamless experience.
+- Report bugs or ideas here: [GitHub Issues](https://github.com/toonymak1993/GameConsoleMode/issues)
+- Join the community here: [Discord](https://discord.gg/FbjYDeEJce)
 
-### **4. Returning to Windows**
-- Close your game launcher, and GCM will automatically restore the Windows desktop environment.
+## A Note On Development
 
----
+GCM is not a throwaway mockup or a fresh AI-only experiment.
 
-## 🤝 Contributing
-
-GameConsoleMode is open to contributions from the community.
-- To contribute:
-  - Submit **issues** for bug reports or feature requests.
-  - Open **pull requests** with proposed improvements or fixes.
-
----
-
-## 📞 Contact
-
-For inquiries or support, reach out via Discord: **`Lynxu`** or **`Toonymak`** or **`Toonymak`**   
-Join our Discord server: [**GameConsoleMode Discord**](https://discord.gg/FbjYDeEJce)
-
----
-
-GameConsoleMode continues to evolve, bringing new features and improvements with each release.  
-Try it out, and let us know how we can make it even better! 🎉
-
-
+The project has been around for years. AI has been used as development support in parts of the workflow, but the app was not built from scratch that way, and the code has been reviewed throughout development.

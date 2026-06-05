@@ -118,6 +118,15 @@ namespace gcmloader
             5.0
         };
 
+        private static readonly HashSet<string> SteamControllerShortcutRowIds = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "shortcut-enabled",
+            "shortcut-key1",
+            "shortcut-key2",
+            "shortcut-hold",
+            "shortcut-reset"
+        };
+
         private const string DefaultThemeAccent = "Graphite";
         private const string DefaultThemeCardTint = "Graphite";
         private const string DefaultThemeGlassStrength = "Clear";
@@ -258,6 +267,139 @@ namespace gcmloader
                 ResetSteamPath,
                 _ => ResetSteamPath(),
                 "Launcher");
+            AddSettingsRow(
+                "steam",
+                "steam-store-sync-enabled",
+                "Sync third-party libraries",
+                "Sync supported Epic, GOG and Xbox libraries into Steam before Steam launches.",
+                ToggleSteamStoreSyncEnabledSetting,
+                _ => ToggleSteamStoreSyncEnabledSetting(),
+                "Store Sync");
+            AddSettingsRow(
+                "steam",
+                "steam-store-sync-artwork",
+                "Sync artwork",
+                "Download Steam artwork for imported non-Steam games when Store Sync updates shortcuts.",
+                ToggleSteamStoreSyncArtworkSetting,
+                _ => ToggleSteamStoreSyncArtworkSetting(),
+                "Store Sync");
+            AddSettingsRow(
+                "steam",
+                "steam-store-sync-epic",
+                "Epic Games",
+                "Import launchable Epic Games titles into Steam automatically.",
+                () => ToggleSteamStoreEnabledSetting("epic-games", SteamStoreSyncEpicKey),
+                _ => ToggleSteamStoreEnabledSetting("epic-games", SteamStoreSyncEpicKey),
+                "Stores");
+            AddSettingsRow(
+                "steam",
+                "steam-store-sync-gog",
+                "GOG Galaxy",
+                "Import detected GOG installs into Steam automatically.",
+                () => ToggleSteamStoreEnabledSetting("gog-galaxy", SteamStoreSyncGogKey),
+                _ => ToggleSteamStoreEnabledSetting("gog-galaxy", SteamStoreSyncGogKey),
+                "Stores");
+            AddSettingsRow(
+                "steam",
+                "steam-store-sync-xbox",
+                "Xbox / Game Pass",
+                "Scan Xbox library folders and import launchable titles into Steam.",
+                () => ToggleSteamStoreEnabledSetting("xbox-game-pass", SteamStoreSyncXboxKey),
+                _ => ToggleSteamStoreEnabledSetting("xbox-game-pass", SteamStoreSyncXboxKey),
+                "Stores");
+            AddSettingsRow(
+                "steam",
+                "steam-store-sync-run",
+                "Run Store Sync now",
+                "Manually refresh Steam shortcuts and artwork right now.",
+                async () => await RunSteamStoreSyncNowAsync(),
+                sectionTitle: "Store Sync");
+            AddSettingsRow(
+                "steam",
+                "steam-plugin-host-enabled",
+                "Steam plugin host",
+                "Run GCM's built-in Steam Quick Access tools host in the background.",
+                async () => await ToggleSteamPluginHostEnabledSettingAsync(),
+                sectionTitle: "Quick Access Host");
+            AddSettingsRow(
+                "steam",
+                "steam-plugin-host-devmode",
+                "Launch Steam in developer mode",
+                "Start Steam with developer-mode support so the Quick Access host can reach Steam's DevTools port.",
+                ToggleSteamPluginDeveloperModeSetting,
+                _ => ToggleSteamPluginDeveloperModeSetting(),
+                "Quick Access Host");
+            AddSettingsRow(
+                "steam",
+                "steam-plugin-host-status",
+                "Plugin host status",
+                "Refresh the current status of the Steam Quick Access host and its Steam attachment state.",
+                async () => await RefreshSteamPluginHostStatusAsync(),
+                sectionTitle: "Quick Access Host");
+            AddSettingsRow(
+                "steam",
+                "steam-plugin-devtools-status",
+                "Steam DevTools port",
+                "Check whether Steam exposes SharedJSContext and Quick Access over 127.0.0.1:8080.",
+                async () => await RefreshSteamPluginHostStatusAsync(),
+                sectionTitle: "Quick Access Host");
+            AddSettingsRow(
+                "steam",
+                "steam-plugin-log",
+                "Latest service log",
+                "Shows the latest integrated Steam host or Store Sync message from GCM.",
+                async () => await RefreshSteamPluginHostStatusAsync(),
+                sectionTitle: "Quick Access Host");
+
+            AddSettingsCategory("controller", "Controller", "Live controller mode, Steam Controller restrictions and shortcut compatibility.", "\uE7FC");
+            AddSettingsRow(
+                "controller",
+                "controller-dualsense",
+                "DualSense",
+                "Shows whether DualSense-style navigation is the active controller input mode.",
+                RefreshControllerSettingsStatus,
+                _ => RefreshControllerSettingsStatus(),
+                "Active Controller");
+            AddSettingsRow(
+                "controller",
+                "controller-steam",
+                "Steam Controller",
+                "Shows whether Steam Controller mode is currently active in GCM.",
+                RefreshControllerSettingsStatus,
+                _ => RefreshControllerSettingsStatus(),
+                "Active Controller");
+            AddSettingsRow(
+                "controller",
+                "controller-xbox",
+                "Xbox Controller",
+                "Shows whether Xbox-style navigation is the active controller input mode.",
+                RefreshControllerSettingsStatus,
+                _ => RefreshControllerSettingsStatus(),
+                "Active Controller");
+            AddSettingsRow(
+                "controller",
+                "controller-shortcut-compat",
+                "Controller Shortcuts",
+                "Full shortcut compatibility is only available on Xbox and DualSense controllers.",
+                RefreshControllerSettingsStatus,
+                _ => RefreshControllerSettingsStatus(),
+                "Steam Controller Mode");
+            AddSettingsRow(
+                "controller",
+                "controller-steam-tools",
+                "Tools for Steam",
+                "Steam Controller mode keeps Tools for Steam features like the GCM task manager handoff available.",
+                RefreshControllerSettingsStatus,
+                _ => RefreshControllerSettingsStatus(),
+                "Steam Controller Mode");
+            AddSettingsRow(
+                "controller",
+                "controller-gcm-navigation",
+                "GCM Navigation",
+                "Basic Game Console Mode navigation remains available while Steam Controller mode is active.",
+                RefreshControllerSettingsStatus,
+                _ => RefreshControllerSettingsStatus(),
+                "Steam Controller Mode");
 
             AddSettingsCategory("startup", "Startup", "Boot video, startup apps and Steam intro behavior.", "\uE7AD");
             AddSettingsRow(
@@ -527,7 +669,56 @@ namespace gcmloader
                 async () => await SelectWallpaperAsync(),
                 sectionTitle: "Wallpaper");
 
-            AddSettingsCategory("loader-ui", "Loader UI", "Remaining loader-side behavior and service settings.", "\uE790");
+            AddSettingsCategory("loader-ui", "Loader UI", "Remaining loader-side behavior and local system settings.", "\uE790");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-refresh",
+                "Refresh local runtime status",
+                "Re-check the local-only runtime path that GCM uses instead of a privileged helper service.",
+                async () => await RefreshPrivilegedServiceStatusAsync(),
+                sectionTitle: "GCM Runtime");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-status",
+                "Runtime mode",
+                "Shows whether GCM is running in the streamlined local mode without a background service.",
+                async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
+                sectionTitle: "GCM Runtime");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-shell",
+                "Shell handoff mode",
+                "Explains how WinPart shell handoff behaves in local mode when Windows does not grant elevated registry access.",
+                async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
+                sectionTitle: "GCM Runtime");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-uac",
+                "UAC handoff mode",
+                "Shows how UAC-related cleanup behaves when GCM runs without a privileged helper.",
+                async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
+                sectionTitle: "GCM Runtime");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-keyboard",
+                "Keyboard redirect bridge",
+                "Shows the local keyboard redirect fallback used for the Windows touch keyboard bridge.",
+                async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
+                sectionTitle: "GCM Runtime");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-touchkeyboard",
+                "Touch keyboard bridge",
+                "Shows how GCM reaches the Windows touch keyboard subsystem directly in local mode.",
+                async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
+                sectionTitle: "GCM Runtime");
+            AddSettingsRow(
+                "loader-ui",
+                "gcm-service-log",
+                "Latest runtime note",
+                "Displays the newest local runtime note so startup and subsystem issues stay visible in one place.",
+                async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
+                sectionTitle: "Diagnostics");
             AddSettingsRow(
                 "loader-ui",
                 "discord-card",
@@ -876,7 +1067,16 @@ namespace gcmloader
                 return new List<SettingsRowDefinition>();
             }
 
-            return _settingsCategories[_selectedSettingsCategoryIndex].Rows;
+            SettingsCategoryDefinition category = _settingsCategories[_selectedSettingsCategoryIndex];
+            if (string.Equals(category.Id, "shortcuts", StringComparison.OrdinalIgnoreCase) &&
+                IsSteamControllerInputModeActive())
+            {
+                return category.Rows
+                    .Where(row => SteamControllerShortcutRowIds.Contains(row.Id))
+                    .ToList();
+            }
+
+            return category.Rows;
         }
 
         private SettingsCategoryDefinition? SelectedSettingsCategoryOrNull()
@@ -898,6 +1098,31 @@ namespace gcmloader
             }
 
             return rows[_selectedSettingsRowIndex];
+        }
+
+        private void RefreshControllerSettingsStatus()
+        {
+            RefreshSettingsOverlayValues();
+        }
+
+        private bool IsControllerTypeActive(ControllerType controllerType)
+        {
+            return _hasObservedControllerInput && _lastActiveControllerType == controllerType;
+        }
+
+        private string FormatControllerModeSummary()
+        {
+            if (!_hasObservedControllerInput)
+            {
+                return "Waiting for input";
+            }
+
+            return _lastActiveControllerType switch
+            {
+                ControllerType.PlayStation => "DualSense active",
+                ControllerType.SteamController => "Steam Controller mode",
+                _ => "Xbox active"
+            };
         }
 
         private void ReloadSettingsOverlayState()
@@ -935,6 +1160,7 @@ namespace gcmloader
             EnsureStringSetting("theme_top_dock_size", DefaultThemeTopDockSize);
             EnsureStringSetting("theme_top_dock_position", DefaultThemeTopDockPosition);
             MigrateThemeDefaultsIfNeeded();
+            EnsureSteamIntegrationDefaults();
 
             EnsureDefaultShortcuts();
         }
@@ -993,9 +1219,44 @@ namespace gcmloader
                 Function = function,
                 Key1 = string.Equals(function, "taskmanager", StringComparison.OrdinalIgnoreCase) ? "Back" : "None",
                 Key2 = string.Equals(function, "taskmanager", StringComparison.OrdinalIgnoreCase) ? "X" : "None",
-                HoldDuration = string.Equals(function, "taskmanager", StringComparison.OrdinalIgnoreCase) ? 1.0 : 0.0,
+                HoldDuration = 0.0,
                 Enabled = string.Equals(function, "taskmanager", StringComparison.OrdinalIgnoreCase)
             };
+        }
+
+        private static bool TryMigrateTaskManagerShortcutToInstant(TomlTableArray shortcutsArray)
+        {
+            foreach (TomlTable entry in shortcutsArray)
+            {
+                string function = entry["function"]?.ToString() ?? string.Empty;
+                if (!string.Equals(function, "taskmanager", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string key1 = entry["key1"]?.ToString() ?? "None";
+                string key2 = entry["key2"]?.ToString() ?? "None";
+                bool enabled = !entry.ContainsKey("enabled") || Convert.ToBoolean(entry["enabled"]);
+                double holdDuration = entry.ContainsKey("hold_duration")
+                    ? Convert.ToDouble(entry["hold_duration"])
+                    : 0.0;
+
+                bool isPreviousDefault =
+                    enabled &&
+                    string.Equals(key1, "Back", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(key2, "X", StringComparison.OrdinalIgnoreCase) &&
+                    Math.Abs(holdDuration - 1.0) < 0.001;
+
+                if (!isPreviousDefault)
+                {
+                    return false;
+                }
+
+                entry["hold_duration"] = 0.0;
+                return true;
+            }
+
+            return false;
         }
 
         private void EnsureDefaultShortcuts()
@@ -1021,6 +1282,12 @@ namespace gcmloader
                 shortcutsObj is TomlTableArray shortcutsArray &&
                 shortcutsArray.Count > 0)
             {
+                if (TryMigrateTaskManagerShortcutToInstant(shortcutsArray))
+                {
+                    Directory.CreateDirectory(settingsFolder);
+                    File.WriteAllText(settingsFilePath, Toml.FromModel(rootTable));
+                }
+
                 return;
             }
 
@@ -1246,6 +1513,13 @@ namespace gcmloader
 
             SetSettingsRowValue("steam-path", FormatSteamPathSummary());
             SetSettingsRowValue("steam-path-reset", "Auto-detect");
+            RefreshSteamIntegrationSettingsValues();
+            SetSettingsRowStatusValue("controller-dualsense", IsControllerTypeActive(ControllerType.PlayStation) ? "Active" : "Inactive", IsControllerTypeActive(ControllerType.PlayStation));
+            SetSettingsRowStatusValue("controller-steam", IsControllerTypeActive(ControllerType.SteamController) ? "Active" : "Inactive", IsControllerTypeActive(ControllerType.SteamController));
+            SetSettingsRowStatusValue("controller-xbox", IsControllerTypeActive(ControllerType.Xbox) ? "Active" : "Inactive", IsControllerTypeActive(ControllerType.Xbox));
+            SetSettingsRowStatusValue("controller-shortcut-compat", IsSteamControllerInputModeActive() ? "Restricted" : "Full", !IsSteamControllerInputModeActive());
+            SetSettingsRowStatusValue("controller-steam-tools", IsSteamControllerInputModeActive() ? "Ready" : "Standby", IsSteamControllerInputModeActive());
+            SetSettingsRowStatusValue("controller-gcm-navigation", _hasObservedControllerInput ? "Ready" : "Waiting", _hasObservedControllerInput);
             SetSettingsRowValue("startup-apps", FormatEnabled(GetSetting("usewinpartstartapps", true)));
             SetSettingsRowValue("startup-video-enabled", FormatEnabled(GetSetting("usestartupvideo", false)));
             SetSettingsRowValue("steam-startup-video-enabled", FormatEnabled(GetSetting("usesteamstartupvideo", false)));
@@ -1289,14 +1563,44 @@ namespace gcmloader
             SetSettingsRowValue("steamgriddb-key", FormatApiKeySummary(GetSetting("steamgriddb_api_key", string.Empty, false)));
             SetSettingsRowValue("uac-enabled", FormatEnabled(GetSetting("uac", true)));
             SetSettingsRowValue("windows-settings", "Open");
+            SetSettingsRowValue("gcm-service-refresh", "Run check");
+            SetSettingsRowValue("gcm-service-log", BuildPrivilegedServiceLogSummary());
+            SetSettingsRowStatusValue("gcm-service-status", BuildPrivilegedServiceStatusSummary(), _isPrivilegedServiceReady);
 
-            SetSettingsCategorySummary("steam", string.IsNullOrWhiteSpace(GetSetting("steamlauncherpath", string.Empty, false)) ? "Auto path" : "Manual path");
+            string pendingServiceCheckText = _isPrivilegedServiceReady ? "Local mode active" : "Local mode unavailable";
+            bool pendingServiceCheckPositive = _isPrivilegedServiceReady;
+
+            GcmSubsystemHealth? shellSubsystem = FindPrivilegedSubsystem("Winlogon shell access");
+            SetSettingsRowStatusValue(
+                "gcm-service-shell",
+                shellSubsystem == null ? pendingServiceCheckText : $"{shellSubsystem.Status} | {ShortenForUi(shellSubsystem.Details, shellSubsystem.Status)}",
+                shellSubsystem?.IsReady ?? pendingServiceCheckPositive);
+
+            GcmSubsystemHealth? uacSubsystem = FindPrivilegedSubsystem("UAC policy access");
+            SetSettingsRowStatusValue(
+                "gcm-service-uac",
+                uacSubsystem == null ? pendingServiceCheckText : $"{uacSubsystem.Status} | {ShortenForUi(uacSubsystem.Details, uacSubsystem.Status)}",
+                uacSubsystem?.IsReady ?? pendingServiceCheckPositive);
+
+            GcmSubsystemHealth? keyboardSubsystem = FindPrivilegedSubsystem("Keyboard redirect access");
+            SetSettingsRowStatusValue(
+                "gcm-service-keyboard",
+                keyboardSubsystem == null ? pendingServiceCheckText : $"{keyboardSubsystem.Status} | {ShortenForUi(keyboardSubsystem.Details, keyboardSubsystem.Status)}",
+                keyboardSubsystem?.IsReady ?? pendingServiceCheckPositive);
+
+            GcmSubsystemHealth? touchKeyboardSubsystem = FindPrivilegedSubsystem("Touch keyboard control");
+            SetSettingsRowStatusValue(
+                "gcm-service-touchkeyboard",
+                touchKeyboardSubsystem == null ? pendingServiceCheckText : $"{touchKeyboardSubsystem.Status} | {ShortenForUi(touchKeyboardSubsystem.Details, touchKeyboardSubsystem.Status)}",
+                touchKeyboardSubsystem?.IsReady ?? pendingServiceCheckPositive);
+
+            SetSettingsCategorySummary("controller", FormatControllerModeSummary());
             SetSettingsCategorySummary("startup", GetSetting("usestartupvideo", false) ? "Video ready" : "Steam boot");
             SetSettingsCategorySummary("preload", _managedPreloadApps.Count == 0 ? "No apps" : $"{_managedPreloadApps.Count} app(s)");
-            SetSettingsCategorySummary("shortcuts", $"{_managedShortcuts.Count(shortcut => shortcut.Enabled)} active");
+            SetSettingsCategorySummary("shortcuts", IsSteamControllerInputModeActive() ? "Task Manager only" : $"{_managedShortcuts.Count(shortcut => shortcut.Enabled)} active");
             SetSettingsCategorySummary("theme", $"{GetSetting("theme_accent", DefaultThemeAccent)} | Cards {GetSetting("theme_card_size", DefaultThemeCardSize)} | Top {GetSetting("theme_top_dock_position", DefaultThemeTopDockPosition)}");
             SetSettingsCategorySummary("audio-visuals", $"{CountVisualSettingsEnabled()} active");
-            SetSettingsCategorySummary("loader-ui", $"{CountLoaderUiSettingsEnabled()} active");
+            SetSettingsCategorySummary("loader-ui", $"{BuildPrivilegedServiceStatusSummary()} | {CountLoaderUiSettingsEnabled()} active");
 
             UpdateSettingsContextPanel();
             UpdateSettingsFooter();
@@ -1310,6 +1614,33 @@ namespace gcmloader
                 row.ValueHost.Children.Add(row.ValueText);
                 row.ValueText.Text = text;
             }
+        }
+
+        private void SetSettingsRowStatusValue(string id, string text, bool isPositive)
+        {
+            if (!_settingsRowsById.TryGetValue(id, out SettingsRowDefinition? row))
+            {
+                return;
+            }
+
+            Color dotColor = isPositive
+                ? Color.FromArgb(255, 95, 220, 122)
+                : Color.FromArgb(255, 226, 81, 81);
+
+            row.ValueHost.Children.Clear();
+            row.ValueHost.Children.Add(new Border
+            {
+                Width = 12,
+                Height = 12,
+                CornerRadius = new CornerRadius(999),
+                Background = new SolidColorBrush(dotColor),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0)
+            });
+            row.ValueHost.Children.Add(row.ValueText);
+            row.ValueText.Text = text;
         }
 
         private void SetSettingsRowShortcutButtonValue(string id, string buttonName)
@@ -1849,6 +2180,12 @@ namespace gcmloader
 
         private void CycleSelectedShortcut(int direction)
         {
+            if (IsSteamControllerInputModeActive())
+            {
+                RefreshSettingsOverlayValues();
+                return;
+            }
+
             if (_managedShortcuts.Count == 0)
             {
                 return;
@@ -2152,6 +2489,12 @@ namespace gcmloader
 
         private ManagedShortcut? SelectedShortcutOrNull()
         {
+            if (IsSteamControllerInputModeActive())
+            {
+                return _managedShortcuts.FirstOrDefault(shortcut =>
+                    string.Equals(shortcut.Function, "taskmanager", StringComparison.OrdinalIgnoreCase));
+            }
+
             if (_managedShortcuts.Count == 0 || _selectedManagedShortcutIndex < 0 || _selectedManagedShortcutIndex >= _managedShortcuts.Count)
             {
                 return null;
@@ -2212,6 +2555,13 @@ namespace gcmloader
                     return;
                 }
 
+                if (IsSteamControllerInputModeActive())
+                {
+                    SettingsContextTitle.Text = "Steam Controller Mode";
+                    SettingsContextText.Text = "Only the Task Manager shortcut is configurable while the Steam Controller is the active navigation device. Full shortcut support returns as soon as you navigate with Xbox or DualSense again.";
+                    return;
+                }
+
                 SettingsContextTitle.Text = FormatShortcutFunctionDisplayName(shortcut.Function);
                 SettingsContextText.Text = $"Current combo: {FormatShortcutCombo(shortcut)} | Hold: {FormatHoldDuration(shortcut.HoldDuration)} | {FormatEnabled(shortcut.Enabled)}. Press A on primary or secondary to capture a real controller button.";
                 return;
@@ -2254,7 +2604,9 @@ namespace gcmloader
 
             SettingsFooterText.Text = _settingsPane == SettingsPane.Categories
                 ? "Up/Down: browse categories. Right or A: open category. B: close."
-                : "Up/Down: move. Right: next value. X: previous value. A: apply. Left: categories.";
+                : IsSteamControllerInputModeActive() && string.Equals(SelectedSettingsCategoryOrNull()?.Id, "shortcuts", StringComparison.OrdinalIgnoreCase)
+                    ? "Steam Controller mode: only the Task Manager shortcut is available here. Left: categories."
+                    : "Up/Down: move. Right: next value. X: previous value. A: apply. Left: categories.";
         }
 
         private string? TryMapGamepadPressToShortcutButton(GamepadButtonFlags newPresses)
@@ -2321,6 +2673,11 @@ namespace gcmloader
             if (shortcut == null)
             {
                 return "No shortcut selected";
+            }
+
+            if (IsSteamControllerInputModeActive())
+            {
+                return "Task Manager only";
             }
 
             return $"{_selectedManagedShortcutIndex + 1}/{_managedShortcuts.Count} | {FormatShortcutFunctionDisplayName(shortcut.Function)}";

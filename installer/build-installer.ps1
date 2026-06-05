@@ -23,7 +23,11 @@ if (-not (Test-Path $isccPath)) {
 [xml]$projectXml = Get-Content $projectPath
 $version = $projectXml.Project.PropertyGroup.Version | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($version)) {
-    $version = "2.6.0"
+    $version = "2.6.7"
+}
+
+if (Test-Path $publishDir) {
+    Remove-Item -LiteralPath $publishDir -Recurse -Force
 }
 
 New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
@@ -35,8 +39,9 @@ dotnet publish $projectPath `
     -r $Runtime `
     -p:Platform=x64 `
     -p:WindowsPackageType=None `
-    -p:PublishSingleFile=true `
+    -p:PublishSingleFile=false `
     -p:SelfContained=true `
+    -p:PublishTrimmed=false `
     -o $publishDir
 
 Write-Host "Compiling Inno Setup installer to $installerDir"

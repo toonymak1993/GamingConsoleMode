@@ -2,7 +2,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Security.Principal;
 using System.Threading;
 using LaunchActivatedEventArgs = Microsoft.UI.Xaml.LaunchActivatedEventArgs;
 
@@ -59,15 +58,7 @@ namespace gcmloader
                 return;
             }
 
-             //2. Admin-Rechte Check
-            if (!IsAdministrator())
-            {
-                StartupTrace("Current process is not elevated. Restarting as admin.");
-                RestartAsAdmin();
-                Environment.Exit(0);
-                return;
-            }
-          StartupTrace("Admin check passed.");
+            StartupTrace("Bootstrap privileges ready. Running in local mode without forced elevation.");
 
             // 3. Toast Notification Setup (Optional)
             CommunityToolkit.WinUI.Notifications.ToastNotificationManagerCompat.OnActivated += (toastArgs) =>
@@ -104,35 +95,5 @@ namespace gcmloader
             Debug.WriteLine("[GCM] MainWindow wurde aufgrund von Skalierungsänderung neu aufgebaut.");
         }
 
-        private static bool IsAdministrator()
-        {
-            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
-            {
-                WindowsPrincipal principal = new WindowsPrincipal(identity);
-                return principal.IsInRole(WindowsBuiltInRole.Administrator);
-            }
-        }
-
-        private static void RestartAsAdmin()
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                UseShellExecute = true,
-                WorkingDirectory = Environment.CurrentDirectory,
-                FileName = Process.GetCurrentProcess().MainModule.FileName,
-                Verb = "runas"
-            };
-            try
-            {
-                StartupTrace("Attempting elevated relaunch.");
-                Process.Start(startInfo);
-                StartupTrace("Elevated relaunch started.");
-            }
-            catch (Exception ex)
-            {
-                StartupTrace($"Failed to restart as admin: {ex.Message}");
-                Debug.WriteLine($"Failed to restart as admin: {ex.Message}");
-            }
-        }
     }
 }

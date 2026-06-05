@@ -1,0 +1,60 @@
+{
+  "themes": [
+    {
+      "id": "rounded-library",
+      "title": "Rounded Library",
+      "author": "Tools for Steam",
+      "version": "1.0",
+      "description": "Round off cards, rows, and inputs so the whole panel feels softer.",
+      "storeDescription": "An adjustable radius theme for cards, buttons, and editor fields.",
+      "isCommunity": false,
+      "defaultInstalled": true,
+      "defaultEnabled": false,
+      "downloadCount": 7421,
+      "sourceLabel": "Built-in",
+      "targets": [ "Quick Access", "Library" ],
+      "injectRules": [
+        {
+          "targets": [ "QuickAccess.*" ],
+          "cssLines": [
+            "#quickaccess_content_7 .steamloader-card, #quickaccess_content_7 .steamloader-editor-card, #quickaccess_content_7 .steamloader-volume-card { border-radius: {{panel-radius}}px; }",
+            "#quickaccess_content_7 .steamloader-dialog-button, #quickaccess_content_7 .steamloader-fallback-button, #quickaccess_content_7 .steamloader-editor-textarea { border-radius: {{button-radius}}px !important; }"
+          ]
+        },
+        {
+          "targets": [ "SP", "Steam Big Picture Mode", "~https://steamloopback.host/routes/library/~", "~https://steamloopback.host/index.html~" ],
+          "cssLines": [
+            ".steamloader-theme-artwork-host, .steamloader-theme-artwork-bg { border-radius: {{panel-radius}}px !important; overflow: hidden !important; }",
+            ".steamloader-theme-artwork { border-radius: {{panel-radius}}px !important; clip-path: inset(0 round {{panel-radius}}px); }",
+            ".steamloader-theme-portrait-host, .steamloader-theme-portrait-bg { border-radius: {{panel-radius}}px !important; overflow: hidden !important; }",
+            ".steamloader-theme-portrait { border-radius: {{panel-radius}}px !important; clip-path: inset(0 round {{panel-radius}}px); }"
+          ]
+        }
+      ],
+      "options": [
+        {
+          "id": "panel-radius",
+          "title": "Panel Radius",
+          "description": "Set the border radius for cards and larger theme surfaces.",
+          "type": "range",
+          "min": 8,
+          "max": 36,
+          "step": 2,
+          "defaultNumber": 18,
+          "unit": "px"
+        },
+        {
+          "id": "button-radius",
+          "title": "Button Radius",
+          "description": "Set the border radius for rows, buttons, and inputs.",
+          "type": "range",
+          "min": 6,
+          "max": 28,
+          "step": 2,
+          "defaultNumber": 14,
+          "unit": "px"
+        }
+      ]
+    }
+  ]
+}

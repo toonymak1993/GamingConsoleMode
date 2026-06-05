@@ -1,0 +1,5 @@
+.sharedappdetailsheader_BoxSizer_30GVp {
+    --logo-max-height: 120px;
+    top: calc(100vh - var(--logo-max-height) * 1.3 - var(--CGV-play-bar-height) - var(--CGV-footer-height)) !important;
+    max-height: var(--logo-max-height);
+}

@@ -92,7 +92,7 @@
                                 <Image Source="ms-appx:///Assets/windowsicon.png" Width="20" Height="20" Stretch="Uniform"/>
                             </Button>
 
-                            <Button x:Name="VolumeButton" Width="50" Height="40" 
+                            <Button x:Name="VolumeButton" Width="50" Height="40" Click="VolumeButton_Click"
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
                                     HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                                 <FontIcon Glyph="&#xE767;" FontSize="18" Foreground="White"/>
@@ -126,13 +126,13 @@
                 <Grid x:Name="ShellStage"
                       Grid.Row="1"
                       Margin="36,0,36,72"
-                      HorizontalAlignment="Center"
+                      HorizontalAlignment="Stretch"
                       VerticalAlignment="Bottom"
                       MaxWidth="1800">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="LauncherColumn" Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition x:Name="CardsColumn" Width="Auto"/>
+                        <ColumnDefinition x:Name="CardsColumn" Width="*"/>
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0"
@@ -161,7 +161,7 @@
                         <StackPanel x:Name="LauncherAreaPanel"
                                     Orientation="Horizontal"
                                     Spacing="18"
-                                    HorizontalAlignment="Center"
+                                    HorizontalAlignment="Left"
                                     VerticalAlignment="Bottom"/>
                     </StackPanel>
 
@@ -175,7 +175,7 @@
 
                     <Grid Grid.Column="2"
                           VerticalAlignment="Bottom"
-                          HorizontalAlignment="Left"
+                          HorizontalAlignment="Stretch"
                           MinHeight="228">
                         <TextBlock x:Name="NoCardsMessage"
                                    Text="No process is currently open"
@@ -191,7 +191,7 @@
                                       VerticalScrollBarVisibility="Disabled"
                                       HorizontalScrollBarVisibility="Hidden"
                                       HorizontalScrollMode="Enabled"
-                                      HorizontalAlignment="Left"
+                                      HorizontalAlignment="Stretch"
                                       VerticalAlignment="Bottom"
                                       MaxWidth="1450">
                             <StackPanel x:Name="ProgramCardPanel"
@@ -268,14 +268,14 @@
                     </Grid.Background>
                 </Grid>
 
-                <Grid x:Name="AudioPanelContent" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Grid x:Name="AudioPanelContent" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
                     <Grid.RenderTransform>
                         <CompositeTransform x:Name="AudioPanelTransform" TranslateY="100"/>
                     </Grid.RenderTransform>
 
-                    <Border Width="650" VerticalAlignment="Center" HorizontalAlignment="Center" 
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                CornerRadius="24" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    <Border Width="720" MaxWidth="720" VerticalAlignment="Center" HorizontalAlignment="Center" 
+                Background="#E313171D"
+                CornerRadius="28" BorderBrush="#40FFFFFF" BorderThickness="1"
                 Padding="0">
                         <Border.Shadow>
                             <ThemeShadow/>
@@ -290,31 +290,31 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <Grid Grid.Row="0" Margin="30,25,30,10">
+                            <Grid Grid.Row="0" Margin="30,26,30,12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
-                                <Border x:Name="TabHeaderDevices" Grid.Column="0" CornerRadius="12" Padding="0,10" Background="#22FFFFFF">
+                                <Border x:Name="TabHeaderDevices" Grid.Column="0" CornerRadius="16" Padding="0,12" Background="#1EFFFFFF" BorderBrush="#24FFFFFF" BorderThickness="1">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
                                         <FontIcon Glyph="&#xE7F5;" FontSize="18"/>
                                         <TextBlock Text="Output Devices" FontWeight="Bold" FontSize="16"/>
                                     </StackPanel>
                                 </Border>
 
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Opacity="0.6" Margin="20,0">
-                                    <Border CornerRadius="6" BorderBrush="#88FFFFFF" BorderThickness="1.5" Padding="6,2">
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Opacity="0.72" Margin="20,0">
+                                    <Border CornerRadius="8" BorderBrush="#66FFFFFF" BorderThickness="1" Padding="8,4" Background="#10000000">
                                         <TextBlock Text="LB" FontSize="11" FontWeight="Bold"/>
                                     </Border>
                                     <FontIcon Glyph="&#xE76B;" FontSize="12"/>
-                                    <Border CornerRadius="6" BorderBrush="#88FFFFFF" BorderThickness="1.5" Padding="6,2">
+                                    <Border CornerRadius="8" BorderBrush="#66FFFFFF" BorderThickness="1" Padding="8,4" Background="#10000000">
                                         <TextBlock Text="RB" FontSize="11" FontWeight="Bold"/>
                                     </Border>
                                 </StackPanel>
 
-                                <Border x:Name="TabHeaderMixer" Grid.Column="2" CornerRadius="12" Padding="0,10" Background="Transparent" Opacity="0.5">
+                                <Border x:Name="TabHeaderMixer" Grid.Column="2" CornerRadius="16" Padding="0,12" Background="#06000000" BorderBrush="#16FFFFFF" BorderThickness="1" Opacity="0.72">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
                                         <FontIcon Glyph="&#xE995;" FontSize="18"/>
                                         <TextBlock Text="App Mixer" FontWeight="Bold" FontSize="16"/>
@@ -323,7 +323,7 @@
                             </Grid>
 
                             <Border x:Name="MasterVolumeContainer" Grid.Row="1" Margin="30,5,30,15" 
-                        Background="#0AFFFFFF" CornerRadius="12" Padding="15"
+                        Background="#10FFFFFF" CornerRadius="18" Padding="18"
                         BorderThickness="1" BorderBrush="Transparent">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -343,9 +343,9 @@
                                 </Grid>
                             </Border>
 
-                            <Rectangle Grid.Row="2" Height="1" Fill="#1AFFFFFF" Margin="30,0"/>
+                            <Rectangle Grid.Row="2" Height="1" Fill="#14FFFFFF" Margin="30,0"/>
 
-                            <Grid Grid.Row="3" Margin="20,15">
+                            <Grid Grid.Row="3" Margin="22,16,22,18">
                                 <ScrollViewer x:Name="AudioDevicesScrollViewer" MaxHeight="400" VerticalScrollBarVisibility="Hidden" HorizontalScrollMode="Disabled">
                                     <StackPanel x:Name="SimpleAudioList" Spacing="10"/>
                                 </ScrollViewer>
@@ -355,8 +355,8 @@
                                 </ScrollViewer>
                             </Grid>
 
-                            <Border Grid.Row="4" Background="#0FFFFFFF" CornerRadius="0,0,24,24" Padding="0,12">
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="25">
+                            <Border Grid.Row="4" Background="#16000000" BorderBrush="#18FFFFFF" BorderThickness="0,1,0,0" CornerRadius="0,0,28,28" Padding="22,14">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="28">
 
                                     <StackPanel x:Name="LegendDevices" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                         <Ellipse Width="16" Height="16" Fill="#FFA5D952"/>

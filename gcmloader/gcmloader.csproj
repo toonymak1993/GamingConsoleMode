@@ -3,10 +3,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <Version>2.6.0</Version>
-    <AssemblyVersion>2.6.0.0</AssemblyVersion>
-    <FileVersion>2.6.0.0</FileVersion>
-    <InformationalVersion>2.6.0</InformationalVersion>
+    <Version>2.6.7</Version>
+    <AssemblyVersion>2.6.7.0</AssemblyVersion>
+    <FileVersion>2.6.7.0</FileVersion>
+    <InformationalVersion>2.6.7</InformationalVersion>
     <RootNamespace>gcmloader</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
@@ -15,7 +15,8 @@
 	  <UseWinUI>true</UseWinUI>
 	  <EnableMsixTooling>true</EnableMsixTooling>
 	  <Nullable>enable</Nullable>
-	  <PublishSingleFile>true</PublishSingleFile>
+	  <ImplicitUsings>enable</ImplicitUsings>
+	  <PublishSingleFile>false</PublishSingleFile>
 	  <SelfContained>true</SelfContained>
 	  <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
@@ -73,6 +74,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="SteamHost\Assets\**\*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </EmbeddedResource>
     <EmbeddedResource Include="asforally.exe">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -122,9 +126,10 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
-    <EmbeddedResource Include="Assets\windowsicon.png">
+    <Content Include="Assets\windowsicon.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
     <EmbeddedResource Include="Assets\xbox-controller.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
@@ -155,6 +160,7 @@
     <ProjectCapability Include="Msix" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" />
     <PackageReference Include="ClickableTransparentOverlay" Version="11.1.0" />
     <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
     <PackageReference Include="Discord.Net" Version="3.17.1" />
@@ -519,6 +525,6 @@
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
     <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">False</PublishTrimmed>
   </PropertyGroup>
 </Project>

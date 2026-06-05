@@ -1,0 +1,81 @@
+{
+  "name": "Clean Gameview",
+  "author": "SuchMeme",
+  "target": "Library",
+  "version": "v1.7",
+  "manifest_version": 9,
+  "description": "Makes the game view less cluttered, and shows more of the game's art",
+  "inject": {
+    "shared.css": ["SP"]
+  },
+  "patches": {
+    "Play Bar Style": {
+      "type": "dropdown",
+      "default": "Transparent",
+      "values": {
+        "Transparent": {
+          "transparent.css": ["SP"]
+        },
+        "Blur": {
+          "blur.css": ["SP"]
+        },
+        "Connected with Body": {
+          "connected.css": ["SP"]
+        }
+      }
+    },
+    "Alignment": {
+      "type": "dropdown",
+      "default": "Zoom-Center",
+      "values": {
+        "Zoom-Center": {},
+        "Zoom-Left": {
+          "alignments/left.css": ["SP"]
+        },
+        "Zoom-Right": {
+          "alignments/right.css": ["SP"]
+        },
+        "Contain": {
+          "alignments/contain.css": ["SP"]
+        },
+        "Stretch": {
+          "alignments/stretch.css": ["SP"]
+        }
+      }
+    },
+    "Show Steam Cloud": {
+      "type": "checkbox",
+      "default": "No",
+      "values": {
+        "Yes": {
+          "steamcloud.css": ["SP"]
+        },
+        "No": {}
+      }
+    },
+    "Ignore Footer": {
+      "type": "checkbox",
+      "default": "No",
+      "values": {
+        "Yes": {
+          "--CGV-footer-height": ["0px", "SP"],
+          "--CGV-play-anim-height": ["100vh", "SP"]
+        },
+        "No": {
+          "--CGV-footer-height": ["40px", "SP"],
+          "--CGV-play-anim-height": ["58vw", "SP"]
+        }
+      }
+    },
+    "Lock Logo": {
+      "type": "checkbox",
+      "default": "Yes",
+      "values": {
+        "Yes": {
+          "lockedlogo.css": ["SP"]
+        },
+        "No": {}
+      }
+    }
+  }
+}
