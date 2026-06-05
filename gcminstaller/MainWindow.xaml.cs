@@ -11,7 +11,7 @@ namespace gcminstaller
 {
     public partial class MainWindow : Window
     {
-        private const string GitHubApiUrl = "https://api.github.com/repos/toonymak1993/GameConsoleMode/releases/latest";
+        private const string GitHubApiUrl = "https://api.github.com/repos/toonymak1993/GamingConsoleMode/releases/latest";
         private readonly HttpClient httpClient = new HttpClient();
 
         public MainWindow()
@@ -78,7 +78,7 @@ namespace gcminstaller
                 using var client = new HttpClient();
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("GCMInstaller");
 
-                var json = await client.GetStringAsync("https://api.github.com/repos/toonymak1993/GameConsoleMode/releases/latest");
+                var json = await client.GetStringAsync("https://api.github.com/repos/toonymak1993/GamingConsoleMode/releases/latest");
                 using var doc = JsonDocument.Parse(json);
 
                 string body = doc.RootElement.GetProperty("body").GetString();

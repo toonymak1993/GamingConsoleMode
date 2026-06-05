@@ -98,7 +98,7 @@ namespace gcmloader
         private bool _hasCheckedForGithubReleaseUpdate;
         private FocusArea _githubReleaseReturnFocusArea = FocusArea.Cards;
         private GithubReleaseInfo _availableGithubReleaseUpdate;
-        private const string GithubLatestReleaseApiUrl = "https://api.github.com/repos/toonymak1993/GameConsoleMode/releases/latest";
+        private const string GithubLatestReleaseApiUrl = "https://api.github.com/repos/toonymak1993/GamingConsoleMode/releases/latest";
         private FocusArea _gameOptionsReturnFocusArea = FocusArea.Cards;
         private Border _bottomLegendBar;
         private StackPanel _bottomLegendItemsHost;
@@ -7998,14 +7998,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 string releaseUrl = root.TryGetProperty("html_url", out JsonElement urlElement)
                     ? urlElement.GetString()
-                    : "https://github.com/toonymak1993/GameConsoleMode/releases/latest";
+                    : "https://github.com/toonymak1993/GamingConsoleMode/releases/latest";
 
                 _availableGithubReleaseUpdate = new GithubReleaseInfo
                 {
                     ReleaseVersion = latestReleaseVersion,
                     VersionText = string.IsNullOrWhiteSpace(releaseTag) ? FormatVersion(latestReleaseVersion) : releaseTag.Trim(),
                     DisplayTitle = string.IsNullOrWhiteSpace(releaseName) ? $"GitHub Release {FormatVersion(latestReleaseVersion)}" : releaseName.Trim(),
-                    HtmlUrl = string.IsNullOrWhiteSpace(releaseUrl) ? "https://github.com/toonymak1993/GameConsoleMode/releases/latest" : releaseUrl.Trim()
+                    HtmlUrl = string.IsNullOrWhiteSpace(releaseUrl) ? "https://github.com/toonymak1993/GamingConsoleMode/releases/latest" : releaseUrl.Trim()
                 };
 
                 DispatcherQueue.TryEnqueue(() =>
