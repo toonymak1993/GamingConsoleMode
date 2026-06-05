@@ -58,7 +58,7 @@ The focus is now on one coherent fullscreen experience instead of splitting setu
 ## Feedback
 
 - Report bugs or ideas here: [GitHub Issues](https://github.com/toonymak1993/GameConsoleMode/issues)
-- Join the community here: [Discord](https://discord.gg/FbjYDeEJce)
+- Join the community here: [Discord](https://discord.gg/2nMTsujnUR)
 
 ## A Note On Development
 
