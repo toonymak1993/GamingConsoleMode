@@ -116,12 +116,12 @@ namespace gcmloader
         private bool _isRebuildingResponsiveShell;
         private string _lastLegendSignature = string.Empty;
         private DispatcherTimer _audioOverlayRefreshTimer;
-        private bool _allowMasterVolumeSliderWrite;
         private bool _suppressMasterVolumeWrite;
         private readonly Dictionary<string, MediaPlayer> _uiSoundPlayers = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _uiSoundLastPlayedUtc = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _uiActionGateSync = new();
         private readonly Dictionary<string, DateTime> _uiActionLastTriggeredUtc = new(StringComparer.OrdinalIgnoreCase);
+        private DateTime _lastMasterVolumeWriteUtc = DateTime.MinValue;
         private bool _isShellUiReady;
         private bool _isTransitioningToMainUi;
         private bool _taskManagerStartupPending;
@@ -182,6 +182,14 @@ namespace gcmloader
             public string DisplayName { get; set; }
             public bool IsDefault { get; set; }
         }
+
+        private sealed class AudioMixerSessionGroup
+        {
+            public string Key { get; set; }
+            public string DisplayName { get; set; }
+            public BitmapImage Icon { get; set; }
+            public List<AudioSessionControl> Sessions { get; } = new();
+        }
         #endregion
 
         #region soundcontrol
@@ -210,20 +218,32 @@ namespace gcmloader
                 return;
             }
 
+            if ((DateTime.UtcNow - _lastMasterVolumeWriteUtc).TotalMilliseconds < 650)
+            {
+                return;
+            }
+
             try
             {
-                var enumerator = new MMDeviceEnumerator();
-                var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                using var enumerator = new MMDeviceEnumerator();
+                var device = TryGetDefaultRenderDevice(enumerator);
+                if (device == null)
+                {
+                    return;
+                }
+
                 int volume = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
 
                 _suppressMasterVolumeWrite = true;
                 MasterVolumeSlider.Value = volume;
-                _suppressMasterVolumeWrite = false;
 
                 MasterVolumeText.Text = $"{volume}%";
                 UpdateVolumeIcon(volume);
             }
             catch
+            {
+            }
+            finally
             {
                 _suppressMasterVolumeWrite = false;
             }
@@ -243,16 +263,37 @@ namespace gcmloader
                 MasterVolumeText.Text = $"{newVolume}%";
                 UpdateVolumeIcon(newVolume);
 
-                if (_suppressMasterVolumeWrite || !_allowMasterVolumeSliderWrite)
+                if (_suppressMasterVolumeWrite)
                 {
                     return;
                 }
 
-                var enumerator = new MMDeviceEnumerator();
-                var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                device.AudioEndpointVolume.MasterVolumeLevelScalar = newVolume / 100.0f;
+                _lastMasterVolumeWriteUtc = DateTime.UtcNow;
+                TrySetMasterVolume(newVolume);
             }
             catch { }
+        }
+
+        private bool TrySetMasterVolume(int volumePercent)
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var device = TryGetDefaultRenderDevice(enumerator);
+                if (device == null)
+                {
+                    return false;
+                }
+
+                float scalar = Math.Clamp(volumePercent, 0, 100) / 100.0f;
+                device.AudioEndpointVolume.MasterVolumeLevelScalar = scalar;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Audio] Master volume write failed: {ex.Message}");
+                return false;
+            }
         }
 
         private void UpdateVolumeIcon(int volume)
@@ -310,17 +351,14 @@ namespace gcmloader
 
             foreach (var row in _audioMixerRows)
             {
-                if (row?.Tag is not AudioSessionControl session)
+                if (row?.Tag is not AudioMixerSessionGroup group)
                 {
                     continue;
                 }
 
                 try
                 {
-                    if (session.State != AudioSessionState.AudioSessionStateExpired)
-                    {
-                        UpdateMixerRowVisuals(row, session.SimpleAudioVolume.Volume);
-                    }
+                    UpdateMixerRowVisuals(row, GetAudioSessionGroupVolume(group));
                 }
                 catch
                 {
@@ -384,90 +422,24 @@ namespace gcmloader
         {
             if (MixerListStackPanel == null) return;
 
+            string selectedKey = string.Empty;
+            if (_selectedMixerIndex >= 0 &&
+                _selectedMixerIndex < _audioMixerRows.Count &&
+                _audioMixerRows[_selectedMixerIndex]?.Tag is AudioMixerSessionGroup selectedGroup)
+            {
+                selectedKey = selectedGroup.Key ?? string.Empty;
+            }
+
             MixerListStackPanel.Children.Clear();
             _audioMixerRows.Clear();
-            _selectedMixerIndex = 0;
             _lastAudioMixerRefreshUtc = DateTime.UtcNow;
-
-            HashSet<uint> processedPids = new HashSet<uint>();
 
             try
             {
-                var enumerator = new MMDeviceEnumerator();
-                var device = TryGetDefaultRenderDevice(enumerator);
-                if (device == null)
+                var groups = GetAudioMixerSessionGroups();
+                foreach (var group in groups)
                 {
-                    ShowMixerFallbackMessage("No default audio output device is available.");
-                    return;
-                }
-
-                var sessionManager = device.AudioSessionManager;
-                try
-                {
-                    sessionManager.RefreshSessions();
-                }
-                catch (Exception refreshEx)
-                {
-                    Debug.WriteLine($"[AudioMixer] RefreshSessions failed: {refreshEx}");
-                }
-
-                for (int i = 0; i < sessionManager.Sessions.Count; i++)
-                {
-                    var session = sessionManager.Sessions[i];
-
-                    // 1. Grundfilter: Abgelaufene Sessions ignorieren
-                    if (session.State == AudioSessionState.AudioSessionStateExpired) continue;
-
-                    uint pid = session.GetProcessID;
-
-                    // 2. Doppelte PIDs ignorieren
-                    if (pid > 0 && processedPids.Contains(pid)) continue;
-
-                    string displayName = "System / Unbekannt";
-                    BitmapImage iconImage = null;
-
-                    if (pid > 0)
-                    {
-                        try
-                        {
-                            var proc = Process.GetProcessById((int)pid);
-                            if (!string.IsNullOrEmpty(proc.ProcessName))
-                            {
-                                displayName = proc.ProcessName;
-                            }
-
-                            try
-                            {
-                                if (proc.MainModule != null && !string.IsNullOrEmpty(proc.MainModule.FileName))
-                                {
-                                    iconImage = GetAppIconAsBitmapImage(proc.MainModule.FileName);
-                                }
-                            }
-                            catch { /* Icon-Zugriff verweigert */ }
-                        }
-                        catch
-                        {
-                            // Prozess existiert nicht mehr oder Zugriff verweigert
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        // PID 0 (System) wird hier ignoriert, um "System / Unbekannt" zu vermeiden
-                        continue;
-                    }
-
-                    // 3. EXPLIZITER FILTER: Wenn kein Name gefunden wurde, Eintrag nicht anzeigen
-                    if (displayName == "System / Unbekannt")
-                    {
-                        continue;
-                    }
-
-                    // Markieren als verarbeitet
-                    processedPids.Add(pid);
-
-                    // Zeile erstellen und zur UI hinzufügen
-                    var row = CreateMixerRow(displayName, iconImage, session);
+                    var row = CreateMixerRow(group.DisplayName, group.Icon, group);
                     MixerListStackPanel.Children.Add(row);
                     _audioMixerRows.Add(row);
                 }
@@ -475,7 +447,18 @@ namespace gcmloader
                 if (_audioMixerRows.Count == 0)
                 {
                     ShowMixerFallbackMessage("No active app audio sessions are available right now.");
+                    return;
                 }
+
+                int restoredIndex = string.IsNullOrWhiteSpace(selectedKey)
+                    ? -1
+                    : _audioMixerRows.FindIndex(row =>
+                        row.Tag is AudioMixerSessionGroup group &&
+                        string.Equals(group.Key, selectedKey, StringComparison.OrdinalIgnoreCase));
+
+                _selectedMixerIndex = restoredIndex >= 0
+                    ? restoredIndex
+                    : Math.Clamp(_selectedMixerIndex, 0, _audioMixerRows.Count - 1);
             }
             catch (Exception ex)
             {
@@ -484,8 +467,227 @@ namespace gcmloader
             }
         }
 
+        private List<AudioMixerSessionGroup> GetAudioMixerSessionGroups()
+        {
+            var groups = new Dictionary<string, AudioMixerSessionGroup>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+                foreach (var device in GetRenderDevicesForMixer(enumerator))
+                {
+                    AudioSessionManager sessionManager;
+                    try
+                    {
+                        sessionManager = device.AudioSessionManager;
+                        sessionManager.RefreshSessions();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[AudioMixer] Session manager failed for {device.FriendlyName}: {ex.Message}");
+                        continue;
+                    }
+
+                    for (int i = 0; i < sessionManager.Sessions.Count; i++)
+                    {
+                        AudioSessionControl session;
+                        try
+                        {
+                            session = sessionManager.Sessions[i];
+                            if (session == null || session.State == AudioSessionState.AudioSessionStateExpired)
+                            {
+                                continue;
+                            }
+                        }
+                        catch
+                        {
+                            continue;
+                        }
+
+                        if (!TryCreateAudioSessionGroupInfo(session, out string key, out string displayName, out BitmapImage icon))
+                        {
+                            continue;
+                        }
+
+                        if (!groups.TryGetValue(key, out var group))
+                        {
+                            group = new AudioMixerSessionGroup
+                            {
+                                Key = key,
+                                DisplayName = displayName,
+                                Icon = icon
+                            };
+                            groups[key] = group;
+                        }
+
+                        if (group.Icon == null && icon != null)
+                        {
+                            group.Icon = icon;
+                        }
+
+                        group.Sessions.Add(session);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AudioMixer] Enumerating mixer sessions failed: {ex}");
+            }
+
+            return groups.Values
+                .Where(group => group.Sessions.Count > 0)
+                .OrderByDescending(IsAudioSessionGroupActive)
+                .ThenBy(group => group.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private List<MMDevice> GetRenderDevicesForMixer(MMDeviceEnumerator enumerator)
+        {
+            var devices = new List<MMDevice>();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddDevice(MMDevice device)
+            {
+                if (device == null)
+                {
+                    return;
+                }
+
+                string id = device.ID ?? string.Empty;
+                if (seenIds.Add(id))
+                {
+                    devices.Add(device);
+                }
+            }
+
+            try
+            {
+                AddDevice(TryGetDefaultRenderDevice(enumerator));
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).Cast<MMDevice>())
+                {
+                    AddDevice(device);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AudioMixer] Render endpoint enumeration failed: {ex.Message}");
+            }
+
+            return devices;
+        }
+
+        private bool TryCreateAudioSessionGroupInfo(
+            AudioSessionControl session,
+            out string key,
+            out string displayName,
+            out BitmapImage icon)
+        {
+            key = string.Empty;
+            displayName = string.Empty;
+            icon = null;
+
+            uint pid = 0;
+            try { pid = session.GetProcessID; } catch { }
+
+            string sessionName = string.Empty;
+            try { sessionName = session.DisplayName?.Trim() ?? string.Empty; } catch { }
+
+            if (pid > 0)
+            {
+                try
+                {
+                    using var proc = Process.GetProcessById((int)pid);
+                    string processName = proc.ProcessName?.Trim() ?? string.Empty;
+                    if (IsHiddenAudioMixerProcess(processName))
+                    {
+                        return false;
+                    }
+
+                    string exePath = string.Empty;
+                    try { exePath = proc.MainModule?.FileName ?? string.Empty; } catch { }
+
+                    displayName = !string.IsNullOrWhiteSpace(sessionName)
+                        ? sessionName
+                        : NormalizeMixerDisplayName(processName);
+                    key = !string.IsNullOrWhiteSpace(exePath)
+                        ? exePath
+                        : $"pid-app:{processName}";
+
+                    if (!string.IsNullOrWhiteSpace(exePath))
+                    {
+                        try { icon = GetAppIconAsBitmapImage(exePath); } catch { }
+                    }
+                }
+                catch
+                {
+                    if (string.IsNullOrWhiteSpace(sessionName))
+                    {
+                        return false;
+                    }
+
+                    displayName = sessionName;
+                    key = $"pid:{pid}:{sessionName}";
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(sessionName))
+                {
+                    return false;
+                }
+
+                displayName = sessionName;
+                key = $"session:{sessionName}";
+            }
+
+            displayName = NormalizeMixerDisplayName(displayName);
+            return !string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(displayName);
+        }
+
+        private static bool IsHiddenAudioMixerProcess(string processName)
+        {
+            if (string.IsNullOrWhiteSpace(processName))
+            {
+                return true;
+            }
+
+            return processName.Equals("audiodg", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Equals("system", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Equals("idle", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Equals("svchost", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeMixerDisplayName(string rawName)
+        {
+            if (string.IsNullOrWhiteSpace(rawName))
+            {
+                return string.Empty;
+            }
+
+            string name = rawName.Trim();
+            return name.Length <= 1
+                ? name.ToUpperInvariant()
+                : char.ToUpperInvariant(name[0]) + name[1..];
+        }
+
+        private static bool IsAudioSessionGroupActive(AudioMixerSessionGroup group)
+        {
+            return group.Sessions.Any(session =>
+            {
+                try { return session.State == AudioSessionState.AudioSessionStateActive; }
+                catch { return false; }
+            });
+        }
+
         // Creates a single row for the mixer
-        private Border CreateMixerRow(string name, BitmapImage icon, AudioSessionControl session)
+        private Border CreateMixerRow(string name, BitmapImage icon, AudioMixerSessionGroup group)
         {
             var border = new Border
             {
@@ -496,7 +698,7 @@ namespace gcmloader
                 BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(38, 255, 255, 255)),
                 Padding = new Thickness(18, 0, 18, 0),
                 Margin = new Thickness(8, 6, 8, 6),
-                Tag = session,
+                Tag = group,
                 // Transform direkt vorbereiten für flüssigere Animation
                 RenderTransform = new CompositeTransform { CenterX = 0.5, CenterY = 0.5 },
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5)
@@ -568,8 +770,7 @@ namespace gcmloader
             {
                 try
                 {
-                    if (session.State != AudioSessionState.AudioSessionStateExpired)
-                        UpdateMixerRowVisuals(border, session.SimpleAudioVolume.Volume);
+                    UpdateMixerRowVisuals(border, GetAudioSessionGroupVolume(group));
                 }
                 catch { }
             };
@@ -600,8 +801,7 @@ namespace gcmloader
             {
                 try
                 {
-                    if (session.State != AudioSessionState.AudioSessionStateExpired)
-                        UpdateMixerRowVisuals(border, session.SimpleAudioVolume.Volume);
+                    UpdateMixerRowVisuals(border, GetAudioSessionGroupVolume(group));
                 }
                 catch { }
             };
@@ -647,18 +847,61 @@ namespace gcmloader
             if (rowIndex < 0 || rowIndex >= _audioMixerRows.Count) return;
 
             var row = _audioMixerRows[rowIndex];
-            if (row.Tag is AudioSessionControl session)
+            if (row.Tag is AudioMixerSessionGroup group)
             {
                 try
                 {
-                    float current = session.SimpleAudioVolume.Volume;
+                    float current = GetAudioSessionGroupVolume(group);
                     float newVol = Math.Clamp(current + change, 0.0f, 1.0f);
 
-                    session.SimpleAudioVolume.Volume = newVol;
+                    foreach (var session in group.Sessions)
+                    {
+                        try
+                        {
+                            if (session.State != AudioSessionState.AudioSessionStateExpired)
+                            {
+                                session.SimpleAudioVolume.Volume = newVol;
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+
                     UpdateMixerRowVisuals(row, newVol);
                 }
                 catch { }
             }
+        }
+
+        private static float GetAudioSessionGroupVolume(AudioMixerSessionGroup group)
+        {
+            if (group == null || group.Sessions.Count == 0)
+            {
+                return 0.0f;
+            }
+
+            float total = 0.0f;
+            int count = 0;
+
+            foreach (var session in group.Sessions)
+            {
+                try
+                {
+                    if (session.State == AudioSessionState.AudioSessionStateExpired)
+                    {
+                        continue;
+                    }
+
+                    total += session.SimpleAudioVolume.Volume;
+                    count++;
+                }
+                catch
+                {
+                }
+            }
+
+            return count == 0 ? 0.0f : Math.Clamp(total / count, 0.0f, 1.0f);
         }
 
         private void ApplyAudioMixerRowVisual(Border row, bool isSelected)
@@ -763,7 +1006,6 @@ namespace gcmloader
 
         private void ResetAudioFlyoutState(bool collapseOverlay)
         {
-            _allowMasterVolumeSliderWrite = false;
             StopAudioOverlayRefreshLoop();
 
             if (AudioPanelTransform != null)
@@ -1044,7 +1286,6 @@ namespace gcmloader
 
                 ToggleAudioTab(false);
                 _isMasterVolumeFocused = false;
-                _allowMasterVolumeSliderWrite = false;
 
                 SimpleAudioList.Children.Clear();
                 _audioDeviceButtons.Clear();
@@ -1223,7 +1464,6 @@ namespace gcmloader
                 await Task.Delay(10);
                 SimpleAudioList.UpdateLayout();
 
-                _allowMasterVolumeSliderWrite = true;
                 StartAudioOverlayRefreshLoop();
                 UpdateVisualFocus();
             }
@@ -1241,7 +1481,6 @@ namespace gcmloader
         private void CloseAudioFlyout()
         {
             _audioFlyoutRequestVersion++;
-            _allowMasterVolumeSliderWrite = false;
             StopAudioOverlayRefreshLoop();
 
             if (AudioOverlay == null || AudioPanelTransform == null)
@@ -4241,17 +4480,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 rootElement.Loaded += (s, e) =>
                 {
                     App.StartupTrace("Root element loaded.");
-                    InstallNativeScalingHook();
-                    SetupScalingEvents(rootElement);
-                    RefreshScalingLayout("InitialLoad", forceMonitorResize: true);
-                    StartRuntimeScaleMonitor();
-                    FocusSink.Focus(FocusState.Programmatic);
-
-                    if (!_isVideoPlaybackInitiated)
+                    try
                     {
-                        _isVideoPlaybackInitiated = true;
-                        App.StartupTrace("Starting startup video flow.");
-                        PlayStartupVideo();
+                        App.StartupTrace("Root element setup begin.");
+                        InstallNativeScalingHook();
+                        SetupScalingEvents(rootElement);
+                        RefreshScalingLayout("InitialLoad", forceMonitorResize: true);
+                        StartRuntimeScaleMonitor();
+                        FocusSink?.Focus(FocusState.Programmatic);
+
+                        if (!_isVideoPlaybackInitiated)
+                        {
+                            _isVideoPlaybackInitiated = true;
+                            App.StartupTrace("Starting startup video flow.");
+                            PlayStartupVideo();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        App.StartupTrace($"Root element setup failed: {ex}");
+                        Debug.WriteLine($"[Start] Root element setup failed: {ex}");
+
+                        if (!_isVideoPlaybackInitiated)
+                        {
+                            _isVideoPlaybackInitiated = true;
+                            TransitionToMainUI();
+                        }
                     }
                 };
             }
@@ -7145,25 +7399,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
             try
             {
-                // 1. Reset shell to explorer.exe in Registry
-                if (!await TrySetWinlogonShellViaServiceAsync("explorer.exe"))
-                {
-                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", true))
-                    {
-                        if (key != null)
-                        {
-                            key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
-                        }
-                    }
-                }
-
-                // 2. Restore startup apps
+                // 1. Restore startup apps
                 if (AppSettings.Load<bool>("usewinpartstartapps"))
                 {
                     StartupControl.RestoreStartupApps();
                 }
 
-                // 3. Task Manager Style Restart
+                // 2. Task Manager Style Restart
                 // By killing and restarting explorer.exe, Windows naturally rebuilds the 
                 // Taskbar, Desktop (Progman), and Icons without us needing to unhide them manually.
                 Console.WriteLine("Restarting explorer.exe (Task Manager style)...");
@@ -7801,76 +8043,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
         private async Task ConsoleModeToShellAsync()
         {
-            // Die Pfade zur Windows Shell Registry
-            const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-            const string valueName = "Shell";
-
             try
             {
-                // 1. PFAD ERMITTELN: Pfad der aktuellen .exe holen und in Anführungszeichen setzen
-                string targetExecutable = Process.GetCurrentProcess().MainModule.FileName;
-                if (!targetExecutable.StartsWith("\""))
-                {
-                    targetExecutable = $"\"{targetExecutable}\"";
-                }
+                string targetExecutable = GcmWindowsShellService.ResolveStableExecutablePath(
+                    Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty);
+                string targetShellValue = $"\"{targetExecutable}\"";
 
-                if (await TrySetWinlogonShellViaServiceAsync(targetExecutable))
+                if (await TrySetWinlogonShellViaServiceAsync(targetShellValue))
                 {
                     return;
                 }
 
-                // 2. FALLBACK: In local mode we only touch HKLM when Windows already grants admin rights.
-                if (!IsAdministrator())
-                {
-                    Debug.WriteLine("[ConsoleMode] Local mode active. Skipping Winlogon shell registration because no administrator token is available.");
-                    return;
-                }
-
-                // 3. REGISTRY ÖFFNEN: LocalMachine erfordert Admin-Rechte
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, true))
-                {
-                    if (key == null)
-                    {
-                        Debug.WriteLine($"[ConsoleMode] ERROR: Registry-Pfad '{keyName}' konnte nicht geöffnet werden.");
-                        return;
-                    }
-
-                    // 4. RETRY-LOGIK: Wir versuchen es 3x, falls Windows den Zugriff kurzzeitig blockiert
-                    const int maxRetries = 3;
-                    bool success = false;
-
-                    for (int i = 0; i < maxRetries; i++)
-                    {
-                        try
-                        {
-                            // Wert setzen
-                            key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
-
-                            // Kurze Pause zur Verarbeitung durch das System
-                            await Task.Delay(150);
-
-                            // Überprüfung: Hat es geklappt?
-                            string currentValue = key.GetValue(valueName)?.ToString();
-                            if (currentValue != null && currentValue.Equals(targetExecutable, StringComparison.OrdinalIgnoreCase))
-                            {
-                                Debug.WriteLine($"[ConsoleMode] Shell erfolgreich gesetzt im Versuch {i + 1}.");
-                                success = true;
-                                break;
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"[ConsoleMode] Versuch {i + 1} fehlgeschlagen: {ex.Message}");
-                        }
-
-                        await Task.Delay(500); // Längere Pause vor dem nächsten Versuch
-                    }
-
-                    if (!success)
-                    {
-                        Debug.WriteLine("[ConsoleMode] FATAL: Shell konnte nach mehreren Versuchen nicht geändert werden.");
-                    }
-                }
+                GcmWindowsShellService.SetEnabled(targetExecutable, arguments: null, enabled: true);
+                App.StartupTrace($"ConsoleModeToShellAsync registered HKLM shell '{targetExecutable}'.");
             }
             catch (UnauthorizedAccessException)
             {
@@ -8185,48 +8370,27 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     try
                     {
-                        // Set explorer.exe as the default shell in the registry
-                        if (!await TrySetWinlogonShellViaServiceAsync("explorer.exe"))
-                        {
-                            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
-                                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", writable: true))
-                            {
-                                if (key != null)
-                                {
-                                    key.SetValue("Shell", "explorer.exe", RegistryValueKind.String);
-                                    Console.WriteLine("Shell successfully set to explorer.exe.");
-                                }
-                                else
-                                {
-                                    Console.WriteLine("Registry key not found.");
-                                }
-                            }
-                        }
-
                         Console.WriteLine("Starting explorer.exe...");
 
-                        // Check if explorer is already running
-                        bool explorerRunning = Process.GetProcessesByName("explorer").Any();
+                        bool shellReady = IsWindowsShellReady();
+                        bool explorerRunning = GcmWindowsShellService.IsExplorerRunning();
                         await TaskManagerDebloatServicesAsync();
 
-                        if (!explorerRunning)
+                        if (!shellReady)
                         {
-                            Process.Start("explorer.exe");
+                            App.StartupTrace(explorerRunning
+                                ? "winpart found explorer without a desktop shell. Restoring Explorer shell through temporary HKCU shell ownership."
+                                : "winpart found no explorer process. Restoring Explorer shell through temporary HKCU shell ownership.");
+
+                            string targetExecutable = GcmWindowsShellService.ResolveStableExecutablePath(
+                                Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty);
+                            await GcmWindowsShellService.StartWindowsShellForCurrentSessionAsync(targetExecutable, arguments: null);
                         }
 
                         // --- OPTIMIZATION: Smart Wait for Explorer ---
                         // Instead of freezing the app for 5 seconds, we wait asynchronously 
                         // until the Windows Taskbar is actually created by explorer.exe.
-                        int timeoutCounter = 0;
-                        IntPtr taskbarHandle = IntPtr.Zero;
-
-                        // Poll every 100ms for up to 10 seconds (100 attempts)
-                        while (taskbarHandle == IntPtr.Zero && timeoutCounter < 100)
-                        {
-                            await Task.Delay(100);
-                            taskbarHandle = FindWindow("Shell_TrayWnd", null);
-                            timeoutCounter++;
-                        }
+                        await WaitForWindowsShellAsync(maxAttempts: 100, delayMs: 100);
 
                         // Give Windows a tiny moment to draw the desktop icons properly
                         await Task.Delay(500);
@@ -8252,46 +8416,6 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         Console.WriteLine("Error during explorer startup: " + ex.Message);
                     }
 
-                    // Restore gcmloader as the shell for the next boot
-                    try
-                    {
-                        const string keyName = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-                        const string valueName = "Shell";
-
-                        string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-                        string targetExecutable = Path.Combine(programFilesX86, "GCM", "gcmloader", "gcmloader.exe");
-
-                        if (!File.Exists(targetExecutable))
-                        {
-                            return;
-                        }
-
-                        if (!await TrySetWinlogonShellViaServiceAsync(targetExecutable))
-                        {
-                            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName, writable: true))
-                            {
-                                if (key != null)
-                                {
-                                    key.SetValue(valueName, targetExecutable, RegistryValueKind.String);
-
-                                    // Verify the change
-                                    string currentValue = key.GetValue(valueName)?.ToString();
-                                    if (currentValue == targetExecutable)
-                                    {
-                                        Console.WriteLine($"Current value: {currentValue} successfully set.");
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"Failed to set '{valueName}'.");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error restoring shell: {ex.Message}");
-                    }
                 }
             }
             catch
@@ -8344,6 +8468,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 }
             }
         }
+
         public async Task TaskManagerReEnableServicesAsync()
         {
             // Choose correct list based on device mode
@@ -8581,7 +8706,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ApplySteamOnlyMode();
             await StartSteam();
 
-            // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
+            // 4. Installer-managed shell ownership can still be repaired here when GCM already has admin rights.
             await ConsoleModeToShellAsync();
         }
         #endregion winparts
@@ -8751,7 +8876,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private const uint SWP_NOACTIVATE = 0x0010;
         // Wir fügen den Parameter 'forceRestart' hinzu. Standard ist 'false'.
-        private async Task StartSteam(bool forceRestart = false)
+        private async Task StartSteam(bool forceRestart = false, bool allowDeveloperModeRestart = true)
         {
             try
             {
@@ -8779,7 +8904,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 // A "Cold Start" is required if explicitly requested (e.g., on boot) OR if Steam is completely closed
                 bool isColdStart = forceRestart || !isSteamRunning;
 
-                if (await ShouldForceSteamRestartForPluginHostAsync(isSteamRunning))
+                if (allowDeveloperModeRestart && await ShouldForceSteamRestartForPluginHostAsync(isSteamRunning))
                 {
                     Debug.WriteLine("[GCM] Steam plugin host requested a developer-mode restart.");
                     ShowInAppNotification("Restarting Steam for plugin host...");
@@ -9163,6 +9288,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             App.StartupTrace("SetupSystemAndDesktopAsync begin.");
             ShowInAppNotification("Loading system services...");
+            await EnsureBackgroundExplorerShellAsync();
             await EnsurePrivilegedServiceReadyAsync(ShouldFailFastWhenPrivilegedServiceIsMissing());
             // System-Hooks und Hintergrunddienste aktivieren
             Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
@@ -9174,25 +9300,32 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
 
             // ---> HIER IST DAS NEUE AWAIT <---
+            App.StartupTrace("SetupSystemAndDesktopAsync preload begin.");
             await prestartlist();
+            App.StartupTrace("SetupSystemAndDesktopAsync preload complete.");
 
             SettingsVerify();
+            App.StartupTrace("SetupSystemAndDesktopAsync settings verified.");
             if (!await TryConfigureKeyboardRedirectViaServiceAsync(true))
             {
                 KeyboardRedirector.EnableRedirect();
             }
+            App.StartupTrace("SetupSystemAndDesktopAsync keyboard redirect ready.");
 
             // Hintergrund-Tools asynchron starten
             if (IsSteamPluginHostEnabled())
             {
                 _ = EnsureSteamPluginHostRunningAsync(notifyIfStarting: false);
             }
+            App.StartupTrace("SetupSystemAndDesktopAsync steam host checked.");
             if (!await TryEnsureTouchKeyboardServiceViaServiceAsync())
             {
                 EnsureTouchKeyboardServiceIsRunning();
             }
+            App.StartupTrace("SetupSystemAndDesktopAsync touch keyboard checked.");
             cssloader();
             preaudio(true, false);
+            App.StartupTrace("SetupSystemAndDesktopAsync css/audio applied.");
 
             // Autostart-Apps deaktivieren, falls gewünscht
             try
@@ -9207,8 +9340,72 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             // JETZT laden wir den Desktop (explorer.exe) und verstecken die Taskleiste.
             Debug.WriteLine("Starte WinPart-Modus (Desktop laden) im Hintergrund...");
             ShowInAppNotification("Preparing Windows shell...");
+            App.StartupTrace("SetupSystemAndDesktopAsync winpart begin.");
             await winpart();
+            App.StartupTrace("SetupSystemAndDesktopAsync winpart complete.");
             App.StartupTrace("SetupSystemAndDesktopAsync complete.");
+        }
+
+        private static bool IsWindowsShellReady()
+        {
+            return FindWindow("Shell_TrayWnd", null) != IntPtr.Zero;
+        }
+
+        private static async Task<bool> WaitForWindowsShellAsync(int maxAttempts = 60, int delayMs = 100)
+        {
+            if (IsWindowsShellReady())
+            {
+                return true;
+            }
+
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                await Task.Delay(delayMs);
+                if (IsWindowsShellReady())
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private async Task EnsureBackgroundExplorerShellAsync()
+        {
+            try
+            {
+                if (IsWindowsShellReady())
+                {
+                    App.StartupTrace("Background explorer shell already running.");
+                    return;
+                }
+
+                string configuredShell = ReadConfiguredWinlogonShell();
+                string shellExecutable = ExtractExecutablePath(configuredShell);
+                if (!IsGcmShellExecutable(shellExecutable))
+                {
+                    App.StartupTrace("Background explorer bootstrap skipped because Winlogon is not currently assigned to GCM.");
+                    return;
+                }
+
+                App.StartupTrace(GcmWindowsShellService.IsExplorerRunning()
+                    ? "Background explorer bootstrap found explorer without a desktop shell. Temporarily assigning Explorer as shell."
+                    : "Background explorer bootstrap found no explorer process. Temporarily assigning Explorer as shell.");
+
+                string targetExecutable = GcmWindowsShellService.ResolveStableExecutablePath(
+                    Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty);
+                bool shellReady = await GcmWindowsShellService.StartWindowsShellForCurrentSessionAsync(
+                    targetExecutable,
+                    arguments: null);
+                App.StartupTrace(shellReady
+                    ? "Background explorer shell is ready."
+                    : "Background explorer shell launch timed out, continuing startup anyway.");
+            }
+            catch (Exception ex)
+            {
+                App.StartupTrace($"Background explorer bootstrap failed: {ex}");
+                Debug.WriteLine($"[Start] Failed to bootstrap explorer in background: {ex.Message}");
+            }
         }
 
         // Diese Methode kümmert sich am Ende NUR noch um das reine Öffnen des Launchers.
@@ -9217,7 +9414,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             ApplySteamOnlyMode();
             Debug.WriteLine("Desktop ist bereit. Starte nun Launcher: steam");
             ShowInAppNotification("Starting Steam Big Picture...");
-            await StartSteam(true);
+            // Boot must start Steam directly with the desired arguments. Do not kill/restart
+            // an already-running Steam here, because that makes shell startup feel broken.
+            await StartSteam(false, allowDeveloperModeRestart: false);
         }
 
         #endregion start

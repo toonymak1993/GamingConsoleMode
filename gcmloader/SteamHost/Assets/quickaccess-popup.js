@@ -2989,34 +2989,6 @@
     await sendStoreSyncRequest("api/store-sync/settings/toggle", { key });
   }
 
-  async function toggleRunOnWindowsSignIn() {
-    const snapshot = getGeneralSettingsSnapshot();
-    const enabled = !Boolean(snapshot?.runOnWindowsSignIn);
-    if (snapshot) {
-      state.generalSettings.snapshot = {
-        ...snapshot,
-        runOnWindowsSignIn: enabled,
-      };
-      rerenderGeneralSettingsPanel();
-    }
-
-    await sendGeneralSettingsRequest("api/settings/autostart", { value: enabled });
-  }
-
-  async function toggleHideWindowsShellInConsoleMode() {
-    const snapshot = getGeneralSettingsSnapshot();
-    const enabled = !Boolean(snapshot?.hideWindowsShellInConsoleMode);
-    if (snapshot) {
-      state.generalSettings.snapshot = {
-        ...snapshot,
-        hideWindowsShellInConsoleMode: enabled,
-      };
-      rerenderGeneralSettingsPanel();
-    }
-
-    await sendGeneralSettingsRequest("api/settings/hide-windows-shell", { value: enabled });
-  }
-
   async function togglePluginEnabled(pluginId, enabled) {
     const snapshot = getGeneralSettingsSnapshot();
     if (snapshot?.plugins) {
@@ -3996,34 +3968,12 @@
         subtitle: "General",
         status: resolveGeneralSettingsStatusText(),
         error: state.generalSettings.error,
-        note: "Global Tools for Steam options live here so plugin settings can stay focused on their own job.",
-        dividerAfterIndex: 2,
+        note: "Tools for Steam is built into GCM. Windows shell ownership, startup flow, and the desktop handoff are managed by Game Console Mode itself.",
+        dividerAfterIndex: 0,
         slots: [
-          makeSettingToggleSlot(
-            "tfs",
-            "run-on-windows-sign-in",
-            "Run on Windows Sign-In",
-            "Start Tools for Steam before Explorer, sync your launchers, launch Steam in dev mode, and then bring Windows back in behind it.",
-            Boolean(settings?.runOnWindowsSignIn),
-            () => toggleRunOnWindowsSignIn(),
-            {
-              disabled: isGeneralSettingsBusy(),
-            },
-          ),
-          makeSettingToggleSlot(
-            "tfs",
-            "hide-windows-shell",
-            "Hide Windows Shell in Console Mode",
-            "Hide the taskbar and desktop icons while Steam Big Picture is active. They return when Big Picture closes.",
-            settings?.hideWindowsShellInConsoleMode !== false,
-            () => toggleHideWindowsShellInConsoleMode(),
-            {
-              disabled: isGeneralSettingsBusy(),
-            },
-          ),
           makeCommandSlot(
             "Open GCM Settings",
-            "Bring Game Console Mode to the front and open the Steam settings category.",
+            "Bring Game Console Mode to the front and open the integrated Steam category.",
             () => openToolsForSteamManager(),
             {
               disabled: isGeneralSettingsBusy(),

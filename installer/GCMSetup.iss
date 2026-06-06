@@ -48,6 +48,10 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb"
 Source: "..\gcmloader\logo.ico"; DestDir: "{app}"; DestName: "{#MyAppShortcutIcon}"; Flags: ignoreversion
 
+[Registry]
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"; ValueType: string; ValueName: "Shell"; ValueData: """{app}\{#MyAppExeName}"""
+Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"; ValueName: "Shell"; Flags: deletevalue
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppShortcutIcon}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\{#MyAppShortcutIcon}"
@@ -56,12 +60,15 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "{cmd}"; Parameters: "/C reg add ""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"" /v Shell /t REG_SZ /d explorer.exe /f >nul 2>&1"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreWinlogonShell"
+Filename: "{cmd}"; Parameters: "/C reg delete ""HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"" /v Shell /f >nul 2>&1"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveUserWinlogonShell"
 Filename: "{cmd}"; Parameters: "/C sc stop ""{#MyServiceName}"" >nul 2>&1"; Flags: runhidden waituntilterminated; RunOnceId: "StopGcmPrivilegedService"
 Filename: "{cmd}"; Parameters: "/C sc delete ""{#MyServiceName}"" >nul 2>&1"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteGcmPrivilegedService"
 
 [Code]
 var
   ProcessedUninstallCommands: string;
+  GcmShellRestoredOnUninstall: Boolean;
 
 function HasProcessedCommand(const Command: string): Boolean;
 begin
@@ -169,6 +176,31 @@ begin
   Exec(ExpandConstant('{cmd}'), '/C taskkill /F /T /IM GamingConsoleMode.exe >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure RestoreExplorerShellForUninstall();
+begin
+  Log('Restoring Windows Explorer as Winlogon shell for uninstall.');
+
+  if RegWriteStringValue(
+    HKLM,
+    'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon',
+    'Shell',
+    'explorer.exe') then
+  begin
+    GcmShellRestoredOnUninstall := True;
+    Log('HKLM Winlogon Shell restored to explorer.exe.');
+  end
+  else
+    Log('WARNING: Could not restore HKLM Winlogon Shell to explorer.exe.');
+
+  if RegValueExists(HKCU, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon', 'Shell') then
+  begin
+    if RegDeleteValue(HKCU, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon', 'Shell') then
+      Log('Removed HKCU Winlogon Shell override.')
+    else
+      Log('WARNING: Could not remove HKCU Winlogon Shell override.');
+  end;
+end;
+
 function UninstallLegacyEntriesInRoot(const RootKey: Integer; const RootPath: string; var FailureMessage: string): Boolean;
 var
   SubKeys: TArrayOfString;
@@ -270,4 +302,23 @@ begin
 
   if not RemovePreviousGcmInstallations(FailureMessage) then
     Result := FailureMessage;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  GcmShellRestoredOnUninstall := False;
+  CloseKnownGcmProcesses();
+  RestoreExplorerShellForUninstall();
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RestoreExplorerShellForUninstall();
+end;
+
+function NeedRestart(): Boolean;
+begin
+  Result := GcmShellRestoredOnUninstall;
 end;

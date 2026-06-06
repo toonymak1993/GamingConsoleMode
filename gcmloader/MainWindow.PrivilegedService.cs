@@ -1,3 +1,5 @@
+using Microsoft.Win32;
+
 namespace gcmloader;
 
 public sealed partial class MainWindow
@@ -11,10 +13,10 @@ public sealed partial class MainWindow
         ["Winlogon shell access"] = new()
         {
             Name = "Winlogon shell access",
-            IsReady = true,
-            IsRequired = false,
-            Status = "Optional",
-            Details = "WinPart shell handoff only runs when Windows already grants access."
+            IsReady = false,
+            IsRequired = true,
+            Status = "Not checked yet",
+            Details = "GCM keeps shell ownership in the current-user Winlogon shell entry, matching the SteamLoader shell model."
         },
         ["UAC policy access"] = new()
         {
@@ -45,10 +47,11 @@ public sealed partial class MainWindow
     private Task<bool> EnsurePrivilegedServiceReadyAsync(bool failFast, CancellationToken cancellationToken = default)
     {
         App.StartupTrace("Checking local runtime mode. No privileged service is required.");
+        RefreshLocalRuntimeSubsystems();
         _cachedPrivilegedServiceHealth = null;
         _isPrivilegedServiceReady = true;
         _lastPrivilegedServiceCheckUtc = DateTimeOffset.UtcNow;
-        _lastPrivilegedServiceMessage = "Local mode active";
+        _lastPrivilegedServiceMessage = BuildLocalRuntimeSummary();
         DispatcherQueue.TryEnqueue(RefreshSettingsOverlayValues);
         return Task.FromResult(true);
     }
@@ -141,6 +144,109 @@ public sealed partial class MainWindow
         return _localRuntimeSubsystems.TryGetValue(name, out GcmSubsystemHealth? subsystem)
             ? subsystem
             : null;
+    }
+
+    private void RefreshLocalRuntimeSubsystems()
+    {
+        if (_localRuntimeSubsystems.TryGetValue("Winlogon shell access", out GcmSubsystemHealth? shellSubsystem))
+        {
+            string configuredShell = ReadConfiguredWinlogonShell();
+            string shellExecutable = ExtractExecutablePath(configuredShell);
+
+            if (IsGcmShellExecutable(shellExecutable))
+            {
+                shellSubsystem.IsReady = true;
+                shellSubsystem.Status = "Registered";
+                shellSubsystem.Details = $"Windows is configured to boot into {Path.GetFileName(shellExecutable)}.";
+            }
+            else if (string.IsNullOrWhiteSpace(shellExecutable))
+            {
+                shellSubsystem.IsReady = false;
+                shellSubsystem.Status = "Missing";
+                shellSubsystem.Details = "No Winlogon shell entry could be read. Reinstall or repair GCM if shell mode should be active.";
+            }
+            else if (string.Equals(shellExecutable, "explorer.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                shellSubsystem.IsReady = false;
+                shellSubsystem.Status = "Explorer owns boot";
+                shellSubsystem.Details = "Windows is currently configured to boot into Explorer. Repair or reinstall GCM to claim shell ownership again.";
+            }
+            else
+            {
+                shellSubsystem.IsReady = false;
+                shellSubsystem.Status = "Custom shell";
+                shellSubsystem.Details = $"Winlogon currently points to {Path.GetFileName(shellExecutable)} instead of GCM.";
+            }
+        }
+    }
+
+    private static string ReadConfiguredWinlogonShell()
+    {
+        try
+        {
+            const string winlogonPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+
+            using RegistryKey? localMachineKey = Registry.LocalMachine.OpenSubKey(winlogonPath, false);
+            string machineShell = localMachineKey?.GetValue("Shell")?.ToString() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(machineShell))
+            {
+                return machineShell;
+            }
+
+            using RegistryKey? currentUserKey = Registry.CurrentUser.OpenSubKey(winlogonPath, false);
+            return currentUserKey?.GetValue("Shell")?.ToString() ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string ExtractExecutablePath(string shellValue)
+    {
+        if (string.IsNullOrWhiteSpace(shellValue))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = shellValue.Trim();
+        if (trimmed.StartsWith("\"", StringComparison.Ordinal))
+        {
+            int endQuote = trimmed.IndexOf('"', 1);
+            if (endQuote > 1)
+            {
+                return trimmed.Substring(1, endQuote - 1);
+            }
+        }
+
+        int exeIndex = trimmed.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+        if (exeIndex >= 0)
+        {
+            return trimmed.Substring(0, exeIndex + 4).Trim();
+        }
+
+        return trimmed;
+    }
+
+    private static bool IsGcmShellExecutable(string executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
+        return string.Equals(Path.GetFileName(executablePath), "gcmloader.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string BuildLocalRuntimeSummary()
+    {
+        GcmSubsystemHealth? shellSubsystem = FindPrivilegedSubsystem("Winlogon shell access");
+        if (shellSubsystem == null)
+        {
+            return "Local mode active";
+        }
+
+        return $"Local mode | {shellSubsystem.Status}";
     }
 }
 

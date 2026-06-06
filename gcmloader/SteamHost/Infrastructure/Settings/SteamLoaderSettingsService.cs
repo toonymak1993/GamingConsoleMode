@@ -36,10 +36,10 @@ public sealed class SteamLoaderSettingsService
     {
         var settings = LoadSettings();
         return new SteamLoaderGeneralSettingsSnapshot(
-            RunOnWindowsSignIn: settings.RunOnWindowsSignIn == true,
-            HideWindowsShellInConsoleMode: settings.HideWindowsShellInConsoleMode ?? true,
+            RunOnWindowsSignIn: false,
+            HideWindowsShellInConsoleMode: false,
             FirstRunCompleted: settings.FirstRunCompleted == true,
-            ConsoleModeDefaultApplied: settings.ConsoleModeDefaultApplied == true,
+            ConsoleModeDefaultApplied: true,
             ProductVersion: GetProductVersion(),
             InstallPath: _installPath,
             Plugins: BuildPluginStates(settings));
@@ -49,7 +49,7 @@ public sealed class SteamLoaderSettingsService
     {
         var settings = LoadSettings() with
         {
-            RunOnWindowsSignIn = enabled,
+            RunOnWindowsSignIn = false,
             RunOnWindowsSignInUserConfigured = true,
             ConsoleModeDefaultApplied = true,
         };
@@ -62,7 +62,7 @@ public sealed class SteamLoaderSettingsService
     {
         var settings = LoadSettings() with
         {
-            HideWindowsShellInConsoleMode = enabled,
+            HideWindowsShellInConsoleMode = false,
         };
 
         SaveSettings(settings);

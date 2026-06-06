@@ -688,7 +688,7 @@ namespace gcmloader
                 "loader-ui",
                 "gcm-service-shell",
                 "Shell handoff mode",
-                "Explains how WinPart shell handoff behaves in local mode when Windows does not grant elevated registry access.",
+                "Shows whether Windows currently points the Winlogon shell at GCM. Runtime handoffs no longer rewrite that boot entry.",
                 async () => await RefreshPrivilegedServiceStatusAsync(notifyUser: false),
                 sectionTitle: "GCM Runtime");
             AddSettingsRow(
