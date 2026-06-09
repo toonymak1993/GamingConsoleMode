@@ -1,6 +1,6 @@
 # Game Console Mode
 
-Game Console Mode is a controller-first shell for Windows that is now built around a Steam backend workflow.
+Game Console Mode is a controller-first shell for Windows that is now built around a Steam and Playnites backend workflow.
 
 It is meant for couch setups, handheld PCs, HTPCs, and full-screen gaming installs where you want Windows to stay in the background and your launcher experience to feel more like a console.
 
@@ -12,7 +12,7 @@ GCM is no longer trying to be a loose collection of launchers and side tools.
 
 The current direction is much simpler:
 
-- Steam is the main backend system
+- Steam and Playnite is the main backend system
 - settings live inside GCM itself
 - the shell, launcher flow, process view, and Steam tools are designed around controller use
 
