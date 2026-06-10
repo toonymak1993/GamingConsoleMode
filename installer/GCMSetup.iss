@@ -3,7 +3,7 @@
 #define MyServiceName "GCMPrivilegedService"
 #define MyAppShortcutIcon "gcm-logo.ico"
 #ifndef AppVersion
-  #define AppVersion "2.6.7"
+  #define AppVersion "2.6.8"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\artifacts\gcmloader-publish"

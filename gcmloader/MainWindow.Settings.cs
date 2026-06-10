@@ -135,7 +135,12 @@ namespace gcmloader
         private const string DefaultThemeDockPosition = "Bottom";
         private const string DefaultThemeTopDockSize = "Default";
         private const string DefaultThemeTopDockPosition = "Center";
+        private const double DefaultThemeTopDockOffsetX = 0.0;
+        private const double DefaultThemeTopDockOffsetY = 0.0;
+        private const double ThemeTopDockOffsetStep = 12.0;
+        private const double ThemeTopDockOffsetLimit = 420.0;
         private const string ThemeDefaultsVersion = "graphite-v1";
+        private const string DefaultLauncherMode = "steam";
 
         private static readonly string[] ThemeAccentPresets =
         {
@@ -183,6 +188,12 @@ namespace gcmloader
             "Right"
         };
 
+        private static readonly string[] LauncherModePresets =
+        {
+            "steam",
+            "playnite"
+        };
+
         private readonly List<SettingsCategoryDefinition> _settingsCategories = new();
         private readonly Dictionary<string, SettingsCategoryDefinition> _settingsCategoriesById = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<SettingsRowDefinition> _settingsRows = new();
@@ -207,7 +218,7 @@ namespace gcmloader
 
         private void ApplySteamOnlyMode()
         {
-            AppSettings.Save("launcher", "steam");
+            EnsureLauncherModeSetting();
         }
 
         private void InitializeSettingsOverlay()
@@ -217,7 +228,6 @@ namespace gcmloader
                 return;
             }
 
-            ApplySteamOnlyMode();
             EnsureSettingsDefaults();
             BuildSettingsRows();
             _isSettingsOverlayInitialized = true;
@@ -251,7 +261,46 @@ namespace gcmloader
             _settingsRows.Clear();
             _settingsRowsById.Clear();
 
-            AddSettingsCategory("steam", "Steam", "Steam-only launcher path and core launch behavior.", "\uE7BF");
+            AddSettingsCategory("launcher", "Launcher", "Choose your launcher mode and customize the launcher card.", "\uE8A7");
+            AddSettingsRow(
+                "launcher",
+                "launcher-mode",
+                "Launcher mode",
+                "Switch between Steam Mode and Playnite Mode.",
+                () => CycleLauncherModeSetting(1),
+                CycleLauncherModeSetting,
+                "Mode");
+            AddSettingsRow(
+                "launcher",
+                "launcher-steam-path",
+                "Steam executable",
+                "Pick a manual Steam path when auto-detection is not enough.",
+                async () => await SelectSteamPathAsync(),
+                sectionTitle: "Paths");
+            AddSettingsRow(
+                "launcher",
+                "launcher-playnite-path",
+                "Playnite fullscreen executable",
+                "Pick Playnite.FullscreenApp.exe when auto-detection is not enough.",
+                async () => await SelectPlaynitePathAsync(),
+                sectionTitle: "Paths");
+            AddSettingsRow(
+                "launcher",
+                "launcher-card-image",
+                "Launcher card image",
+                "Choose the artwork used by the fixed launcher card.",
+                async () => await SelectLauncherArtworkAsync(),
+                sectionTitle: "Launcher Card");
+            AddSettingsRow(
+                "launcher",
+                "launcher-card-image-reset",
+                "Reset launcher card image",
+                "Return the launcher card to the built-in default artwork.",
+                ResetLauncherArtwork,
+                _ => ResetLauncherArtwork(),
+                "Launcher Card");
+
+            AddSettingsCategory("steam", "Steam", "Steam integration, Store Sync and Quick Access host behavior.", "\uE7BF");
             AddSettingsRow(
                 "steam",
                 "steam-path",
@@ -586,7 +635,7 @@ namespace gcmloader
                 "Scales the launcher and live process cards.",
                 () => CycleThemePreset("theme_card_size", ThemeSizePresets, 1, true),
                 dir => CycleThemePreset("theme_card_size", ThemeSizePresets, dir, true),
-                "Layout");
+                "Cards");
             AddSettingsRow(
                 "theme",
                 "theme-dock-size",
@@ -594,7 +643,7 @@ namespace gcmloader
                 "Scales the status and controller hint dock.",
                 () => CycleThemePreset("theme_dock_size", ThemeSizePresets, 1, false),
                 dir => CycleThemePreset("theme_dock_size", ThemeSizePresets, dir, false),
-                "Layout");
+                "Bottom Dock");
             AddSettingsRow(
                 "theme",
                 "theme-dock-position",
@@ -602,7 +651,7 @@ namespace gcmloader
                 "Choose whether the controller/status dock sits at the bottom or top.",
                 () => CycleThemePreset("theme_dock_position", ThemeDockPositionPresets, 1, false),
                 dir => CycleThemePreset("theme_dock_position", ThemeDockPositionPresets, dir, false),
-                "Layout");
+                "Bottom Dock");
             AddSettingsRow(
                 "theme",
                 "theme-top-dock-size",
@@ -618,6 +667,30 @@ namespace gcmloader
                 "Pins the top status dock left, center or right.",
                 () => CycleThemePreset("theme_top_dock_position", ThemeTopDockPositionPresets, 1, false),
                 dir => CycleThemePreset("theme_top_dock_position", ThemeTopDockPositionPresets, dir, false),
+                "Top Dock");
+            AddSettingsRow(
+                "theme",
+                "theme-top-dock-offset-x",
+                "Top dock X offset",
+                "Move the top dock left or right with the controller.",
+                () => AdjustThemeNumberSetting("theme_top_dock_offset_x", ThemeTopDockOffsetStep, -ThemeTopDockOffsetLimit, ThemeTopDockOffsetLimit, false),
+                dir => AdjustThemeNumberSetting("theme_top_dock_offset_x", dir * ThemeTopDockOffsetStep, -ThemeTopDockOffsetLimit, ThemeTopDockOffsetLimit, false),
+                "Top Dock");
+            AddSettingsRow(
+                "theme",
+                "theme-top-dock-offset-y",
+                "Top dock Y offset",
+                "Move the top dock up or down with the controller.",
+                () => AdjustThemeNumberSetting("theme_top_dock_offset_y", ThemeTopDockOffsetStep, -ThemeTopDockOffsetLimit, ThemeTopDockOffsetLimit, false),
+                dir => AdjustThemeNumberSetting("theme_top_dock_offset_y", dir * ThemeTopDockOffsetStep, -ThemeTopDockOffsetLimit, ThemeTopDockOffsetLimit, false),
+                "Top Dock");
+            AddSettingsRow(
+                "theme",
+                "theme-top-dock-offset-reset",
+                "Reset top dock offset",
+                "Center the top dock offsets back to zero.",
+                ResetTopDockOffsets,
+                _ => ResetTopDockOffsets(),
                 "Top Dock");
             AddSettingsRow(
                 "theme",
@@ -1145,7 +1218,10 @@ namespace gcmloader
             EnsureBooleanSetting("show_discord", true);
             EnsureBooleanSetting("uac", true);
 
+            EnsureStringSetting("launcher", DefaultLauncherMode);
             EnsureStringSetting("steamlauncherpath", string.Empty);
+            EnsureStringSetting("playnitelauncherpath", string.Empty);
+            EnsureStringSetting("launcher_card_image_path", string.Empty);
             EnsureStringSetting("startupvideo_path", string.Empty);
             EnsureStringSetting("preaudiostart", GetDefaultAudioDeviceName());
             EnsureStringSetting("preaudioend", GetDefaultAudioDeviceName());
@@ -1159,6 +1235,9 @@ namespace gcmloader
             EnsureStringSetting("theme_dock_position", DefaultThemeDockPosition);
             EnsureStringSetting("theme_top_dock_size", DefaultThemeTopDockSize);
             EnsureStringSetting("theme_top_dock_position", DefaultThemeTopDockPosition);
+            EnsureDoubleSetting("theme_top_dock_offset_x", DefaultThemeTopDockOffsetX);
+            EnsureDoubleSetting("theme_top_dock_offset_y", DefaultThemeTopDockOffsetY);
+            EnsureLauncherModeSetting();
             MigrateThemeDefaultsIfNeeded();
             EnsureSteamIntegrationDefaults();
 
@@ -1205,6 +1284,18 @@ namespace gcmloader
             try
             {
                 AppSettings.Load<string>(key);
+            }
+            catch
+            {
+                AppSettings.Save(key, value);
+            }
+        }
+
+        private void EnsureDoubleSetting(string key, double value)
+        {
+            try
+            {
+                AppSettings.Load<double>(key);
             }
             catch
             {
@@ -1511,6 +1602,11 @@ namespace gcmloader
                 return;
             }
 
+            SetSettingsRowValue("launcher-mode", FormatLauncherModeSummary());
+            SetSettingsRowValue("launcher-steam-path", FormatSteamPathSummary());
+            SetSettingsRowValue("launcher-playnite-path", FormatPlaynitePathSummary());
+            SetSettingsRowValue("launcher-card-image", FormatLauncherArtworkSummary());
+            SetSettingsRowValue("launcher-card-image-reset", "Restore default");
             SetSettingsRowValue("steam-path", FormatSteamPathSummary());
             SetSettingsRowValue("steam-path-reset", "Auto-detect");
             RefreshSteamIntegrationSettingsValues();
@@ -1550,6 +1646,9 @@ namespace gcmloader
             SetSettingsRowValue("theme-dock-position", GetSetting("theme_dock_position", DefaultThemeDockPosition));
             SetSettingsRowValue("theme-top-dock-size", GetSetting("theme_top_dock_size", DefaultThemeTopDockSize));
             SetSettingsRowValue("theme-top-dock-position", GetSetting("theme_top_dock_position", DefaultThemeTopDockPosition));
+            SetSettingsRowValue("theme-top-dock-offset-x", FormatOffset(GetThemeTopDockOffsetX()));
+            SetSettingsRowValue("theme-top-dock-offset-y", FormatOffset(GetThemeTopDockOffsetY()));
+            SetSettingsRowValue("theme-top-dock-offset-reset", "Center offsets");
             SetSettingsRowValue("theme-reset", "Restore defaults");
 
             SetSettingsRowValue("preaudio-enabled", FormatEnabled(GetSetting("usepreaudio", false)));
@@ -1594,6 +1693,7 @@ namespace gcmloader
                 touchKeyboardSubsystem == null ? pendingServiceCheckText : $"{touchKeyboardSubsystem.Status} | {ShortenForUi(touchKeyboardSubsystem.Details, touchKeyboardSubsystem.Status)}",
                 touchKeyboardSubsystem?.IsReady ?? pendingServiceCheckPositive);
 
+            SetSettingsCategorySummary("launcher", FormatLauncherModeSummary());
             SetSettingsCategorySummary("controller", FormatControllerModeSummary());
             SetSettingsCategorySummary("startup", GetSetting("usestartupvideo", false) ? "Video ready" : "Steam boot");
             SetSettingsCategorySummary("preload", _managedPreloadApps.Count == 0 ? "No apps" : $"{_managedPreloadApps.Count} app(s)");
@@ -1994,6 +2094,91 @@ namespace gcmloader
             RefreshSettingsOverlayValues();
         }
 
+        private async Task SelectPlaynitePathAsync()
+        {
+            string detectedPath = AutoDetectLauncherPath("playnite") ?? string.Empty;
+            string startDirectory = Path.GetDirectoryName(detectedPath) ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string selectedFile = NativeOpenFileDialog.Show(
+                "Select Playnite.FullscreenApp.exe",
+                startDirectory,
+                "Playnite fullscreen executable (*.exe)|*.exe|All files (*.*)|*.*");
+
+            if (string.IsNullOrWhiteSpace(selectedFile))
+            {
+                return;
+            }
+
+            if (!File.Exists(selectedFile) ||
+                !string.Equals(Path.GetFileName(selectedFile), "Playnite.FullscreenApp.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                await messagebox("Please choose Playnite.FullscreenApp.exe.");
+                return;
+            }
+
+            AppSettings.Save("playnitelauncherpath", selectedFile);
+            RefreshSettingsOverlayValues();
+        }
+
+        private async Task SelectLauncherArtworkAsync()
+        {
+            string currentPath = GetSetting("launcher_card_image_path", string.Empty, false);
+            string startDirectory = !string.IsNullOrWhiteSpace(currentPath) && File.Exists(currentPath)
+                ? Path.GetDirectoryName(currentPath) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+
+            string selectedFile = NativeOpenFileDialog.Show(
+                "Select launcher card image",
+                startDirectory,
+                "Images (*.jpg;*.jpeg;*.png;*.bmp;*.webp)|*.jpg;*.jpeg;*.png;*.bmp;*.webp|All files (*.*)|*.*");
+
+            if (string.IsNullOrWhiteSpace(selectedFile) || !File.Exists(selectedFile))
+            {
+                return;
+            }
+
+            AppSettings.Save("launcher_card_image_path", selectedFile);
+            LoadDynamicLauncherCards();
+            RefreshSettingsOverlayValues();
+            UpdateVisualFocus();
+            await Task.CompletedTask;
+        }
+
+        private void ResetLauncherArtwork()
+        {
+            AppSettings.Save("launcher_card_image_path", string.Empty);
+            LoadDynamicLauncherCards();
+            RefreshSettingsOverlayValues();
+            UpdateVisualFocus();
+        }
+
+        private void CycleLauncherModeSetting(int direction)
+        {
+            EnsureLauncherModeSetting();
+            string current = GetConfiguredLauncherMode();
+            int currentIndex = Array.FindIndex(
+                LauncherModePresets,
+                value => string.Equals(value, current, StringComparison.OrdinalIgnoreCase));
+
+            if (currentIndex < 0)
+            {
+                currentIndex = 0;
+            }
+
+            int nextIndex = (currentIndex + direction + LauncherModePresets.Length) % LauncherModePresets.Length;
+            string nextMode = LauncherModePresets[nextIndex];
+            AppSettings.Save("launcher", nextMode);
+
+            if (string.Equals(nextMode, "playnite", StringComparison.OrdinalIgnoreCase))
+            {
+                AppSettings.Save(SteamStoreSyncEnabledKey, false);
+                AppSettings.Save(SteamPluginHostEnabledKey, false);
+            }
+
+            LoadDynamicLauncherCards();
+            RefreshSettingsOverlayValues();
+            UpdateVisualFocus();
+        }
+
         private void ResetSteamPath()
         {
             AppSettings.Save("steamlauncherpath", string.Empty);
@@ -2307,8 +2492,31 @@ namespace gcmloader
             AppSettings.Save("theme_dock_position", DefaultThemeDockPosition);
             AppSettings.Save("theme_top_dock_size", DefaultThemeTopDockSize);
             AppSettings.Save("theme_top_dock_position", DefaultThemeTopDockPosition);
+            AppSettings.Save("theme_top_dock_offset_x", DefaultThemeTopDockOffsetX);
+            AppSettings.Save("theme_top_dock_offset_y", DefaultThemeTopDockOffsetY);
             AppSettings.Save("theme_defaults_version", ThemeDefaultsVersion);
             ApplyResponsiveShellSizing(rebuildCards: true);
+            RefreshSettingsOverlayValues();
+            UpdateVisualFocus();
+        }
+
+        private void AdjustThemeNumberSetting(string key, double delta, double min, double max, bool rebuildCards)
+        {
+            double current = GetSetting(key, 0.0, false);
+            double next = Math.Clamp(current + delta, min, max);
+            next = Math.Round(next, 1);
+
+            AppSettings.Save(key, next);
+            ApplyResponsiveShellSizing(rebuildCards);
+            RefreshSettingsOverlayValues();
+            UpdateVisualFocus();
+        }
+
+        private void ResetTopDockOffsets()
+        {
+            AppSettings.Save("theme_top_dock_offset_x", DefaultThemeTopDockOffsetX);
+            AppSettings.Save("theme_top_dock_offset_y", DefaultThemeTopDockOffsetY);
+            ApplyResponsiveShellSizing();
             RefreshSettingsOverlayValues();
             UpdateVisualFocus();
         }
@@ -2342,11 +2550,7 @@ namespace gcmloader
             bool enabled = !GetSetting("gcmwallpaper", false);
             AppSettings.Save("gcmwallpaper", enabled);
 
-            if (!enabled)
-            {
-                AppSettings.Save("gcmwallpaperpath", string.Empty);
-            }
-
+            RefreshWallpaperFromSettings();
             RefreshSettingsOverlayValues();
         }
 
@@ -2364,8 +2568,17 @@ namespace gcmloader
 
             AppSettings.Save("gcmwallpaperpath", selectedFile);
             AppSettings.Save("gcmwallpaper", true);
+            RefreshWallpaperFromSettings();
             RefreshSettingsOverlayValues();
             await Task.CompletedTask;
+        }
+
+        private void RefreshWallpaperFromSettings()
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                SetBackgroundImage(GetScreenWidth(), GetScreenHeight(), animate: true);
+            });
         }
 
         private void ToggleDiscordCardSetting()
@@ -2797,6 +3010,77 @@ namespace gcmloader
                 : $"{holdDuration:0.##}s";
         }
 
+        private static string FormatOffset(double value)
+        {
+            if (Math.Abs(value) < 0.01)
+            {
+                return "0px";
+            }
+
+            return value > 0
+                ? $"+{value:0.#}px"
+                : $"{value:0.#}px";
+        }
+
+        private void EnsureLauncherModeSetting()
+        {
+            string mode = GetSetting("launcher", DefaultLauncherMode, false);
+            if (LauncherModePresets.Any(preset => string.Equals(preset, mode, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (string.Equals(mode, "playnite", StringComparison.OrdinalIgnoreCase))
+                {
+                    AppSettings.Save(SteamStoreSyncEnabledKey, false);
+                    AppSettings.Save(SteamPluginHostEnabledKey, false);
+                }
+
+                return;
+            }
+
+            AppSettings.Save("launcher", DefaultLauncherMode);
+        }
+
+        private string GetConfiguredLauncherMode()
+        {
+            string mode = GetSetting("launcher", DefaultLauncherMode, false).Trim().ToLowerInvariant();
+            return string.Equals(mode, "playnite", StringComparison.OrdinalIgnoreCase)
+                ? "playnite"
+                : "steam";
+        }
+
+        private string GetConfiguredLauncherDisplayName()
+        {
+            return string.Equals(GetConfiguredLauncherMode(), "playnite", StringComparison.OrdinalIgnoreCase)
+                ? "Playnite"
+                : "Steam";
+        }
+
+        private string FormatLauncherModeSummary()
+        {
+            return string.Equals(GetConfiguredLauncherMode(), "playnite", StringComparison.OrdinalIgnoreCase)
+                ? "Playnite Mode"
+                : "Steam Mode";
+        }
+
+        private string FormatPlaynitePathSummary()
+        {
+            string configuredPath = GetSetting("playnitelauncherpath", string.Empty, false);
+            if (!string.IsNullOrWhiteSpace(configuredPath))
+            {
+                return ShortenForUi(configuredPath, "Manual path");
+            }
+
+            string detectedPath = AutoDetectLauncherPath("playnite") ?? string.Empty;
+            return string.IsNullOrWhiteSpace(detectedPath)
+                ? "Auto-detect"
+                : $"Auto | {ShortenForUi(detectedPath, detectedPath)}";
+        }
+
+        private string FormatLauncherArtworkSummary()
+        {
+            string artworkPath = GetSetting("launcher_card_image_path", string.Empty, false);
+            return ShortenForUi(artworkPath, "Built-in default");
+        }
+
         private string GetThemeAccentName()
         {
             return GetSetting("theme_accent", DefaultThemeAccent, false);
@@ -2875,6 +3159,22 @@ namespace gcmloader
                 "Large" => 1.18,
                 _ => 1.0
             };
+        }
+
+        private double GetThemeTopDockOffsetX()
+        {
+            return Math.Clamp(
+                GetSetting("theme_top_dock_offset_x", DefaultThemeTopDockOffsetX, false),
+                -ThemeTopDockOffsetLimit,
+                ThemeTopDockOffsetLimit);
+        }
+
+        private double GetThemeTopDockOffsetY()
+        {
+            return Math.Clamp(
+                GetSetting("theme_top_dock_offset_y", DefaultThemeTopDockOffsetY, false),
+                -ThemeTopDockOffsetLimit,
+                ThemeTopDockOffsetLimit);
         }
 
         private bool IsThemeDockTop()

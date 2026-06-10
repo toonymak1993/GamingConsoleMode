@@ -92,6 +92,12 @@
                                 <Image Source="ms-appx:///Assets/windowsicon.png" Width="20" Height="20" Stretch="Uniform"/>
                             </Button>
 
+                            <Button x:Name="VideoOutputButton" Width="50" Height="40" Click="VideoOutputButton_Click"
+                                    Background="Transparent" BorderThickness="0" CornerRadius="10"
+                                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                                <FontIcon Glyph="&#xE7F4;" FontSize="18" Foreground="White"/>
+                            </Button>
+
                             <Button x:Name="VolumeButton" Width="50" Height="40" Click="VolumeButton_Click"
                                     Background="Transparent" BorderThickness="0" CornerRadius="10"
                                     HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
@@ -477,6 +483,86 @@
                                 </StackPanel>
                             </Button>
 
+                        </StackPanel>
+
+                        <Border BorderBrush="#15FFFFFF" BorderThickness="0,1,0,0" Padding="15">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+                                <Ellipse Width="18" Height="18" Fill="#FFDB4E4E"/>
+                                <TextBlock Text="Back / Close" Foreground="#AAFFFFFF" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid x:Name="VideoOutputMenu" Visibility="Collapsed" Canvas.ZIndex="3001" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <Grid.ChildrenTransitions>
+                    <TransitionCollection>
+                        <EntranceThemeTransition FromVerticalOffset="30" />
+                        <ContentThemeTransition/>
+                    </TransitionCollection>
+                </Grid.ChildrenTransitions>
+
+                <Grid Tapped="VideoOutputMenu_BackdropTapped">
+                    <Grid.Background>
+                        <AcrylicBrush TintColor="#050505" TintOpacity="0.85" FallbackColor="#CC000000" />
+                    </Grid.Background>
+                </Grid>
+
+                <Border Width="380" VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        CornerRadius="16" BorderBrush="#33FFFFFF" BorderThickness="1"
+                        Padding="0">
+                    <Border.Shadow>
+                        <ThemeShadow/>
+                    </Border.Shadow>
+
+                    <StackPanel>
+                        <Border Background="#10FFFFFF" CornerRadius="16,16,0,0" Padding="15">
+                            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                                <FontIcon Glyph="&#xE7F4;" FontSize="18" Foreground="White"/>
+                                <TextBlock Text="VIDEO OUTPUT" FontWeight="Bold" FontSize="16" Foreground="White"/>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Spacing="8" Padding="20">
+                            <Button x:Name="VideoInternalMenuItem" Click="VideoInternalMenuItem_Click"
+                                    HorizontalAlignment="Stretch" Height="70" CornerRadius="8"
+                                    BorderThickness="1" BorderBrush="#44FFFFFF" Background="#25FFFFFF"
+                                    Padding="15,0">
+                                <Grid HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <FontIcon Glyph="&#xE7F4;" FontSize="24" VerticalAlignment="Center" Foreground="#A5D952"/>
+
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="20,0,0,0">
+                                        <TextBlock Text="Internal Display" FontSize="16" FontWeight="SemiBold" Foreground="White"/>
+                                        <TextBlock Text="Switch to the built-in screen." FontSize="12" Opacity="0.7" Foreground="White"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+
+                            <Button x:Name="VideoExternalMenuItem" Click="VideoExternalMenuItem_Click"
+                                    HorizontalAlignment="Stretch" Height="70" CornerRadius="8"
+                                    Background="#10FFFFFF" BorderThickness="1" BorderBrush="#22FFFFFF"
+                                    Padding="15,0">
+                                <Grid HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <FontIcon Glyph="&#xE8A9;" FontSize="22" VerticalAlignment="Center" Foreground="White"/>
+
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="20,0,0,0">
+                                        <TextBlock Text="External Display" FontSize="16" FontWeight="SemiBold" Foreground="White"/>
+                                        <TextBlock Text="Switch to the connected monitor or TV." FontSize="12" Opacity="0.7" Foreground="White"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
                         </StackPanel>
 
                         <Border BorderBrush="#15FFFFFF" BorderThickness="0,1,0,0" Padding="15">

@@ -4236,7 +4236,7 @@ namespace gcmloader
         // Füge diese Deklarationen für die Gamepad-Steuerung hinzu, falls sie fehlen:
 
         // Die drei Fokus-Bereiche unserer App
-        private enum FocusArea { Launcher, QuickLaunchers, Cards, TopButtons, PowerMenu, AppLauncher, AudioMenu, ImageSelection, GameOptions, StartupVideo, SettingsMenu, WindowsReturnConfirm, GithubReleasePrompt }
+        private enum FocusArea { Launcher, QuickLaunchers, Cards, TopButtons, PowerMenu, VideoOutputMenu, AppLauncher, AudioMenu, ImageSelection, GameOptions, StartupVideo, SettingsMenu, WindowsReturnConfirm, GithubReleasePrompt }
         private List<Border> _quickLauncherButtons = new List<Border>();
         private int _selectedQuickLauncherIndex = 0;
         private FocusArea _currentFocusArea = FocusArea.Cards;
@@ -4244,8 +4244,10 @@ namespace gcmloader
         // Index und Liste für die oberen Buttons
         private int _selectedTopButtonIndex = 0;
         private List<Button> _topButtons = new List<Button>();
-        private List<Button> _powerMenuItems = new List<Button>(); 
-        private int _selectedPowerMenuItemIndex = 0; 
+        private List<Button> _powerMenuItems = new List<Button>();
+        private int _selectedPowerMenuItemIndex = 0;
+        private List<Button> _videoOutputMenuItems = new List<Button>();
+        private int _selectedVideoOutputMenuItemIndex = 0;
 
 
 
@@ -4543,8 +4545,9 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             _quickLauncherButtons = new List<Border>();
             QuickLauncherPanel.Visibility = Visibility.Collapsed;
 
-            _topButtons = new List<Button> { ExitGcmButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
+            _topButtons = new List<Button> { ExitGcmButton, VideoOutputButton, VolumeButton, SettingsButton, AppLauncherButton, ShutdownButton };
             _powerMenuItems = new List<Button> { SleepMenuItem, RestartMenuItem, ShutdownMenuItem, LogOffMenuItem };
+            _videoOutputMenuItems = new List<Button> { VideoInternalMenuItem, VideoExternalMenuItem };
 
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             Application.Current.UnhandledException += CurrentApp_UnhandledException;
@@ -6999,7 +7002,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         #region Hybrid Wallpaper Logic (Live & Static)
 
-        private void SetBackgroundImage(int width, int height)
+        private void SetBackgroundImage(int width, int height, bool animate = false)
         {
             try
             {
@@ -7053,13 +7056,13 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 if (videoExtensions.Contains(extension))
                 {
                     Debug.WriteLine("[Wallpaper] Starte Live-Video: " + cleanPath);
-                    SetupLiveWallpaper(cleanPath);
+                    SetupLiveWallpaper(cleanPath, animate);
                 }
                 else
                 {
                     Debug.WriteLine("[Wallpaper] Setze statisches Bild: " + cleanPath);
-                    StopLiveWallpaper();
-                    _ = ApplyStaticBackgroundImageAsync(cleanPath, Math.Max(width, height));
+                    StopLiveWallpaper(animate);
+                    _ = ApplyStaticBackgroundImageAsync(cleanPath, Math.Max(width, height), animate);
                 }
             }
             catch (Exception ex)
@@ -7069,7 +7072,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             }
         }
 
-        private async Task ApplyStaticBackgroundImageAsync(string cleanPath, int targetDecodeSize)
+        private async Task ApplyStaticBackgroundImageAsync(string cleanPath, int targetDecodeSize, bool animate = false)
         {
             int loadVersion = Interlocked.Increment(ref _backgroundImageLoadVersion);
             byte[] imageBytes;
@@ -7116,12 +7119,36 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                         return;
                     }
 
+                    if (animate && BackgroundImage.Visibility == Visibility.Visible && BackgroundImage.Opacity > 0.05)
+                    {
+                        AnimateOverlayOpacity(BackgroundImage, 0.0, false);
+                        await Task.Delay(180);
+
+                        if (loadVersion != _backgroundImageLoadVersion)
+                        {
+                            return;
+                        }
+                    }
+
                     BackgroundImage.Source = bitmap;
                     BackgroundImage.Visibility = Visibility.Visible;
+                    BackgroundImage.Opacity = animate ? 0.0 : 1.0;
 
                     if (BackgroundVideoPlayer != null)
                     {
-                        BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                        if (animate && BackgroundVideoPlayer.Visibility == Visibility.Visible)
+                        {
+                            AnimateOverlayOpacity(BackgroundVideoPlayer, 0.0, true);
+                        }
+                        else
+                        {
+                            BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                        }
+                    }
+
+                    if (animate)
+                    {
+                        AnimateOverlayOpacity(BackgroundImage, 1.0, false);
                     }
 
                     App.StartupTrace("Wallpaper static image applied.");
@@ -7135,11 +7162,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             });
         }
 
-        private void SetupLiveWallpaper(string videoPath)
+        private void SetupLiveWallpaper(string videoPath, bool animate = false)
         {
             try
             {
-                StopLiveWallpaper();
+                StopLiveWallpaper(animate);
 
                 var player = new Windows.Media.Playback.MediaPlayer();
                 _backgroundWallpaperPlayer = player;
@@ -7159,20 +7186,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 {
                     BackgroundVideoPlayer.SetMediaPlayer(player);
                     BackgroundVideoPlayer.Visibility = Visibility.Visible;
-                }
-
-                // WICHTIG: Den Player-Typ auf 'Hardware' zwingen (über das UI Element)
-                if (BackgroundVideoPlayer != null)
-                {
-                    BackgroundVideoPlayer.Opacity = 1.0;
+                    BackgroundVideoPlayer.Opacity = animate ? 0.0 : 1.0;
                 }
 
                 player.Play();
+
+                if (animate)
+                {
+                    if (BackgroundImage != null && BackgroundImage.Visibility == Visibility.Visible)
+                    {
+                        AnimateOverlayOpacity(BackgroundImage, 0.0, true);
+                    }
+
+                    if (BackgroundVideoPlayer != null)
+                    {
+                        AnimateOverlayOpacity(BackgroundVideoPlayer, 1.0, false);
+                    }
+                }
             }
             catch (Exception ex) { Debug.WriteLine($"[Wallpaper] Error: {ex.Message}"); }
         }
 
-        private void StopLiveWallpaper()
+        private void StopLiveWallpaper(bool animate = false)
         {
             try
             {
@@ -7183,7 +7218,14 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     if (BackgroundVideoPlayer != null)
                     {
                         BackgroundVideoPlayer.SetMediaPlayer(null);
-                        BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                        if (animate)
+                        {
+                            AnimateOverlayOpacity(BackgroundVideoPlayer, 0.0, true);
+                        }
+                        else
+                        {
+                            BackgroundVideoPlayer.Visibility = Visibility.Collapsed;
+                        }
                     }
                     player.Dispose();
                     _backgroundWallpaperPlayer = null;
@@ -7772,6 +7814,19 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     break;
 
                 case "playnite":
+                    try
+                    {
+                        string configuredPlaynitePath = AppSettings.Load<string>("playnitelauncherpath");
+                        if (!string.IsNullOrWhiteSpace(configuredPlaynitePath) && File.Exists(configuredPlaynitePath))
+                        {
+                            return configuredPlaynitePath;
+                        }
+                    }
+                    catch
+                    {
+                        // Fall back to auto-detection below.
+                    }
+
                     // 1. Zuerst exakt in deinem Standard-Pfad schauen (99% der Fälle)
                     string defaultPath = Path.Combine(localAppData, "Playnite", "Playnite.FullscreenApp.exe");
                     if (File.Exists(defaultPath))
@@ -7865,16 +7920,24 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         {
             if (!TryBeginSteamLaunch())
             {
-                Debug.WriteLine("[GCM] Ignoring duplicate Steam launcher request.");
+                Debug.WriteLine("[GCM] Ignoring duplicate launcher request.");
                 return;
             }
 
             MakeSelfNonTopmost();
             ApplySteamOnlyMode();
-            Debug.WriteLine("[GCM] Wechsle zu konfiguriertem Launcher: 'steam'...");
+            string launcherMode = GetConfiguredLauncherMode();
+            string launcherDisplayName = GetConfiguredLauncherDisplayName();
+            Debug.WriteLine($"[GCM] Wechsle zu konfiguriertem Launcher: '{launcherDisplayName}'...");
 
             try
             {
+                if (string.Equals(launcherMode, "playnite", StringComparison.OrdinalIgnoreCase))
+                {
+                    await StartPlaynite();
+                    return;
+                }
+
                 if (await TryReturnToSteamViaTaskViewAsync())
                 {
                     return;
@@ -9257,10 +9320,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
                 // 3. ERST JETZT, wo das Video weg ist und der Desktop 100% bereit ist,
                 // starten wir den eigentlichen Launcher. Er poppt jetzt nahezu sofort auf!
-                ShowInAppNotification("Preparing Steam Big Picture...");
+                string configuredLauncherName = GetConfiguredLauncherDisplayName();
+                ShowInAppNotification($"Preparing {configuredLauncherName}...");
                 await StartConfiguredLauncherAsync();
                 App.StartupTrace("Configured launcher start finished.");
-                ShowInAppNotification("Steam handoff complete.");
+                ShowInAppNotification($"{configuredLauncherName} handoff complete.");
 
                 // 4. GCM Loader als Shell in die Registry schreiben für den nächsten Start
                 await ConsoleModeToShellAsync();
@@ -9412,8 +9476,17 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         private async Task StartConfiguredLauncherAsync()
         {
             ApplySteamOnlyMode();
-            Debug.WriteLine("Desktop ist bereit. Starte nun Launcher: steam");
-            ShowInAppNotification("Starting Steam Big Picture...");
+            string launcherMode = GetConfiguredLauncherMode();
+            string launcherDisplayName = GetConfiguredLauncherDisplayName();
+            Debug.WriteLine($"Desktop ist bereit. Starte nun Launcher: {launcherDisplayName}");
+            ShowInAppNotification($"Starting {launcherDisplayName}...");
+
+            if (string.Equals(launcherMode, "playnite", StringComparison.OrdinalIgnoreCase))
+            {
+                await StartPlaynite();
+                return;
+            }
+
             // Boot must start Steam directly with the desired arguments. Do not kill/restart
             // an already-running Steam here, because that makes shell startup feel broken.
             await StartSteam(false, allowDeveloperModeRestart: false);
@@ -9726,9 +9799,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 double focusedScale = _currentFocusArea == FocusArea.TopButtons ? topDockScale * 1.05 : topDockScale;
                 InfoPanelTransform.ScaleX = focusedScale;
                 InfoPanelTransform.ScaleY = focusedScale;
+                InfoPanelTransform.TranslateX = GetThemeTopDockOffsetX() * layoutScale;
+                InfoPanelTransform.TranslateY = GetThemeTopDockOffsetY() * layoutScale;
             }
 
             ApplyTopBarButtonScale(ExitGcmButton, topDockScale);
+            ApplyTopBarButtonScale(VideoOutputButton, topDockScale);
             ApplyTopBarButtonScale(VolumeButton, topDockScale);
             ApplyTopBarButtonScale(SettingsButton, topDockScale);
             ApplyTopBarButtonScale(AppLauncherButton, topDockScale);
@@ -9824,14 +9900,21 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             LauncherAreaPanel.Children.Clear();
 
             ApplySteamOnlyMode();
-            string mainLauncherIconPath = "ms-appx:///Assets/steam_logo.png";
+            string launcherMode = GetConfiguredLauncherMode();
+            bool isPlayniteMode = string.Equals(launcherMode, "playnite", StringComparison.OrdinalIgnoreCase);
+            string launcherDisplayName = GetConfiguredLauncherDisplayName();
+            string mainLauncherIconPath = isPlayniteMode
+                ? "ms-appx:///Assets/playnite_logo.png"
+                : "ms-appx:///Assets/steam_logo.png";
 
             // 1. MAIN LAUNCHER (Wird groß erstellt: 250x250)
             var mainLauncherItem = new LauncherCardItem
             {
-                Name = "Steam",
+                Name = launcherDisplayName,
                 Subtitle = "Launcher",
-                Description = "Zuruck in Steam Big Picture und direkt wieder in die Hauptoberflache springen.",
+                Description = isPlayniteMode
+                    ? "Return to Playnite Fullscreen and keep GCM ready in the background."
+                    : "Return to Steam Big Picture and keep GCM ready in the background.",
                 ImagePath = mainLauncherIconPath,
                 IsPrimary = true,
                 TapAction = (s, e) => SwitchToConfiguredLauncher()
@@ -9873,6 +9956,28 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
         }
 
 
+        private BitmapImage ResolveLauncherCardBackgroundImage()
+        {
+            string customPath = GetSetting("launcher_card_image_path", string.Empty, false).Trim('"').Trim();
+            if (!string.IsNullOrWhiteSpace(customPath) && File.Exists(customPath))
+            {
+                try
+                {
+                    return new BitmapImage(new Uri(customPath, UriKind.Absolute));
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Launcher] Failed to load custom launcher artwork: {ex.Message}");
+                }
+            }
+
+            string fallbackAsset = string.Equals(GetConfiguredLauncherMode(), "playnite", StringComparison.OrdinalIgnoreCase)
+                ? "ms-appx:///Assets/playnite_logo.png"
+                : "ms-appx:///Assets/steam_launcher_background.jpg";
+
+            return new BitmapImage(new Uri(fallbackAsset));
+        }
+
 
         /// <summary>
         /// Creates a single, clickable launcher card based on the provided data.
@@ -9886,7 +9991,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             bool isMainLauncher = item.IsPrimary;
             bool isGameCard = item.GameInfo?.IsGame == true;
             var launcherBackgroundSource = isMainLauncher
-                ? new BitmapImage(new Uri("ms-appx:///Assets/steam_launcher_background.jpg"))
+                ? ResolveLauncherCardBackgroundImage()
                 : null;
 
             var loadedImage = new Image
@@ -12194,6 +12299,12 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     AddLegendHint(hints, "B", "Back");
                     break;
 
+                case FocusArea.VideoOutputMenu:
+                    AddLegendHint(hints, "Navigate", "Navigate");
+                    AddLegendHint(hints, "A", "Select");
+                    AddLegendHint(hints, "B", "Back");
+                    break;
+
                 case FocusArea.WindowsReturnConfirm:
                     AddLegendHint(hints, "A", "Return to Windows");
                     AddLegendHint(hints, "B", "Stay in GCM");
@@ -13785,6 +13896,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                    AppLauncher?.Visibility == Visibility.Visible ||
                    AudioOverlay?.Visibility == Visibility.Visible ||
                    PowerMenu?.Visibility == Visibility.Visible ||
+                   VideoOutputMenu?.Visibility == Visibility.Visible ||
                    GameOptionsOverlay?.Visibility == Visibility.Visible;
         }
 
@@ -16543,6 +16655,35 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     }
                     break;
 
+                case FocusArea.VideoOutputMenu:
+                    if (((newPresses & GamepadButtonFlags.DPadDown) != 0 || stickMovedDown) && _videoOutputMenuItems.Any())
+                    {
+                        _selectedVideoOutputMenuItemIndex = (_selectedVideoOutputMenuItemIndex + 1) % _videoOutputMenuItems.Count;
+                        navigated = true;
+                    }
+                    else if (((newPresses & GamepadButtonFlags.DPadUp) != 0 || stickMovedUp) && _videoOutputMenuItems.Any())
+                    {
+                        _selectedVideoOutputMenuItemIndex = (_selectedVideoOutputMenuItemIndex - 1 + _videoOutputMenuItems.Count) % _videoOutputMenuItems.Count;
+                        navigated = true;
+                    }
+                    else if ((newPresses & GamepadButtonFlags.A) != 0 && _videoOutputMenuItems.Count > _selectedVideoOutputMenuItemIndex)
+                    {
+                        var btn = _videoOutputMenuItems[_selectedVideoOutputMenuItemIndex];
+                        btn.Focus(FocusState.Programmatic);
+
+                        if (btn == VideoInternalMenuItem) VideoInternalMenuItem_Click(null, null);
+                        else if (btn == VideoExternalMenuItem) VideoExternalMenuItem_Click(null, null);
+
+                        PlayActivationSound();
+                    }
+                    else if ((newPresses & GamepadButtonFlags.B) != 0)
+                    {
+                        CloseVideoOutputMenu();
+                        navigated = true;
+                        PlaydeactivationSound();
+                    }
+                    break;
+
                 // --- 6. AppLauncher (Fullscreen Grid) ---
                 // --- 6. AppLauncher (Fullscreen Grid) ---
                 case FocusArea.AppLauncher:
@@ -16847,6 +16988,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
 
         private void PowerButton_Click(object sender, RoutedEventArgs e)
         {
+            if (VideoOutputMenu?.Visibility == Visibility.Visible)
+            {
+                VideoOutputMenu.Visibility = Visibility.Collapsed;
+            }
+
             if (PowerMenu.Visibility == Visibility.Visible)
             {
                 PowerMenu.Visibility = Visibility.Collapsed;
@@ -16870,6 +17016,90 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
             PowerMenu.Visibility = Visibility.Collapsed;
             _currentFocusArea = FocusArea.TopButtons;
             UpdateVisualFocus();
+        }
+
+        private void VideoOutputButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (VideoOutputMenu?.Visibility == Visibility.Visible)
+            {
+                CloseVideoOutputMenu();
+            }
+            else
+            {
+                OpenVideoOutputMenu();
+            }
+        }
+
+        private void OpenVideoOutputMenu()
+        {
+            if (VideoOutputMenu == null)
+            {
+                return;
+            }
+
+            if (PowerMenu?.Visibility == Visibility.Visible)
+            {
+                PowerMenu.Visibility = Visibility.Collapsed;
+            }
+
+            VideoOutputMenu.Visibility = Visibility.Visible;
+            _currentFocusArea = FocusArea.VideoOutputMenu;
+            _selectedVideoOutputMenuItemIndex = 0;
+            UpdateVisualFocus();
+        }
+
+        private void CloseVideoOutputMenu()
+        {
+            if (VideoOutputMenu != null)
+            {
+                VideoOutputMenu.Visibility = Visibility.Collapsed;
+            }
+
+            _currentFocusArea = FocusArea.TopButtons;
+            UpdateVisualFocus();
+        }
+
+        private void VideoOutputMenu_BackdropTapped(object sender, TappedRoutedEventArgs e)
+        {
+            CloseVideoOutputMenu();
+        }
+
+        private void VideoInternalMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            RequestDisplaySwitch("/internal", "Internal display");
+        }
+
+        private void VideoExternalMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            RequestDisplaySwitch("/external", "External display");
+        }
+
+        private void RequestDisplaySwitch(string arguments, string displayName)
+        {
+            try
+            {
+                string displaySwitchPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "System32",
+                    "DisplaySwitch.exe");
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = File.Exists(displaySwitchPath) ? displaySwitchPath : "DisplaySwitch.exe",
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                });
+
+                SendOverlayNotification($"Video output: {displayName}");
+                CloseVideoOutputMenu();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[VideoOutput] Failed to switch display output: {ex.Message}");
+                SendOverlayNotification("Video output switch failed.");
+            }
         }
 
         /// <summary>
@@ -16912,6 +17142,7 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 b.BorderThickness = new Thickness(0);
             });
             _powerMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
+            _videoOutputMenuItems.ForEach(b => { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); });
             StyleWindowsReturnConfirmChoices();
 
             if (_currentFocusArea != FocusArea.Cards)
@@ -16973,6 +17204,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                     {
                         var selectedButton = _powerMenuItems[_selectedPowerMenuItemIndex];
                         selectedButton.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 255, 255));
+                    }
+                    break;
+
+                case FocusArea.VideoOutputMenu:
+                    if (_videoOutputMenuItems.Count > _selectedVideoOutputMenuItemIndex)
+                    {
+                        var selectedButton = _videoOutputMenuItems[_selectedVideoOutputMenuItemIndex];
+                        selectedButton.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 255, 255));
+                        selectedButton.Focus(FocusState.Programmatic);
                     }
                     break;
 
@@ -17057,13 +17297,15 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 var buttonToClick = _topButtons[_selectedTopButtonIndex];
                 string gateKey = buttonToClick == VolumeButton
                     ? "top-volume-button"
-                    : buttonToClick == SettingsButton
-                        ? "top-settings-button"
-                        : buttonToClick == AppLauncherButton
-                            ? "top-app-launcher-button"
-                            : buttonToClick == ShutdownButton
-                                ? "top-shutdown-button"
-                                : "top-exit-button";
+                    : buttonToClick == VideoOutputButton
+                        ? "top-video-output-button"
+                        : buttonToClick == SettingsButton
+                            ? "top-settings-button"
+                            : buttonToClick == AppLauncherButton
+                                ? "top-app-launcher-button"
+                                : buttonToClick == ShutdownButton
+                                    ? "top-shutdown-button"
+                                    : "top-exit-button";
 
                 if (!TryAcquireUiActionGate(gateKey, buttonToClick == VolumeButton ? 280 : 220))
                 {
@@ -17078,6 +17320,11 @@ private static readonly string SettingsFilePath = Path.Combine(SettingsFolder, "
                 else if (buttonToClick == VolumeButton) // NEU: Reaktion auf A-Taste
                 {
                     return TryToggleAudioFlyout("audio-top-button");
+                }
+                else if (buttonToClick == VideoOutputButton)
+                {
+                    VideoOutputButton_Click(null, null);
+                    return true;
                 }
                 else if (buttonToClick == SettingsButton)
                 {

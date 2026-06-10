@@ -23,7 +23,7 @@ if (-not (Test-Path $isccPath)) {
 [xml]$projectXml = Get-Content $projectPath
 $version = $projectXml.Project.PropertyGroup.Version | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($version)) {
-    $version = "2.6.7"
+    $version = "2.6.8"
 }
 
 if (Test-Path $publishDir) {

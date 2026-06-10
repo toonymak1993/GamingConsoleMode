@@ -3,10 +3,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <Version>2.6.7</Version>
-    <AssemblyVersion>2.6.7.0</AssemblyVersion>
-    <FileVersion>2.6.7.0</FileVersion>
-    <InformationalVersion>2.6.7</InformationalVersion>
+    <Version>2.6.8</Version>
+    <AssemblyVersion>2.6.8.0</AssemblyVersion>
+    <FileVersion>2.6.8.0</FileVersion>
+    <InformationalVersion>2.6.8</InformationalVersion>
     <RootNamespace>gcmloader</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
